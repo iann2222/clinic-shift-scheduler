@@ -76,3 +76,54 @@ def minimal_valid_input() -> dict[str, Any]:
 def clone_fixture() -> dict[str, Any]:
     return deepcopy(minimal_valid_input())
 
+
+def single_employee_pattern_input(
+    *,
+    employment_type: str,
+    full_time_class: str | None,
+    worked_periods: set[str],
+) -> dict[str, Any]:
+    """Build a complete one-day fixture that forces one daily pattern."""
+
+    employee: dict[str, Any] = {
+        "employee_id": "E001",
+        "name": "測試人員",
+        "employment_type": employment_type,
+        "full_time_class": full_time_class,
+        "roles": ["assistant"],
+        "fairness_group": (
+            f"FT_{full_time_class}" if employment_type == "full_time" else "PT"
+        ),
+        "shift_mode": "EXACT",
+        "required_shifts": len(worked_periods),
+    }
+    if employment_type == "part_time":
+        employee["available_slots"] = [
+            {"date": "2024-10-01", "period": period, "roles": ["assistant"]}
+            for period in ("morning", "afternoon", "evening")
+        ]
+
+    return {
+        "schema_version": "v1",
+        "period": {
+            "start_date": "2024-10-01",
+            "end_date": "2024-10-01",
+            "closed_weekdays": [],
+            "closed_dates": [],
+            "holidays": [],
+        },
+        "periods": ["morning", "afternoon", "evening"],
+        "roles": ["assistant"],
+        "demands": [
+            {
+                "date": "2024-10-01",
+                "period": period,
+                "role": "assistant",
+                "count": int(period in worked_periods),
+            }
+            for period in ("morning", "afternoon", "evening")
+        ],
+        "employees": [employee],
+        "leave_requests": [],
+        "unavailable_slots": [],
+    }
