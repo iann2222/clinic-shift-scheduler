@@ -15,6 +15,20 @@
 
 ## 使用方式
 
+本專案使用名為 `clinic_shift_scheduler` 的 Conda environment，Python
+版本固定為 3.12。首次建立環境並依 `pyproject.toml` 安裝專案：
+
+```powershell
+conda env create --file environment.yml
+conda activate clinic_shift_scheduler
+```
+
+後續開發或執行前先啟用環境：
+
+```powershell
+conda activate clinic_shift_scheduler
+```
+
 ```python
 from clinic_shift_scheduler import validate_and_normalize
 
@@ -28,16 +42,24 @@ normalized = validate_and_normalize(raw_v1_mapping)
 PowerShell：
 
 ```powershell
-$env:VIRTUAL_ENV_DISABLE_PROMPT = "1"
-python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -e ".[test]"
-$env:PYTHONPATH = "src;."
-.\.venv\Scripts\python.exe -m pytest
+conda activate clinic_shift_scheduler
+python -m pytest
 ```
 
-不使用 pytest 時，也可執行：
+不切換目前 shell 的 environment 時，可執行：
 
 ```powershell
-$env:PYTHONPATH = "src;."
+conda run --name clinic_shift_scheduler python -m pytest
+```
+
+不使用 pytest 時，也可在已啟用的 environment 中執行：
+
+```powershell
 python -m unittest discover -s tests -v
+```
+
+`pyproject.toml` 的依賴異動後，使用相同 environment 重新同步：
+
+```powershell
+conda env update --file environment.yml
 ```
