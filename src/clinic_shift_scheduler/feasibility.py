@@ -1,4 +1,4 @@
-"""CP-SAT model for phase-two hard feasibility only.
+"""CP-SAT hard-feasibility model with phase-three conservative prechecks.
 
 This module intentionally has no objective. It consumes the phase-one
 ``NormalizedScheduleInput`` and enforces the v1 hard constraints.
@@ -15,42 +15,18 @@ from typing import Mapping
 
 from ortools.sat.python import cp_model
 
+from .daily_patterns import (
+    PATTERN_PERIODS,
+    DailyPattern,
+    allowed_daily_patterns,
+)
 from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period, ShiftMode
 from .models import AssignmentKey, DemandKey, NormalizedScheduleInput
-
-
-class DailyPattern(StrEnum):
-    OFF = "off"
-    MORNING_ONLY = "morning_only"
-    AFTERNOON_ONLY = "afternoon_only"
-    EVENING_ONLY = "evening_only"
-    MORNING_AFTERNOON = "morning_afternoon"
-    AFTERNOON_EVENING = "afternoon_evening"
-    MORNING_EVENING = "morning_evening"
-    TRIPLE = "triple"
-
-
-PATTERN_PERIODS: Mapping[DailyPattern, frozenset[Period]] = MappingProxyType(
-    {
-        DailyPattern.OFF: frozenset(),
-        DailyPattern.MORNING_ONLY: frozenset({Period.MORNING}),
-        DailyPattern.AFTERNOON_ONLY: frozenset({Period.AFTERNOON}),
-        DailyPattern.EVENING_ONLY: frozenset({Period.EVENING}),
-        DailyPattern.MORNING_AFTERNOON: frozenset(
-            {Period.MORNING, Period.AFTERNOON}
-        ),
-        DailyPattern.AFTERNOON_EVENING: frozenset(
-            {Period.AFTERNOON, Period.EVENING}
-        ),
-        DailyPattern.MORNING_EVENING: frozenset(
-            {Period.MORNING, Period.EVENING}
-        ),
-        DailyPattern.TRIPLE: frozenset(PERIODS_V1),
-    }
-)
+from .precheck import PrecheckResult, PrecheckStatus, run_prechecks
 
 
 class FeasibilityStatus(StrEnum):
+    PRECHECK_INFEASIBLE = "PRECHECK_INFEASIBLE"
     FEASIBLE = "FEASIBLE"
     INFEASIBLE = "INFEASIBLE"
     UNKNOWN = "UNKNOWN"
@@ -69,6 +45,7 @@ class FeasibilitySolverConfig:
     max_time_seconds: float | None = None
     num_search_workers: int = 1
     random_seed: int = 0
+    enable_precheck: bool = True
 
     def __post_init__(self) -> None:
         if self.max_time_seconds is not None and self.max_time_seconds <= 0:
@@ -97,6 +74,7 @@ class FeasibilityResult:
     daily_patterns: Mapping[PersonDayKey, DailyPattern]
     raw_solver_status: str
     wall_time_seconds: float
+    precheck: PrecheckResult | None
 
     @property
     def is_feasible(self) -> bool:
@@ -105,22 +83,6 @@ class FeasibilityResult:
 
 def _var_name(prefix: str, *parts: object) -> str:
     return f"{prefix}[{','.join(str(part) for part in parts)}]"
-
-
-def _allowed_patterns(
-    employment_type: EmploymentType,
-    full_time_class: FullTimeClass | None,
-) -> frozenset[DailyPattern]:
-    patterns = set(DailyPattern)
-    if employment_type is EmploymentType.PART_TIME:
-        patterns.remove(DailyPattern.TRIPLE)
-    elif full_time_class is FullTimeClass.A:
-        patterns.remove(DailyPattern.TRIPLE)
-    elif full_time_class is FullTimeClass.B:
-        patterns.remove(DailyPattern.MORNING_EVENING)
-    else:  # Protected by phase-one validation.
-        raise ValueError("full-time employee must have class A or B")
-    return frozenset(patterns)
 
 
 def build_feasibility_model(data: NormalizedScheduleInput) -> FeasibilityModel:
@@ -157,7 +119,12 @@ def build_feasibility_model(data: NormalizedScheduleInput) -> FeasibilityModel:
             for period in PERIODS_V1:
                 slot_key = (employee.employee_id, day, period)
                 slot_variable = model.new_bool_var(
-                    _var_name("slot_work", employee.employee_id, day.isoformat(), period.value)
+                    _var_name(
+                        "slot_work",
+                        employee.employee_id,
+                        day.isoformat(),
+                        period.value,
+                    )
                 )
                 slot_work[slot_key] = slot_variable
                 role_variables = x_by_person_period[slot_key]
@@ -182,7 +149,7 @@ def build_feasibility_model(data: NormalizedScheduleInput) -> FeasibilityModel:
                 ]
                 model.add(day_slot_vars[period] == sum(containing_patterns))
 
-            allowed_patterns = _allowed_patterns(
+            allowed_patterns = allowed_daily_patterns(
                 employee.employment_type, employee.full_time_class
             )
             for pattern in set(DailyPattern) - allowed_patterns:
@@ -226,6 +193,16 @@ def solve_feasibility(
     """Solve only the hard-feasibility problem and extract a raw assignment."""
 
     config = config or FeasibilitySolverConfig()
+    precheck = run_prechecks(data) if config.enable_precheck else None
+    if precheck is not None and precheck.status is PrecheckStatus.PRECHECK_INFEASIBLE:
+        return FeasibilityResult(
+            status=FeasibilityStatus.PRECHECK_INFEASIBLE,
+            assignments=(),
+            daily_patterns=MappingProxyType({}),
+            raw_solver_status="NOT_RUN",
+            wall_time_seconds=0.0,
+            precheck=precheck,
+        )
     built = build_feasibility_model(data)
     solver = cp_model.CpSolver()
     solver.parameters.num_search_workers = config.num_search_workers
@@ -242,6 +219,7 @@ def solve_feasibility(
             daily_patterns=MappingProxyType({}),
             raw_solver_status=raw_status_name,
             wall_time_seconds=solver.wall_time,
+            precheck=precheck,
         )
     if raw_status not in (cp_model.FEASIBLE, cp_model.OPTIMAL):
         return FeasibilityResult(
@@ -250,6 +228,7 @@ def solve_feasibility(
             daily_patterns=MappingProxyType({}),
             raw_solver_status=raw_status_name,
             wall_time_seconds=solver.wall_time,
+            precheck=precheck,
         )
 
     assignments = tuple(
@@ -268,4 +247,5 @@ def solve_feasibility(
         daily_patterns=MappingProxyType(selected_patterns),
         raw_solver_status=raw_status_name,
         wall_time_seconds=solver.wall_time,
+        precheck=precheck,
     )

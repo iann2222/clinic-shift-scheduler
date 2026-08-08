@@ -6,6 +6,7 @@ from datetime import date
 
 from clinic_shift_scheduler import (
     DailyPattern,
+    FeasibilitySolverConfig,
     FeasibilityStatus,
     build_feasibility_model,
     solve_feasibility,
@@ -14,6 +15,9 @@ from clinic_shift_scheduler import (
 from clinic_shift_scheduler.feasibility import PATTERN_PERIODS
 
 from tests.fixtures import clone_fixture, single_employee_pattern_input
+
+
+NO_PRECHECK = FeasibilitySolverConfig(enable_precheck=False)
 
 
 class FeasibilityTests(unittest.TestCase):
@@ -29,7 +33,7 @@ class FeasibilityTests(unittest.TestCase):
             full_time_class=full_time_class,
             worked_periods={period.value for period in PATTERN_PERIODS[pattern]},
         )
-        return solve_feasibility(validate_and_normalize(payload))
+        return solve_feasibility(validate_and_normalize(payload), NO_PRECHECK)
 
     def test_class_a_allows_seven_patterns_and_forbids_triple(self) -> None:
         for pattern in DailyPattern:
@@ -85,7 +89,7 @@ class FeasibilityTests(unittest.TestCase):
     def test_feasible_result_exactly_covers_demand_with_qualified_people(self) -> None:
         normalized = validate_and_normalize(clone_fixture())
         built = build_feasibility_model(normalized)
-        result = solve_feasibility(normalized)
+        result = solve_feasibility(normalized, NO_PRECHECK)
 
         self.assertEqual(set(built.x), set(normalized.allowed_assignments))
         self.assertFalse(built.model.has_objective())
@@ -135,7 +139,7 @@ class FeasibilityTests(unittest.TestCase):
             for role in ("reception", "assistant")
         ]
 
-        result = solve_feasibility(validate_and_normalize(payload))
+        result = solve_feasibility(validate_and_normalize(payload), NO_PRECHECK)
 
         self.assertEqual(result.status, FeasibilityStatus.INFEASIBLE)
 
@@ -143,7 +147,7 @@ class FeasibilityTests(unittest.TestCase):
         payload = clone_fixture()
         payload["employees"][0]["roles"] = ["assistant"]
 
-        result = solve_feasibility(validate_and_normalize(payload))
+        result = solve_feasibility(validate_and_normalize(payload), NO_PRECHECK)
 
         self.assertEqual(result.status, FeasibilityStatus.INFEASIBLE)
 
@@ -155,7 +159,7 @@ class FeasibilityTests(unittest.TestCase):
         )
         exact["employees"][0]["required_shifts"] = 2
         self.assertEqual(
-            solve_feasibility(validate_and_normalize(exact)).status,
+            solve_feasibility(validate_and_normalize(exact), NO_PRECHECK).status,
             FeasibilityStatus.INFEASIBLE,
         )
 
@@ -170,7 +174,7 @@ class FeasibilityTests(unittest.TestCase):
         employee["min_shifts"] = 2
         employee["max_shifts"] = 3
         self.assertEqual(
-            solve_feasibility(validate_and_normalize(ranged)).status,
+            solve_feasibility(validate_and_normalize(ranged), NO_PRECHECK).status,
             FeasibilityStatus.INFEASIBLE,
         )
 
@@ -185,11 +189,11 @@ class FeasibilityTests(unittest.TestCase):
         del employee["required_shifts"]
         employee["target_shifts"] = 99
 
-        result = solve_feasibility(validate_and_normalize(target))
+        result = solve_feasibility(validate_and_normalize(target), NO_PRECHECK)
         self.assertEqual(result.status, FeasibilityStatus.FEASIBLE)
 
         employee["min_shifts"] = 2
-        result = solve_feasibility(validate_and_normalize(target))
+        result = solve_feasibility(validate_and_normalize(target), NO_PRECHECK)
         self.assertEqual(result.status, FeasibilityStatus.INFEASIBLE)
 
 

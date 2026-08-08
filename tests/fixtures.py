@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import date, timedelta
 from typing import Any
 
 
@@ -124,6 +125,52 @@ def single_employee_pattern_input(
             for period in ("morning", "afternoon", "evening")
         ],
         "employees": [employee],
+        "leave_requests": [],
+        "unavailable_slots": [],
+    }
+
+
+def synthetic_schedule_input(
+    *,
+    start_date: str,
+    end_date: str,
+    roles: list[str],
+    employees: list[dict[str, Any]],
+    positive_demands: dict[tuple[str, str, str], int],
+) -> dict[str, Any]:
+    """Build a complete v1 input while keeping zero demands explicit."""
+
+    start = date.fromisoformat(start_date)
+    end = date.fromisoformat(end_date)
+    dates = tuple(
+        start + timedelta(days=offset)
+        for offset in range((end - start).days + 1)
+    )
+    return {
+        "schema_version": "v1",
+        "period": {
+            "start_date": start_date,
+            "end_date": end_date,
+            "closed_weekdays": [],
+            "closed_dates": [],
+            "holidays": [],
+        },
+        "periods": ["morning", "afternoon", "evening"],
+        "roles": roles,
+        "demands": [
+            {
+                "date": day.isoformat(),
+                "period": period,
+                "role": role,
+                "count": positive_demands.get(
+                    (day.isoformat(), period, role), 0
+                ),
+            }
+            for day in dates
+            for period in ("morning", "afternoon", "evening")
+            for role in roles
+        ],
+        "employees": employees,
         "leave_requests": [],
         "unavailable_slots": [],
     }
