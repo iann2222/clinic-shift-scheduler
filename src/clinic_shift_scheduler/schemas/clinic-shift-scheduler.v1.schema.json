@@ -1,0 +1,241 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/clinic-shift-scheduler/schemas/v1",
+  "title": "Clinic Shift Scheduler Input v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "period",
+    "periods",
+    "roles",
+    "demands",
+    "employees"
+  ],
+  "properties": {
+    "schema_version": {"const": "v1"},
+    "period": {"$ref": "#/$defs/periodConfig"},
+    "periods": {
+      "type": "array",
+      "prefixItems": [
+        {"const": "morning"},
+        {"const": "afternoon"},
+        {"const": "evening"}
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "roles": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/nonEmptyString"}
+    },
+    "demands": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/demand"}
+    },
+    "employees": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/employee"}
+    },
+    "leave_requests": {
+      "type": "array",
+      "default": [],
+      "items": {"$ref": "#/$defs/leaveRequest"}
+    },
+    "unavailable_slots": {
+      "type": "array",
+      "default": [],
+      "items": {"$ref": "#/$defs/personPeriod"}
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": ".*\\S.*"
+    },
+    "date": {
+      "type": "string",
+      "format": "date"
+    },
+    "period": {
+      "enum": ["morning", "afternoon", "evening"]
+    },
+    "weekday": {
+      "enum": [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday",
+        "saturday",
+        "sunday"
+      ]
+    },
+    "periodConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_date", "end_date"],
+      "properties": {
+        "start_date": {"$ref": "#/$defs/date"},
+        "end_date": {"$ref": "#/$defs/date"},
+        "closed_weekdays": {
+          "type": "array",
+          "default": [],
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/weekday"}
+        },
+        "closed_dates": {
+          "type": "array",
+          "default": [],
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/date"}
+        },
+        "holidays": {
+          "type": "array",
+          "default": [],
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/date"}
+        }
+      }
+    },
+    "demand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["date", "period", "role", "count"],
+      "properties": {
+        "date": {"$ref": "#/$defs/date"},
+        "period": {"$ref": "#/$defs/period"},
+        "role": {"$ref": "#/$defs/nonEmptyString"},
+        "count": {"type": "integer", "minimum": 0}
+      }
+    },
+    "availableSlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["date", "period"],
+      "properties": {
+        "date": {"$ref": "#/$defs/date"},
+        "period": {"$ref": "#/$defs/period"},
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        }
+      }
+    },
+    "personPeriod": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["employee_id", "date", "period"],
+      "properties": {
+        "employee_id": {"$ref": "#/$defs/nonEmptyString"},
+        "date": {"$ref": "#/$defs/date"},
+        "period": {"$ref": "#/$defs/period"}
+      }
+    },
+    "leaveRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["employee_id", "date", "all_day"],
+      "properties": {
+        "employee_id": {"$ref": "#/$defs/nonEmptyString"},
+        "date": {"$ref": "#/$defs/date"},
+        "all_day": {"type": "boolean"},
+        "period": {"$ref": "#/$defs/period"},
+        "note": {"type": ["string", "null"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"all_day": {"const": true}}},
+          "then": {"not": {"required": ["period"]}},
+          "else": {"required": ["period"]}
+        }
+      ]
+    },
+    "employee": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "employee_id",
+        "name",
+        "employment_type",
+        "roles",
+        "fairness_group",
+        "shift_mode"
+      ],
+      "properties": {
+        "employee_id": {"$ref": "#/$defs/nonEmptyString"},
+        "name": {"$ref": "#/$defs/nonEmptyString"},
+        "employment_type": {"enum": ["full_time", "part_time"]},
+        "full_time_class": {"type": ["string", "null"], "enum": ["A", "B", null]},
+        "roles": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/nonEmptyString"}
+        },
+        "fairness_group": {"$ref": "#/$defs/nonEmptyString"},
+        "shift_mode": {"enum": ["EXACT", "RANGE", "TARGET"]},
+        "required_shifts": {"type": "integer", "minimum": 0},
+        "target_shifts": {"type": "integer", "minimum": 0},
+        "min_shifts": {"type": "integer", "minimum": 0},
+        "max_shifts": {"type": "integer", "minimum": 0},
+        "available_slots": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/availableSlot"}
+        },
+        "notes": {"type": ["string", "null"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"employment_type": {"const": "full_time"}}},
+          "then": {"required": ["full_time_class"]},
+          "else": {
+            "properties": {
+              "full_time_class": {"type": "null"},
+              "shift_mode": {"enum": ["EXACT", "RANGE"]}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"shift_mode": {"const": "EXACT"}}},
+          "then": {
+            "required": ["required_shifts"],
+            "not": {
+              "anyOf": [
+                {"required": ["target_shifts"]},
+                {"required": ["min_shifts"]},
+                {"required": ["max_shifts"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {"properties": {"shift_mode": {"const": "RANGE"}}},
+          "then": {
+            "required": ["min_shifts", "max_shifts"],
+            "not": {
+              "anyOf": [
+                {"required": ["required_shifts"]},
+                {"required": ["target_shifts"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {"properties": {"shift_mode": {"const": "TARGET"}}},
+          "then": {
+            "required": ["target_shifts"],
+            "not": {"required": ["required_shifts"]}
+          }
+        }
+      ]
+    }
+  }
+}
