@@ -168,18 +168,42 @@ class ExcelExporterTests(unittest.TestCase):
     def test_statistics_and_solver_sheets_use_formal_output_values(self) -> None:
         workbook = build_workbook(self.data, self.output)
         try:
-            individual = workbook["個人統計"]
+            summary = workbook["個人班型摘要"]
+            summary_headers = {
+                cell.value: cell.column
+                for cell in summary[1]
+                if cell.value is not None
+            }
+            first = self.output.individual_statistics[0]
+            self.assertEqual(
+                summary.cell(2, summary_headers["姓名"]).value,
+                first.name,
+            )
+            self.assertEqual(
+                summary.cell(2, summary_headers["總班次"]).value,
+                first.total_shifts,
+            )
+            self.assertEqual(
+                summary.cell(
+                    2,
+                    summary_headers["連續雙班日／出勤日"],
+                ).value,
+                f"{first.consecutive_double_days} / {first.attendance_days}"
+                f"（{first.ratios['consecutive_double_days'].value:.1%}）",
+            )
+
+            individual = workbook["個人詳細統計"]
             headers = {
                 cell.value: cell.column
                 for cell in individual[1]
                 if cell.value is not None
             }
-            first = self.output.individual_statistics[0]
             self.assertEqual(individual.cell(2, headers["employee_id"]).value, first.employee_id)
             self.assertEqual(individual.cell(2, headers["姓名"]).value, first.name)
             self.assertEqual(individual.cell(2, headers["總班次"]).value, first.total_shifts)
+            self.assertGreaterEqual(individual.max_column, 30)
 
-            groups = workbook["群組統計"]
+            groups = workbook["類別與公平性統計"]
             self.assertEqual(groups["A1"].value, "類別統計")
             self.assertEqual(groups["A2"].value, "類別")
             self.assertEqual(groups["A3"].value, self.output.category_statistics[0].category)
@@ -197,7 +221,7 @@ class ExcelExporterTests(unittest.TestCase):
                 )
             )
 
-            solver = workbook["求解資訊"]
+            solver = workbook["求解與驗證資訊"]
             self.assertEqual(solver["A1"].value, "正式結果")
             self.assertEqual(solver["B4"].value, self.output.status.value)
             values = {
@@ -211,6 +235,35 @@ class ExcelExporterTests(unittest.TestCase):
                     "full_time_target_deviation"
                 ],
             )
+        finally:
+            workbook.close()
+
+    def test_pattern_summary_uses_validated_ratios_and_handles_no_attendance(self) -> None:
+        workbook = build_workbook(self.data, self.output)
+        try:
+            sheet = workbook["個人班型摘要"]
+            headers = {
+                cell.value: cell.column
+                for cell in sheet[1]
+                if cell.value is not None
+            }
+            for row, stats in enumerate(self.output.individual_statistics, start=2):
+                ratio = stats.ratios["single_shift_days"]
+                percentage = "N/A" if ratio.value is None else f"{ratio.value:.1%}"
+                self.assertEqual(
+                    sheet.cell(row, headers["單節日／出勤日"]).value,
+                    f"{ratio.numerator} / {ratio.denominator}（{percentage}）",
+                )
+            no_attendance = next(
+                (stats for stats in self.output.individual_statistics if stats.attendance_days == 0),
+                None,
+            )
+            if no_attendance is not None:
+                row = self.output.individual_statistics.index(no_attendance) + 2
+                self.assertEqual(
+                    sheet.cell(row, headers["單節日／出勤日"]).value,
+                    "0 / 0（N/A）",
+                )
         finally:
             workbook.close()
 

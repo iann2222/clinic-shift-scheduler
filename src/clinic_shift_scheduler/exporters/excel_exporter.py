@@ -27,7 +27,13 @@ from .files import (
 )
 
 
-WORKSHEET_NAMES = ("月班表", "個人統計", "群組統計", "求解資訊")
+WORKSHEET_NAMES = (
+    "月班表",
+    "個人班型摘要",
+    "個人詳細統計",
+    "類別與公平性統計",
+    "求解與驗證資訊",
+)
 
 _DARK_BLUE = "1F4E78"
 _HEADER_BLUE = "D9EAF7"
@@ -183,11 +189,85 @@ def _ratio_cell_value(ratio: RatioValue | None) -> float | str:
     return "N/A" if ratio is None or ratio.value is None else ratio.value
 
 
-def _build_individual_sheet(
+def _employee_category_label(
+    employment_type: EmploymentType,
+    full_time_class: FullTimeClass | None,
+) -> str:
+    if employment_type is EmploymentType.PART_TIME:
+        return "兼職"
+    return f"{_full_time_class_label(full_time_class)} 類正職"
+
+
+def _pattern_summary(ratio: RatioValue) -> str:
+    percentage = "N/A" if ratio.value is None else f"{ratio.value:.1%}"
+    return f"{ratio.numerator} / {ratio.denominator}（{percentage}）"
+
+
+def _build_individual_summary_sheet(
     workbook: Workbook,
     output: FormalScheduleOutput,
 ) -> None:
-    sheet = workbook.create_sheet("個人統計")
+    sheet = workbook.create_sheet("個人班型摘要")
+    headers = (
+        "姓名",
+        "類別",
+        "總班次",
+        "出勤日",
+        "連續雙班日／出勤日",
+        "單節日／出勤日",
+        "早＋晚拆班日／出勤日",
+        "三節班日／出勤日",
+    )
+    sheet.append(headers)
+    for stats in output.individual_statistics:
+        sheet.append(
+            (
+                stats.name,
+                _employee_category_label(
+                    stats.employment_type,
+                    stats.full_time_class,
+                ),
+                stats.total_shifts,
+                stats.attendance_days,
+                _pattern_summary(
+                    stats.ratios["consecutive_double_days"],
+                ),
+                _pattern_summary(
+                    stats.ratios["single_shift_days"],
+                ),
+                _pattern_summary(
+                    stats.ratios["morning_evening_days"],
+                ),
+                _pattern_summary(
+                    stats.ratios["triple_days"],
+                ),
+            )
+        )
+    _style_table(
+        sheet,
+        header_row=1,
+        first_data_row=2,
+        last_row=sheet.max_row,
+        last_column=sheet.max_column,
+    )
+    widths = (16, 14, 11, 11, 24, 22, 26, 22)
+    for column, width in enumerate(widths, start=1):
+        sheet.column_dimensions[get_column_letter(column)].width = width
+    for row in range(2, sheet.max_row + 1):
+        sheet.row_dimensions[row].height = 25
+        for column in range(3, sheet.max_column + 1):
+            sheet.cell(row, column).alignment = Alignment(
+                horizontal="center",
+                vertical="center",
+                wrap_text=True,
+            )
+
+
+def _build_individual_detail_sheet(
+    workbook: Workbook,
+    output: FormalScheduleOutput,
+) -> None:
+    sheet = workbook.create_sheet("個人詳細統計")
     overall = output.overall_statistics
     assert overall is not None
     roles = tuple(overall.role_counts)
@@ -276,7 +356,7 @@ def _build_group_sheet(
     workbook: Workbook,
     output: FormalScheduleOutput,
 ) -> None:
-    sheet = workbook.create_sheet("群組統計")
+    sheet = workbook.create_sheet("類別與公平性統計")
     sheet.append(("類別統計",))
     sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=7)
     _header(sheet.cell(1, 1))
@@ -451,7 +531,7 @@ def _build_solver_sheet(
     data: NormalizedScheduleInput,
     output: FormalScheduleOutput,
 ) -> None:
-    sheet = workbook.create_sheet("求解資訊")
+    sheet = workbook.create_sheet("求解與驗證資訊")
     report = output.validation_report
     overall = output.overall_statistics
     assert report is not None and overall is not None
@@ -570,7 +650,8 @@ def build_workbook(
         "Generated from an independently validated formal result model."
     )
     _build_schedule_sheet(workbook, output)
-    _build_individual_sheet(workbook, output)
+    _build_individual_summary_sheet(workbook, output)
+    _build_individual_detail_sheet(workbook, output)
     _build_group_sheet(workbook, output)
     _build_solver_sheet(workbook, data, output)
     return workbook
