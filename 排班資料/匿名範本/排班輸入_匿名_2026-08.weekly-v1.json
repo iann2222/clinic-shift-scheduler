@@ -108,7 +108,7 @@
       "fairness_group": "B_GENERAL",
       "shift_mode": "EXACT",
       "required_shifts": 40,
-      "notes": "依匿名原始資料的班型規則歸入 B 類；與丁要求班型儘量公平。"
+      "notes": "與丁同屬 B 類並要求班型儘量公平。"
     },
     {
       "employee_id": "FT004",
@@ -122,7 +122,7 @@
       "fairness_group": "B_GENERAL",
       "shift_mode": "EXACT",
       "required_shifts": 25,
-      "notes": "依匿名原始資料的班型規則歸入 B 類；與丙要求班型儘量公平。"
+      "notes": "與丙同屬 B 類並要求班型儘量公平。"
     },
     {
       "employee_id": "PT001",

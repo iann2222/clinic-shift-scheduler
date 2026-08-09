@@ -11,6 +11,7 @@ dependencies = [
     # 9.14/9.15 native-crash on the current Windows + Python 3.12 setup;
     # keep the verified stable release until an upgrade passes solver regression tests.
     "ortools~=9.12.4544",
+    "openpyxl>=3.1,<4",
     "pandas>=2.2.3,<3",
 ]
 

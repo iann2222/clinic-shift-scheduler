@@ -7,14 +7,19 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
+from openpyxl import load_workbook
+
 from clinic_shift_scheduler import (
     ExportFileExistsError,
     FeasibilityStatus,
     FormalExportError,
     RESULT_CONTRACT_NAME,
     RESULT_CONTRACT_VERSION,
+    WORKSHEET_NAMES,
     build_output_paths,
     build_result_document,
+    build_workbook,
+    export_result_excel,
     export_result_json,
     finalize_schedule_output,
     solve_lexicographic,
@@ -117,6 +122,133 @@ class JsonExporterTests(unittest.TestCase):
                 generated_at=generated_at,
             )
             self.assertEqual(replaced, target)
+
+
+class ExcelExporterTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.data = validate_and_normalize(minimal_valid_input())
+        cls.result = solve_lexicographic(cls.data)
+        cls.output = finalize_schedule_output(cls.data, cls.result)
+        assert cls.output.status is FeasibilityStatus.OPTIMAL
+
+    def test_workbook_has_expected_sheets_and_horizontal_schedule(self) -> None:
+        workbook = build_workbook(self.data, self.output)
+        try:
+            self.assertEqual(tuple(workbook.sheetnames), WORKSHEET_NAMES)
+            sheet = workbook["月班表"]
+            schedule = self.output.monthly_schedule
+            self.assertEqual(sheet["A1"].value, "日期")
+            self.assertEqual(sheet["A2"].value, "星期")
+            self.assertEqual(sheet["B1"].value, schedule.dates[0])
+            self.assertEqual(sheet["B2"].value, "二")
+            self.assertEqual(sheet["A3"].value, "早上櫃台")
+            self.assertEqual(sheet["B3"].value, schedule.rows[0].cells[0].display)
+            self.assertEqual(sheet.freeze_panes, "B3")
+            self.assertEqual(sheet["B1"].number_format, "m/d")
+        finally:
+            workbook.close()
+
+    def test_statistics_and_solver_sheets_use_formal_output_values(self) -> None:
+        workbook = build_workbook(self.data, self.output)
+        try:
+            individual = workbook["個人統計"]
+            headers = {
+                cell.value: cell.column
+                for cell in individual[1]
+                if cell.value is not None
+            }
+            first = self.output.individual_statistics[0]
+            self.assertEqual(individual.cell(2, headers["employee_id"]).value, first.employee_id)
+            self.assertEqual(individual.cell(2, headers["姓名"]).value, first.name)
+            self.assertEqual(individual.cell(2, headers["總班次"]).value, first.total_shifts)
+
+            groups = workbook["群組統計"]
+            self.assertEqual(groups["A1"].value, "類別統計")
+            self.assertEqual(groups["A2"].value, "類別")
+            self.assertEqual(groups["A3"].value, self.output.category_statistics[0].category)
+
+            solver = workbook["求解資訊"]
+            self.assertEqual(solver["A1"].value, "正式結果")
+            self.assertEqual(solver["B4"].value, self.output.status.value)
+            values = {
+                solver.cell(row, 1).value: solver.cell(row, 2).value
+                for row in range(1, solver.max_row + 1)
+            }
+            self.assertEqual(values["Validation"], "PASS")
+            self.assertEqual(
+                values["full_time_target_deviation"],
+                self.output.overall_statistics.objective_vector[
+                    "full_time_target_deviation"
+                ],
+            )
+        finally:
+            workbook.close()
+
+    def test_closed_date_cells_are_visually_distinct(self) -> None:
+        payload = minimal_valid_input()
+        payload["period"]["end_date"] = "2024-10-02"
+        payload["period"]["closed_dates"] = ["2024-10-02"]
+        data = validate_and_normalize(payload)
+        output = finalize_schedule_output(data, solve_lexicographic(data))
+        workbook = build_workbook(data, output)
+        try:
+            sheet = workbook["月班表"]
+            self.assertEqual(sheet["C3"].value, "休診")
+            self.assertEqual(sheet["C3"].fill.fgColor.rgb[-6:], "D9D9D9")
+            self.assertNotEqual(
+                sheet["B3"].fill.fgColor.rgb,
+                sheet["C3"].fill.fgColor.rgb,
+            )
+        finally:
+            workbook.close()
+
+    def test_excel_write_reopens_and_refuses_implicit_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = export_result_excel(
+                self.data,
+                self.output,
+                output_directory=directory,
+            )
+            reopened = load_workbook(target, read_only=False, data_only=False)
+            try:
+                self.assertEqual(tuple(reopened.sheetnames), WORKSHEET_NAMES)
+                self.assertEqual(reopened["月班表"]["A1"].value, "日期")
+                self.assertEqual(reopened["月班表"].freeze_panes, "B3")
+            finally:
+                reopened.close()
+            self.assertEqual(target.name, "排班結果_2024-10.result-v1.xlsx")
+            self.assertEqual(list(Path(directory).glob("*.tmp")), [])
+            with self.assertRaises(ExportFileExistsError):
+                export_result_excel(
+                    self.data,
+                    self.output,
+                    output_directory=directory,
+                )
+            self.assertEqual(
+                export_result_excel(
+                    self.data,
+                    self.output,
+                    output_directory=directory,
+                    overwrite=True,
+                ),
+                target,
+            )
+
+    def test_invalid_result_cannot_be_exported_to_excel(self) -> None:
+        invalid_output = replace(
+            self.output,
+            status=FeasibilityStatus.VALIDATION_FAILED,
+            monthly_schedule=None,
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(FormalExportError):
+                export_result_excel(
+                    self.data,
+                    invalid_output,
+                    output_directory=directory,
+                )
+            self.assertEqual(list(Path(directory).iterdir()), [])
 
 
 if __name__ == "__main__":

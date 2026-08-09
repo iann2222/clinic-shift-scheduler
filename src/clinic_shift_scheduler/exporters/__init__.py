@@ -7,6 +7,7 @@ from .files import (
     OutputPaths,
     build_output_paths,
 )
+from .excel_exporter import WORKSHEET_NAMES, build_workbook, export_result_excel
 from .json_exporter import (
     RESULT_CONTRACT_NAME,
     RESULT_CONTRACT_VERSION,
@@ -21,7 +22,10 @@ __all__ = [
     "OutputPaths",
     "RESULT_CONTRACT_NAME",
     "RESULT_CONTRACT_VERSION",
+    "WORKSHEET_NAMES",
     "build_output_paths",
     "build_result_document",
+    "build_workbook",
+    "export_result_excel",
     "export_result_json",
 ]
