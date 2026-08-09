@@ -11,3 +11,7 @@ build/
 dist/
 *.egg-info/
 
+# Real scheduling data stays local; only anonymized templates are versioned.
+/排班資料/*
+!/排班資料/匿名範本/
+!/排班資料/匿名範本/**

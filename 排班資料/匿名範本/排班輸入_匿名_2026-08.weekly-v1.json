@@ -1,0 +1,303 @@
+{
+  "authoring_version": "weekly-v1",
+  "schema_version": "v1",
+  "period": {
+    "start_date": "2026-08-01",
+    "end_date": "2026-08-31",
+    "holidays": []
+  },
+  "periods": [
+    "morning",
+    "afternoon",
+    "evening"
+  ],
+  "roles": [
+    "reception",
+    "nursing"
+  ],
+  "weekly_demands": [
+    {
+      "weekdays": [
+        "monday",
+        "tuesday",
+        "wednesday",
+        "thursday",
+        "friday"
+      ],
+      "is_open": true,
+      "staffing": {
+        "morning": {
+          "reception": 1,
+          "nursing": 1
+        },
+        "afternoon": {
+          "reception": 1,
+          "nursing": 1
+        },
+        "evening": {
+          "reception": 1,
+          "nursing": 1
+        }
+      }
+    },
+    {
+      "weekdays": [
+        "saturday"
+      ],
+      "is_open": false
+    },
+    {
+      "weekdays": [
+        "sunday"
+      ],
+      "is_open": true,
+      "staffing": {
+        "morning": {
+          "reception": 1,
+          "nursing": 2
+        },
+        "afternoon": {
+          "reception": 1,
+          "nursing": 1
+        },
+        "evening": {
+          "reception": 1,
+          "nursing": 1
+        }
+      }
+    }
+  ],
+  "date_overrides": [],
+  "employees": [
+    {
+      "employee_id": "FT001",
+      "name": "甲",
+      "employment_type": "full_time",
+      "full_time_class": "A",
+      "roles": [
+        "reception"
+      ],
+      "fairness_group": "A_GENERAL",
+      "shift_mode": "EXACT",
+      "required_shifts": 44,
+      "notes": "只能安排櫃檯班；與乙同屬 A 類並要求班型儘量公平。"
+    },
+    {
+      "employee_id": "FT002",
+      "name": "乙",
+      "employment_type": "full_time",
+      "full_time_class": "A",
+      "roles": [
+        "reception",
+        "nursing"
+      ],
+      "fairness_group": "A_GENERAL",
+      "shift_mode": "EXACT",
+      "required_shifts": 44,
+      "notes": "護理與櫃檯皆可安排；與甲同屬 A 類並要求班型儘量公平。"
+    },
+    {
+      "employee_id": "FT003",
+      "name": "丙",
+      "employment_type": "full_time",
+      "full_time_class": "B",
+      "roles": [
+        "reception",
+        "nursing"
+      ],
+      "fairness_group": "B_GENERAL",
+      "shift_mode": "EXACT",
+      "required_shifts": 40,
+      "notes": "依匿名原始資料的班型規則歸入 B 類；與丁要求班型儘量公平。"
+    },
+    {
+      "employee_id": "FT004",
+      "name": "丁",
+      "employment_type": "full_time",
+      "full_time_class": "B",
+      "roles": [
+        "reception",
+        "nursing"
+      ],
+      "fairness_group": "B_GENERAL",
+      "shift_mode": "EXACT",
+      "required_shifts": 25,
+      "notes": "依匿名原始資料的班型規則歸入 B 類；與丙要求班型儘量公平。"
+    },
+    {
+      "employee_id": "PT001",
+      "name": "戊",
+      "employment_type": "part_time",
+      "full_time_class": null,
+      "roles": [
+        "nursing"
+      ],
+      "fairness_group": "PT_E",
+      "shift_mode": "EXACT",
+      "required_shifts": 2,
+      "available_slots": [
+        {
+          "date": "2026-08-02",
+          "period": "morning",
+          "roles": [
+            "nursing"
+          ]
+        },
+        {
+          "date": "2026-08-30",
+          "period": "morning",
+          "roles": [
+            "nursing"
+          ]
+        }
+      ],
+      "notes": "兩個可排時段均計入本月必要人力，因此使用 EXACT 2。"
+    },
+    {
+      "employee_id": "PT002",
+      "name": "己",
+      "employment_type": "part_time",
+      "full_time_class": null,
+      "roles": [
+        "nursing"
+      ],
+      "fairness_group": "PT_F",
+      "shift_mode": "EXACT",
+      "required_shifts": 6,
+      "available_slots": [
+        {
+          "date": "2026-08-02",
+          "period": "afternoon",
+          "roles": [
+            "nursing"
+          ]
+        },
+        {
+          "date": "2026-08-02",
+          "period": "evening",
+          "roles": [
+            "nursing"
+          ]
+        },
+        {
+          "date": "2026-08-11",
+          "period": "evening",
+          "roles": [
+            "nursing"
+          ]
+        },
+        {
+          "date": "2026-08-14",
+          "period": "evening",
+          "roles": [
+            "nursing"
+          ]
+        },
+        {
+          "date": "2026-08-21",
+          "period": "evening",
+          "roles": [
+            "nursing"
+          ]
+        },
+        {
+          "date": "2026-08-28",
+          "period": "evening",
+          "roles": [
+            "nursing"
+          ]
+        },
+        {
+          "date": "2026-08-30",
+          "period": "afternoon",
+          "roles": [
+            "nursing"
+          ]
+        },
+        {
+          "date": "2026-08-30",
+          "period": "evening",
+          "roles": [
+            "nursing"
+          ]
+        }
+      ],
+      "notes": "從八個可排時段中安排六節，因此使用 EXACT 6。"
+    }
+  ],
+  "leave_requests": [
+    {
+      "employee_id": "FT001",
+      "date": "2026-08-02",
+      "all_day": true,
+      "note": "休假"
+    },
+    {
+      "employee_id": "FT001",
+      "date": "2026-08-21",
+      "all_day": true,
+      "note": "休假"
+    },
+    {
+      "employee_id": "FT002",
+      "date": "2026-08-04",
+      "all_day": true,
+      "note": "休假"
+    },
+    {
+      "employee_id": "FT002",
+      "date": "2026-08-26",
+      "all_day": true,
+      "note": "休假"
+    },
+    {
+      "employee_id": "FT002",
+      "date": "2026-08-30",
+      "all_day": true,
+      "note": "休假"
+    },
+    {
+      "employee_id": "FT003",
+      "date": "2026-08-02",
+      "all_day": true,
+      "note": "休假"
+    },
+    {
+      "employee_id": "FT003",
+      "date": "2026-08-06",
+      "all_day": true,
+      "note": "休假"
+    },
+    {
+      "employee_id": "FT004",
+      "date": "2026-08-09",
+      "all_day": true,
+      "note": "休假"
+    },
+    {
+      "employee_id": "FT004",
+      "date": "2026-08-10",
+      "all_day": true,
+      "note": "休假"
+    },
+    {
+      "employee_id": "FT004",
+      "date": "2026-08-11",
+      "all_day": true,
+      "note": "休假"
+    },
+    {
+      "employee_id": "FT004",
+      "date": "2026-08-16",
+      "all_day": true,
+      "note": "休假"
+    },
+    {
+      "employee_id": "FT004",
+      "date": "2026-08-25",
+      "all_day": true,
+      "note": "休假"
+    }
+  ],
+  "unavailable_slots": []
+}

@@ -28,6 +28,7 @@ from .precheck import PrecheckResult, PrecheckStatus, run_prechecks
 class FeasibilityStatus(StrEnum):
     PRECHECK_INFEASIBLE = "PRECHECK_INFEASIBLE"
     FEASIBLE = "FEASIBLE"
+    OPTIMAL = "OPTIMAL"
     INFEASIBLE = "INFEASIBLE"
     UNKNOWN = "UNKNOWN"
 
@@ -65,6 +66,7 @@ class FeasibilityModel:
     x: Mapping[AssignmentKey, cp_model.IntVar]
     slot_work: Mapping[PersonPeriodKey, cp_model.IntVar]
     daily_patterns: Mapping[PatternKey, cp_model.IntVar]
+    employee_shift_counts: Mapping[str, cp_model.IntVar]
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +80,10 @@ class FeasibilityResult:
 
     @property
     def is_feasible(self) -> bool:
-        return self.status is FeasibilityStatus.FEASIBLE
+        return self.status in (
+            FeasibilityStatus.FEASIBLE,
+            FeasibilityStatus.OPTIMAL,
+        )
 
 
 def _var_name(prefix: str, *parts: object) -> str:
@@ -112,6 +117,7 @@ def build_feasibility_model(data: NormalizedScheduleInput) -> FeasibilityModel:
 
     slot_work: dict[PersonPeriodKey, cp_model.IntVar] = {}
     daily_patterns: dict[PatternKey, cp_model.IntVar] = {}
+    employee_shift_counts: dict[str, cp_model.IntVar] = {}
 
     for employee in data.source.employees:
         for day in data.dates:
@@ -136,7 +142,12 @@ def build_feasibility_model(data: NormalizedScheduleInput) -> FeasibilityModel:
             for pattern in DailyPattern:
                 key = (employee.employee_id, day, pattern)
                 pattern_variables[pattern] = model.new_bool_var(
-                    _var_name("daily_pattern", employee.employee_id, day.isoformat(), pattern.value)
+                    _var_name(
+                        "daily_pattern",
+                        employee.employee_id,
+                        day.isoformat(),
+                        pattern.value,
+                    )
                 )
                 daily_patterns[key] = pattern_variables[pattern]
             model.add_exactly_one(pattern_variables.values())
@@ -163,7 +174,14 @@ def build_feasibility_model(data: NormalizedScheduleInput) -> FeasibilityModel:
             else:
                 model.add(daily_count <= 3)
 
-        total_shifts = sum(x_by_employee[employee.employee_id])
+        assignment_variables = x_by_employee[employee.employee_id]
+        total_shifts = model.new_int_var(
+            0,
+            len(assignment_variables),
+            _var_name("total_shifts", employee.employee_id),
+        )
+        model.add(total_shifts == sum(assignment_variables))
+        employee_shift_counts[employee.employee_id] = total_shifts
         if employee.shift_mode is ShiftMode.EXACT:
             assert employee.required_shifts is not None
             model.add(total_shifts == employee.required_shifts)
@@ -172,7 +190,7 @@ def build_feasibility_model(data: NormalizedScheduleInput) -> FeasibilityModel:
             model.add(total_shifts >= employee.min_shifts)
             model.add(total_shifts <= employee.max_shifts)
         else:
-            # target_shifts remains a soft objective for a later phase.
+            # target_shifts itself is handled only by the optimization controller.
             if employee.min_shifts is not None:
                 model.add(total_shifts >= employee.min_shifts)
             if employee.max_shifts is not None:
@@ -183,7 +201,26 @@ def build_feasibility_model(data: NormalizedScheduleInput) -> FeasibilityModel:
         x=MappingProxyType(x),
         slot_work=MappingProxyType(slot_work),
         daily_patterns=MappingProxyType(daily_patterns),
+        employee_shift_counts=MappingProxyType(employee_shift_counts),
     )
+
+
+def extract_model_solution(
+    built: FeasibilityModel,
+    solver: cp_model.CpSolver,
+) -> tuple[tuple[Assignment, ...], Mapping[PersonDayKey, DailyPattern]]:
+    """Extract the shared raw assignment and daily-pattern representation."""
+
+    assignments = tuple(
+        Assignment(employee_id, day, period, role)
+        for (employee_id, day, period, role), variable in built.x.items()
+        if solver.value(variable)
+    )
+    selected_patterns: dict[PersonDayKey, DailyPattern] = {}
+    for (employee_id, day, pattern), variable in built.daily_patterns.items():
+        if solver.value(variable):
+            selected_patterns[(employee_id, day)] = pattern
+    return assignments, MappingProxyType(selected_patterns)
 
 
 def solve_feasibility(
@@ -231,20 +268,12 @@ def solve_feasibility(
             precheck=precheck,
         )
 
-    assignments = tuple(
-        Assignment(employee_id, day, period, role)
-        for (employee_id, day, period, role), variable in built.x.items()
-        if solver.value(variable)
-    )
-    selected_patterns: dict[PersonDayKey, DailyPattern] = {}
-    for (employee_id, day, pattern), variable in built.daily_patterns.items():
-        if solver.value(variable):
-            selected_patterns[(employee_id, day)] = pattern
+    assignments, selected_patterns = extract_model_solution(built, solver)
 
     return FeasibilityResult(
         status=FeasibilityStatus.FEASIBLE,
         assignments=assignments,
-        daily_patterns=MappingProxyType(selected_patterns),
+        daily_patterns=selected_patterns,
         raw_solver_status=raw_status_name,
         wall_time_seconds=solver.wall_time,
         precheck=precheck,

@@ -1,17 +1,24 @@
 # Clinic Shift Scheduler
 
-本 repository 依據 `診所排班系統.md` 實作診所排班系統。目前完成 v1 資料契約、輸入驗證、正規化、OR-Tools CP-SAT 硬性可行性模型，以及第三階段的保守前置可行性檢查；尚未加入 TARGET 最佳化、兼職最小化、公平性、多階段最佳化或正式班表輸出。
+本 repository 依據 `診所排班系統.md` 實作診所排班系統。目前完成 v1 資料契約、輸入驗證、正規化、OR-Tools CP-SAT 硬性可行性模型、保守前置可行性檢查，以及第四階段的 TARGET 偏差與兼職用量嚴格字典序最佳化；尚未加入 A+B 班型品質、公平性、完整 v1 多階段最佳化或正式班表輸出。
 
 ## 專案結構
 
 - `src/clinic_shift_scheduler/models.py`：不可變的輸入與正規化型別。
+- `src/clinic_shift_scheduler/authoring.py`：將使用者維護的每週營業／需求範本展開成 canonical v1 逐日需求。
 - `src/clinic_shift_scheduler/schemas/`：版本化 JSON Schema。
 - `src/clinic_shift_scheduler/validation.py`：結構與語意驗證，失敗統一回報 `INPUT_INVALID`。
 - `src/clinic_shift_scheduler/normalization.py`：日期、休診、可用性、請假及需求的正規化。
 - `src/clinic_shift_scheduler/daily_patterns.py`：CP-SAT 與前置檢查共用的 v1 每日班型規則。
 - `src/clinic_shift_scheduler/feasibility.py`：無目標函數的 CP-SAT 硬性可行性模型。
 - `src/clinic_shift_scheduler/precheck.py`：總量、個人容量、職務容量及同時段匹配的必要條件檢查。
+- `src/clinic_shift_scheduler/optimization.py`：TARGET 偏差、兼職用量與最佳值鎖定控制器。
 - `tests/`：synthetic fixtures 與單元測試。
+- `排班資料/`：本機實際排班資料；直接放在此層的真名檔案由 Git 忽略，只有 `排班資料/匿名範本/` 會納入版本控制並作為開發與整合驗證資料。
+
+目前 `solve_lexicographic` 回傳的 `OPTIMAL` 表示截至第四階段已實作的
+目標前綴全部完成；A+B 班型、公平性與獨立結果驗證加入後，才會擴充為
+完整 v1 最佳化完成的判定。
 
 ## 使用方式
 
@@ -28,6 +35,21 @@ conda activate clinic_shift_scheduler
 ```powershell
 conda activate clinic_shift_scheduler
 ```
+
+```python
+from clinic_shift_scheduler import validate_and_normalize_weekly
+
+normalized = validate_and_normalize_weekly(raw_weekly_mapping)
+```
+
+建議使用者維護 `weekly-v1` 精簡輸入，例如
+`排班資料/匿名範本/排班輸入_匿名_2026-08.weekly-v1.json`。每個星期必須恰好由一條
+週規則涵蓋；`is_open: true` 時完整填寫早、午、晚各職務人數，
+`is_open: false` 時省略 `staffing`。`date_overrides` 可讓原本營業的特定
+日期臨時休診，或以完整的當日 `staffing` 取代週規則。前處理會展開為
+canonical v1 的逐日 `demands`，再交給既有嚴格驗證與求解流程。
+
+若上游系統本來就會產生完整 canonical v1 資料，仍可直接使用：
 
 ```python
 from clinic_shift_scheduler import validate_and_normalize

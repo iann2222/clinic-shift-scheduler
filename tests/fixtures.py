@@ -32,7 +32,7 @@ def minimal_valid_input() -> dict[str, Any]:
         "employees": [
             {
                 "employee_id": "FT001",
-                "name": "怡秀",
+                "name": "範例甲",
                 "employment_type": "full_time",
                 "full_time_class": "A",
                 "roles": ["reception", "assistant"],
