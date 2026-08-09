@@ -60,7 +60,7 @@ class JsonExporterTests(unittest.TestCase):
             document["contract"],
             {"name": RESULT_CONTRACT_NAME, "version": RESULT_CONTRACT_VERSION},
         )
-        self.assertEqual(RESULT_CONTRACT_VERSION, "1.3")
+        self.assertEqual(RESULT_CONTRACT_VERSION, "1.6")
         self.assertEqual(document["input_schema_version"], "v1")
         self.assertEqual(document["generated_at"], "2024-10-02T03:04:05Z")
         self.assertEqual(document["month"], "2024-10")
@@ -71,28 +71,27 @@ class JsonExporterTests(unittest.TestCase):
             document["objective_vector"],
             document["statistics"]["overall"]["objective_vector"],
         )
-        self.assertEqual(len(document["stage_records"]), 15)
+        self.assertEqual(len(document["stage_records"]), 13)
+        self.assertEqual(len(document["preference_benchmarks"]), 4)
+        self.assertTrue(
+            all(
+                item["locked_actual_value"] is not None
+                for item in document["preference_benchmarks"]
+            )
+        )
+        self.assertEqual(len(document["class_pattern_locks"]), 2)
         self.assertEqual(len(document["assignments"]), 5)
         self.assertIn("individual", document["statistics"])
         self.assertIn("fairness_groups", document["statistics"])
-        self.assertIn("full_time_class_quality", document["statistics"])
-        self.assertEqual(
-            len(document["statistics"]["full_time_class_quality"]), 2
+        self.assertIn("class_preferences", document["statistics"])
+        self.assertEqual(len(document["statistics"]["class_preferences"]), 4)
+        self.assertNotIn("full_time_class_quality", document["statistics"])
+        self.assertIn(
+            "full_time_preference_rank1_max_regret",
+            document["objective_vector"],
         )
         self.assertIn(
-            "class_quality_ratio_gaps_basis_points",
-            document["statistics"]["overall"],
-        )
-        self.assertIn(
-            "full_time_consecutive_ratio_max_gap_basis_points",
-            document["statistics"]["overall"],
-        )
-        self.assertIn(
-            "full_time_consecutive_ratio_total_gap_basis_points",
-            document["statistics"]["overall"],
-        )
-        self.assertIn(
-            "full_time_consecutive_ratio_max_gap",
+            "full_time_first_preference_ratio_total_gap",
             document["objective_vector"],
         )
         full_time_group = next(
@@ -219,8 +218,8 @@ class ExcelExporterTests(unittest.TestCase):
             self.assertGreaterEqual(individual.max_column, 30)
 
             groups = workbook["類別與公平性統計"]
-            self.assertEqual(groups["A1"].value, "全體正職連續雙班比例公平")
-            self.assertEqual(groups["A2"].value, "employee_id")
+            self.assertEqual(groups["A1"].value, "A／B 類別偏好理想值與公平退讓")
+            self.assertEqual(groups["A2"].value, "正職類別")
             self.assertTrue(
                 any(
                     groups.cell(row, 1).value == "類別統計"
@@ -229,20 +228,19 @@ class ExcelExporterTests(unittest.TestCase):
             )
             self.assertTrue(
                 any(
-                    groups.cell(row, 1).value == "全體 max-min gap (bp)"
+                    groups.cell(row, 1).value == "A／B 類別偏好理想值與公平退讓"
                     for row in range(1, groups.max_row + 1)
                 )
             )
             self.assertTrue(
                 any(
-                    isinstance(groups.cell(row, 4).value, str)
-                    and "比例 (bp)" in groups.cell(row, 4).value
+                    groups.cell(row, 10).value == "退讓比例 (bp)"
                     for row in range(1, groups.max_row + 1)
                 )
             )
             self.assertTrue(
                 any(
-                    groups.cell(row, 1).value == "A／B 類別品質順位比例"
+                    groups.cell(row, 1).value == "Fairness group 統計"
                     for row in range(1, groups.max_row + 1)
                 )
             )
@@ -255,6 +253,18 @@ class ExcelExporterTests(unittest.TestCase):
                 for row in range(1, solver.max_row + 1)
             }
             self.assertEqual(values["Validation"], "PASS")
+            self.assertTrue(
+                any(
+                    solver.cell(row, 1).value == "類別偏好理想值 benchmark"
+                    for row in range(1, solver.max_row + 1)
+                )
+            )
+            self.assertTrue(
+                any(
+                    solver.cell(row, 1).value == "剩餘班型類別鎖"
+                    for row in range(1, solver.max_row + 1)
+                )
+            )
             self.assertEqual(
                 values["full_time_target_deviation"],
                 self.output.overall_statistics.objective_vector[

@@ -9,11 +9,24 @@ from itertools import combinations
 from types import MappingProxyType
 from typing import Mapping
 
+from .class_preferences import (
+    CLASS_PREFERENCES,
+    ClassPreferenceMetric,
+    PreferenceDirection,
+    PreferenceRank,
+    class_opportunity_days,
+    preference_regret_basis_points,
+    preference_regret_days,
+)
 from .daily_patterns import DailyPattern, PATTERN_PERIODS
 from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period
 from .feasibility import Assignment, DemandKey, PersonDayKey, PersonPeriodKey
 from .models import NormalizedScheduleInput
-from .optimization import FairnessMetric, OptimizationStage
+from .optimization import (
+    FairnessMetric,
+    OptimizationStage,
+    PreferenceBenchmarkResult,
+)
 from .ratio_fairness import PatternQualityLevel, ratio_basis_points
 
 
@@ -68,6 +81,23 @@ class RecomputedScheduleMetrics:
     class_quality_ratio_gaps_basis_points: Mapping[PatternQualityLevel, int]
     full_time_consecutive_ratio_max_gap_basis_points: int
     full_time_consecutive_ratio_total_gap_basis_points: int
+    class_preference_actual_values: Mapping[
+        tuple[FullTimeClass, PreferenceRank], int
+    ]
+    class_preference_ideal_values: Mapping[
+        tuple[FullTimeClass, PreferenceRank], int
+    ]
+    class_preference_locked_actual_values: Mapping[
+        tuple[FullTimeClass, PreferenceRank], int | None
+    ]
+    class_remaining_pattern_actual_values: Mapping[FullTimeClass, int]
+    class_preference_opportunity_days: Mapping[FullTimeClass, int]
+    class_preference_regret_days: Mapping[
+        tuple[FullTimeClass, PreferenceRank], int
+    ]
+    class_preference_regret_basis_points: Mapping[
+        tuple[FullTimeClass, PreferenceRank], int | None
+    ]
     fairness_gaps: Mapping[
         OptimizationStage, Mapping[tuple[str, FairnessMetric], int]
     ]
@@ -82,6 +112,7 @@ def _gap(values: list[int]) -> int:
 def recompute_schedule_metrics(
     data: NormalizedScheduleInput,
     assignments: tuple[Assignment, ...],
+    preference_benchmarks: tuple[PreferenceBenchmarkResult, ...] = (),
 ) -> RecomputedScheduleMetrics:
     """Recompute all v1 hard facts and objective values without solver state."""
 
@@ -233,6 +264,33 @@ def recompute_schedule_metrics(
 
     pattern_ratios: dict[tuple[str, FairnessMetric], int | None] = {}
     ratio_gaps: dict[tuple[str, FairnessMetric], int] = {}
+    preference_ratio_gaps: dict[
+        OptimizationStage, dict[tuple[str, FairnessMetric], int]
+    ] = {
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP: {},
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP: {},
+        OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP: {},
+    }
+    preference_ratio_stage = {
+        (FullTimeClass.A, FairnessMetric.CONSECUTIVE_DOUBLES): (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
+        ),
+        (FullTimeClass.B, FairnessMetric.SINGLE_SHIFT_DAYS): (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
+        ),
+        (FullTimeClass.A, FairnessMetric.MORNING_EVENING_DAYS): (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP
+        ),
+        (FullTimeClass.B, FairnessMetric.CONSECUTIVE_DOUBLES): (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP
+        ),
+        (FullTimeClass.A, FairnessMetric.SINGLE_SHIFT_DAYS): (
+            OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP
+        ),
+        (FullTimeClass.B, FairnessMetric.TRIPLE_DAYS): (
+            OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP
+        ),
+    }
     for full_time_class, class_metrics in full_time_classes.items():
         groups: dict[str, list[str]] = defaultdict(list)
         for employee in data.source.employees:
@@ -258,6 +316,9 @@ def recompute_schedule_metrics(
                 ratio_gaps[(group, metric)] = (
                     _gap(defined) if len(defined) >= 2 else 0
                 )
+                preference_ratio_gaps[
+                    preference_ratio_stage[(full_time_class, metric)]
+                ][(group, metric)] = ratio_gaps[(group, metric)]
 
     full_time_consecutive_ratios = [
         pattern_ratios[
@@ -278,6 +339,82 @@ def recompute_schedule_metrics(
         abs(left - right)
         for left, right in combinations(defined_consecutive_ratios, 2)
     )
+
+    preference_metric_values = {
+        ClassPreferenceMetric.CONSECUTIVE_DOUBLES: lambda values: (
+            values.consecutive_double_days
+        ),
+        ClassPreferenceMetric.SINGLE_SHIFT_DAYS: lambda values: (
+            values.single_shift_days
+        ),
+        ClassPreferenceMetric.MORNING_EVENING_DAYS: lambda values: (
+            values.morning_evening_days
+        ),
+    }
+    benchmark_by_key = {
+        (item.full_time_class, item.rank): item
+        for item in preference_benchmarks
+        if item.ideal_value is not None
+    }
+    class_preference_actuals: dict[
+        tuple[FullTimeClass, PreferenceRank], int
+    ] = {}
+    class_preference_ideals: dict[
+        tuple[FullTimeClass, PreferenceRank], int
+    ] = {}
+    class_preference_locked_actuals: dict[
+        tuple[FullTimeClass, PreferenceRank], int | None
+    ] = {}
+    class_preference_opportunities = {
+        full_time_class: class_opportunity_days(data, full_time_class)
+        for full_time_class in FullTimeClass
+    }
+    class_preference_regrets: dict[
+        tuple[FullTimeClass, PreferenceRank], int
+    ] = {}
+    class_preference_regret_bps: dict[
+        tuple[FullTimeClass, PreferenceRank], int | None
+    ] = {}
+    for definition in CLASS_PREFERENCES:
+        key = (definition.full_time_class, definition.rank)
+        actual = sum(
+            preference_metric_values[definition.metric](
+                employee_metrics[employee.employee_id]
+            )
+            for employee in data.source.employees
+            if employee.full_time_class is definition.full_time_class
+        )
+        benchmark = benchmark_by_key.get(key)
+        ideal = actual if benchmark is None else benchmark.ideal_value
+        assert ideal is not None
+        regret = preference_regret_days(
+            actual, ideal, definition.direction
+        )
+        opportunity = class_preference_opportunities[
+            definition.full_time_class
+        ]
+        class_preference_actuals[key] = actual
+        class_preference_ideals[key] = ideal
+        class_preference_locked_actuals[key] = (
+            None if benchmark is None else benchmark.locked_actual_value
+        )
+        class_preference_regrets[key] = regret
+        class_preference_regret_bps[key] = preference_regret_basis_points(
+            regret, opportunity
+        )
+
+    class_remaining_pattern_actuals = {
+        FullTimeClass.A: sum(
+            values.single_shift_days
+            for employee_id, values in employee_metrics.items()
+            if data.employees[employee_id].full_time_class is FullTimeClass.A
+        ),
+        FullTimeClass.B: sum(
+            values.triple_days
+            for employee_id, values in employee_metrics.items()
+            if data.employees[employee_id].full_time_class is FullTimeClass.B
+        ),
+    }
 
     stage_members_and_metrics = {
         OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS: (
@@ -334,6 +471,28 @@ def recompute_schedule_metrics(
     fairness_gaps[
         OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP
     ] = MappingProxyType(ratio_gaps)
+    fairness_gaps[
+        OptimizationStage.FULL_TIME_FIRST_PREFERENCE_RATIO_TOTAL_GAP
+    ] = MappingProxyType(
+        preference_ratio_gaps[
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
+        ]
+    )
+    ratio_total_stage = {
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP: (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_TOTAL_GAP
+        ),
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP: (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_TOTAL_GAP
+        ),
+        OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP: (
+            OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_TOTAL_GAP
+        ),
+    }
+    for maximum_stage, gaps in preference_ratio_gaps.items():
+        immutable = MappingProxyType(gaps)
+        fairness_gaps[maximum_stage] = immutable
+        fairness_gaps[ratio_total_stage[maximum_stage]] = immutable
 
     target_deviation = sum(
         abs(
@@ -348,6 +507,16 @@ def recompute_schedule_metrics(
         for employee in data.source.employees
         if employee.employment_type is EmploymentType.PART_TIME
     )
+    rank_regret_values = {
+        rank: [
+            value
+            for (full_time_class, item_rank), value in (
+                class_preference_regret_bps.items()
+            )
+            if item_rank is rank and value is not None
+        ]
+        for rank in PreferenceRank
+    }
     objective_values = {
         OptimizationStage.FULL_TIME_TARGET_DEVIATION: target_deviation,
         OptimizationStage.PART_TIME_USAGE: part_time_usage,
@@ -386,8 +555,58 @@ def recompute_schedule_metrics(
         OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_TOTAL_GAP: sum(
             class_quality_gaps.values()
         ),
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK1_MAX_REGRET: max(
+            rank_regret_values[PreferenceRank.FIRST], default=0
+        ),
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK1_TOTAL_REGRET: sum(
+            rank_regret_values[PreferenceRank.FIRST]
+        ),
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK2_MAX_REGRET: max(
+            rank_regret_values[PreferenceRank.SECOND], default=0
+        ),
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK2_TOTAL_REGRET: sum(
+            rank_regret_values[PreferenceRank.SECOND]
+        ),
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP: max(
+            preference_ratio_gaps[
+                OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
+            ].values(),
+            default=0,
+        ),
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_TOTAL_GAP: sum(
+            preference_ratio_gaps[
+                OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
+            ].values()
+        ),
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP: max(
+            preference_ratio_gaps[
+                OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP
+            ].values(),
+            default=0,
+        ),
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_TOTAL_GAP: sum(
+            preference_ratio_gaps[
+                OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP
+            ].values()
+        ),
+        OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP: max(
+            preference_ratio_gaps[
+                OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP
+            ].values(),
+            default=0,
+        ),
+        OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_TOTAL_GAP: sum(
+            preference_ratio_gaps[
+                OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP
+            ].values()
+        ),
         OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP: max(
             ratio_gaps.values(), default=0
+        ),
+        OptimizationStage.FULL_TIME_FIRST_PREFERENCE_RATIO_TOTAL_GAP: sum(
+            preference_ratio_gaps[
+                OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
+            ].values()
         ),
         OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP: sum(
             ratio_gaps.values()
@@ -398,7 +617,14 @@ def recompute_schedule_metrics(
             if stage
             not in (
                 OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP,
+                OptimizationStage.FULL_TIME_FIRST_PREFERENCE_RATIO_TOTAL_GAP,
                 OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP,
+                OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP,
+                OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_TOTAL_GAP,
+                OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP,
+                OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_TOTAL_GAP,
+                OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP,
+                OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_TOTAL_GAP,
             )
         },
     }
@@ -422,6 +648,25 @@ def recompute_schedule_metrics(
         ),
         full_time_consecutive_ratio_total_gap_basis_points=(
             global_consecutive_total_gap
+        ),
+        class_preference_actual_values=MappingProxyType(
+            class_preference_actuals
+        ),
+        class_preference_ideal_values=MappingProxyType(class_preference_ideals),
+        class_preference_locked_actual_values=MappingProxyType(
+            class_preference_locked_actuals
+        ),
+        class_remaining_pattern_actual_values=MappingProxyType(
+            class_remaining_pattern_actuals
+        ),
+        class_preference_opportunity_days=MappingProxyType(
+            class_preference_opportunities
+        ),
+        class_preference_regret_days=MappingProxyType(
+            class_preference_regrets
+        ),
+        class_preference_regret_basis_points=MappingProxyType(
+            class_preference_regret_bps
         ),
         fairness_gaps=MappingProxyType(fairness_gaps),
         objective_values=MappingProxyType(objective_values),

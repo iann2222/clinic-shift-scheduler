@@ -9,14 +9,26 @@ from enum import StrEnum
 from types import MappingProxyType
 from typing import Mapping
 
-from .daily_patterns import DailyPattern, PATTERN_PERIODS
+from .daily_patterns import (
+    B_MAX_SINGLE_SHIFT_DAYS_PER_MONTH,
+    DailyPattern,
+    PATTERN_PERIODS,
+)
+from .class_preferences import (
+    CLASS_PREFERENCES,
+    PreferenceDirection,
+    class_opportunity_days,
+)
 from .enums import EmploymentType, FullTimeClass, ShiftMode
 from .feasibility import Assignment
 from .models import NormalizedScheduleInput
 from .optimization import (
+    ClassPatternLockResult,
+    FairnessMetric,
     OptimizationStage,
     OptimizationStageResult,
     OptimizationStageStatus,
+    PreferenceBenchmarkResult,
 )
 from .result_metrics import RecomputedScheduleMetrics, recompute_schedule_metrics
 
@@ -51,14 +63,12 @@ class ValidationReport:
 FORMAL_OBJECTIVE_STAGES: tuple[OptimizationStage, ...] = (
     OptimizationStage.FULL_TIME_TARGET_DEVIATION,
     OptimizationStage.PART_TIME_USAGE,
-    OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES,
-    OptimizationStage.FULL_TIME_CONSECUTIVE_RATIO_MAX_GAP,
-    OptimizationStage.FULL_TIME_CONSECUTIVE_RATIO_TOTAL_GAP,
-    OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS,
-    OptimizationStage.FULL_TIME_SECONDARY_PATTERNS,
-    OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP,
-    OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_TOTAL_GAP,
+    OptimizationStage.FULL_TIME_PREFERENCE_RANK1_MAX_REGRET,
+    OptimizationStage.FULL_TIME_PREFERENCE_RANK1_TOTAL_REGRET,
+    OptimizationStage.FULL_TIME_PREFERENCE_RANK2_MAX_REGRET,
+    OptimizationStage.FULL_TIME_PREFERENCE_RANK2_TOTAL_REGRET,
     OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP,
+    OptimizationStage.FULL_TIME_FIRST_PREFERENCE_RATIO_TOTAL_GAP,
     OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP,
     OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS,
     OptimizationStage.PART_TIME_GROUP_FAIRNESS,
@@ -74,10 +84,14 @@ def validate_schedule_result(
     data: NormalizedScheduleInput,
     assignments: tuple[Assignment, ...],
     stages: tuple[OptimizationStageResult, ...],
+    preference_benchmarks: tuple[PreferenceBenchmarkResult, ...] = (),
+    class_pattern_locks: tuple[ClassPatternLockResult, ...] = (),
 ) -> ValidationReport:
     """Validate without reading any CP-SAT variable or solver-derived pattern."""
 
-    recomputed = recompute_schedule_metrics(data, assignments)
+    recomputed = recompute_schedule_metrics(
+        data, assignments, preference_benchmarks
+    )
     issues: list[ResultValidationIssue] = []
     checks = {
         "assignment_integrity": True,
@@ -90,6 +104,8 @@ def validate_schedule_result(
         "daily_patterns": True,
         "total_shifts": True,
         "optimization_stages": True,
+        "preference_benchmarks": True,
+        "class_pattern_locks": True,
         "locked_objectives": True,
     }
 
@@ -306,6 +322,31 @@ def validate_schedule_result(
                     day=day,
                 )
 
+        if employee.full_time_class is FullTimeClass.B:
+            monthly_single_days = Counter(
+                (day.year, day.month)
+                for day in data.dates
+                if recomputed.daily_patterns[(employee.employee_id, day)]
+                in (
+                    DailyPattern.MORNING_ONLY,
+                    DailyPattern.AFTERNOON_ONLY,
+                    DailyPattern.EVENING_ONLY,
+                )
+            )
+            for (year, month), count in monthly_single_days.items():
+                if count <= B_MAX_SINGLE_SHIFT_DAYS_PER_MONTH:
+                    continue
+                add(
+                    "daily_patterns",
+                    "b_monthly_single_shift_limit_exceeded",
+                    (
+                        f"B employees may have at most "
+                        f"{B_MAX_SINGLE_SHIFT_DAYS_PER_MONTH} single-shift "
+                        f"day in {year:04d}-{month:02d}; got {count}"
+                    ),
+                    employee_id=employee.employee_id,
+                )
+
     stage_sequence = tuple(item.stage for item in stages)
     if stage_sequence != FORMAL_STAGE_SEQUENCE:
         add(
@@ -313,6 +354,120 @@ def validate_schedule_result(
             "optimization_stage_sequence_mismatch",
             "formal optimization stages are missing, duplicated, or out of order",
         )
+    benchmark_by_key = {
+        (item.full_time_class, item.rank): item
+        for item in preference_benchmarks
+    }
+    expected_benchmark_keys = {
+        (item.full_time_class, item.rank) for item in CLASS_PREFERENCES
+    }
+    if (
+        len(preference_benchmarks) != len(CLASS_PREFERENCES)
+        or set(benchmark_by_key) != expected_benchmark_keys
+    ):
+        add(
+            "preference_benchmarks",
+            "preference_benchmark_structure_mismatch",
+            "formal result requires one A and B benchmark for each preference rank",
+        )
+    for benchmark in preference_benchmarks:
+        definition = next(
+            (
+                item
+                for item in CLASS_PREFERENCES
+                if item.full_time_class is benchmark.full_time_class
+                and item.rank is benchmark.rank
+            ),
+            None,
+        )
+        if definition is None:
+            continue
+        if (
+            benchmark.metric is not definition.metric
+            or benchmark.direction is not definition.direction
+            or benchmark.opportunity_days
+            != class_opportunity_days(data, benchmark.full_time_class)
+        ):
+            add(
+                "preference_benchmarks",
+                "preference_benchmark_definition_mismatch",
+                "preference benchmark does not match the formal class definition",
+            )
+        if benchmark.status not in (
+            OptimizationStageStatus.OPTIMAL,
+            OptimizationStageStatus.SKIPPED_CONSTANT,
+        ):
+            add(
+                "preference_benchmarks",
+                "preference_benchmark_not_optimal",
+                "every preference ideal must be proven OPTIMAL or constant",
+            )
+        if benchmark.ideal_value is None:
+            add(
+                "preference_benchmarks",
+                "preference_benchmark_missing_value",
+                "preference benchmark is missing its ideal value",
+            )
+            continue
+        key = (benchmark.full_time_class, benchmark.rank)
+        actual = recomputed.class_preference_actual_values[key]
+        if benchmark.locked_actual_value is None:
+            add(
+                "preference_benchmarks",
+                "preference_locked_actual_missing",
+                "formal preference benchmark is missing its locked actual value",
+            )
+        elif actual != benchmark.locked_actual_value:
+            add(
+                "preference_benchmarks",
+                "preference_locked_actual_mismatch",
+                (
+                    f"recorded locked actual {benchmark.locked_actual_value}, "
+                    f"recomputed {actual}"
+                ),
+            )
+        is_better_than_ideal = (
+            actual > benchmark.ideal_value
+            if benchmark.direction is PreferenceDirection.MAXIMIZE
+            else actual < benchmark.ideal_value
+        )
+        if is_better_than_ideal:
+            add(
+                "preference_benchmarks",
+                "preference_benchmark_ideal_violated",
+                "final assignment is better than its recorded proven ideal",
+            )
+    expected_pattern_locks = {
+        (FullTimeClass.A, FairnessMetric.SINGLE_SHIFT_DAYS),
+        (FullTimeClass.B, FairnessMetric.TRIPLE_DAYS),
+    }
+    pattern_lock_by_key = {
+        (item.full_time_class, item.metric): item
+        for item in class_pattern_locks
+    }
+    if (
+        len(class_pattern_locks) != len(expected_pattern_locks)
+        or set(pattern_lock_by_key) != expected_pattern_locks
+    ):
+        add(
+            "class_pattern_locks",
+            "class_pattern_lock_structure_mismatch",
+            "formal result requires A single-day and B triple-day class locks",
+        )
+    for key, item in pattern_lock_by_key.items():
+        full_time_class, _metric = key
+        actual = recomputed.class_remaining_pattern_actual_values[
+            full_time_class
+        ]
+        if actual != item.locked_value:
+            add(
+                "class_pattern_locks",
+                "class_pattern_lock_value_mismatch",
+                (
+                    f"recorded class pattern lock {item.locked_value}, "
+                    f"recomputed {actual}"
+                ),
+            )
     stage_by_name = {item.stage: item for item in stages}
     for stage_name in FORMAL_OBJECTIVE_STAGES:
         stage_result = stage_by_name.get(stage_name)

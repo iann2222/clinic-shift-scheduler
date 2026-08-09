@@ -16,6 +16,7 @@ from typing import Mapping
 from ortools.sat.python import cp_model
 
 from .daily_patterns import (
+    B_MAX_SINGLE_SHIFT_DAYS_PER_MONTH,
     PATTERN_PERIODS,
     DailyPattern,
     allowed_daily_patterns,
@@ -174,6 +175,23 @@ def build_feasibility_model(data: NormalizedScheduleInput) -> FeasibilityModel:
                 model.add(daily_count <= 2)
             else:
                 model.add(daily_count <= 3)
+
+        if employee.full_time_class is FullTimeClass.B:
+            months = sorted({(day.year, day.month) for day in data.dates})
+            for year, month in months:
+                model.add(
+                    sum(
+                        daily_patterns[(employee.employee_id, day, pattern)]
+                        for day in data.dates
+                        if (day.year, day.month) == (year, month)
+                        for pattern in (
+                            DailyPattern.MORNING_ONLY,
+                            DailyPattern.AFTERNOON_ONLY,
+                            DailyPattern.EVENING_ONLY,
+                        )
+                    )
+                    <= B_MAX_SINGLE_SHIFT_DAYS_PER_MONTH
+                )
 
         assignment_variables = x_by_employee[employee.employee_id]
         total_shifts = model.new_int_var(

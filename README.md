@@ -12,8 +12,9 @@
 - `src/clinic_shift_scheduler/daily_patterns.py`：CP-SAT 與前置檢查共用的 v1 每日班型規則。
 - `src/clinic_shift_scheduler/feasibility.py`：無目標函數的 CP-SAT 硬性可行性模型。
 - `src/clinic_shift_scheduler/precheck.py`：總量、個人容量、職務容量及同時段匹配的必要條件檢查。
-- `src/clinic_shift_scheduler/optimization.py`：TARGET 偏差、兼職用量、A+B 班型品質、A／B 類別品質比例、類別內個人比例／整數公平性、其他群組公平性與最佳值鎖定控制器。
-- `src/clinic_shift_scheduler/ratio_fairness.py`：optimizer、結果重算與報表共用的品質順位及整數 basis-points 換算規則。
+- `src/clinic_shift_scheduler/class_preferences.py`：A／B 類各自偏好順位、方向、類別機會日及 regret 的共用定義。
+- `src/clinic_shift_scheduler/optimization.py`：TARGET 偏差、兼職用量、類別偏好 benchmark／regret、類別內個人比例／整數公平性、其他群組公平性與最佳值鎖定控制器。
+- `src/clinic_shift_scheduler/ratio_fairness.py`：optimizer、結果重算與報表共用的整數 basis-points 換算規則。
 - `src/clinic_shift_scheduler/result_metrics.py`：只從最終 assignments 重算每日模式、統計、公平性 gap 與完整目標向量。
 - `src/clinic_shift_scheduler/result_validation.py`：獨立驗證硬性規則、階段順序及鎖定目標值。
 - `src/clinic_shift_scheduler/output.py`：媒介無關的日期橫向班表、個人／群組／整體統計與正式狀態提升。
@@ -21,9 +22,14 @@
 - `tests/`：synthetic fixtures 與單元測試。
 - `排班資料/`：本機實際排班資料；直接放在此層的真名檔案由 Git 忽略，只有 `排班資料/匿名範本/` 會納入版本控制並作為開發與整合驗證資料。
 
-`solve_lexicographic` 會先鎖定 A+B 連續雙班總數，再跨 A／B 類與
-`fairness_group` 最小化全體正職個人的連續雙班比例最大差距及兩兩差總和；
-其餘班型公平性仍依正式規格分組處理。各階段的 `OPTIMAL`／`SKIPPED_CONSTANT` 及
+`solve_lexicographic` 將 A 類「連續雙班、早晚雙班、單節日」與 B 類
+「避免單節日、連續雙班、三節班 fallback」視為不同偏好順位；B 類另有每人每個
+排班月份最多 1 個單節出勤日的硬限制，不建立最大化三節班目標。每一順位先獨立證明
+A、B 類各自的理想值，再依類別機會日計算整數 basis-point regret，依序最小化
+兩類最大 regret 與 regret 總和，並明確鎖定兩類各自的實際品質總值。類別總體品質鎖定後，個人公平性只在相同類別及
+`fairness_group` 內計算，但將全部班型 gap 放進同一 minimax 套件：先壓低最差
+gap，再處理第一順位 gap 總和及全部 gap 總和，避免逐項過早鎖死或為公平增加較差班型總量。各階段的
+`OPTIMAL`／`SKIPPED_CONSTANT` 及
 `implemented_objective_prefix_optimal` 表示所有正式目標均已證明最佳，
 但求解結果本身仍只回傳 `FEASIBLE`。將結果交給
 `finalize_schedule_output` 後，只有獨立驗證全部通過才會提升為完整 v1

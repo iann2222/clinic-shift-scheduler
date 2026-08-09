@@ -359,60 +359,48 @@ def _build_group_sheet(
     sheet = workbook.create_sheet("類別與公平性統計")
     overall = output.overall_statistics
     assert overall is not None
-    sheet.append(("全體正職連續雙班比例公平",))
-    sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=7)
+    sheet.append(("A／B 類別偏好理想值與公平退讓",))
+    sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=10)
     _header(sheet.cell(1, 1))
     sheet.append(
         (
-            "employee_id",
-            "姓名",
             "正職類別",
-            "出勤日",
-            "連續雙班日",
-            "比例 (bp)",
-            "比例",
+            "需求順位",
+            "指標",
+            "方向",
+            "實際值",
+            "鎖定實際值",
+            "單類理想值",
+            "退讓日數",
+            "機會日數",
+            "退讓比例 (bp)",
         )
     )
-    for stats in output.individual_statistics:
-        if stats.employment_type is not EmploymentType.FULL_TIME:
-            continue
-        ratio = stats.ratios["consecutive_double_days"]
+    for stats in output.class_preference_statistics:
         sheet.append(
             (
-                stats.employee_id,
-                stats.name,
                 _full_time_class_label(stats.full_time_class),
-                stats.attendance_days,
-                stats.consecutive_double_days,
-                "N/A" if ratio.basis_points is None else ratio.basis_points,
-                ratio.display,
+                stats.rank.value,
+                stats.metric,
+                stats.direction.value,
+                stats.actual_value,
+                stats.locked_actual_value,
+                stats.ideal_value,
+                stats.regret_days,
+                stats.opportunity_days,
+                "N/A"
+                if stats.regret_basis_points is None
+                else stats.regret_basis_points,
             )
         )
-    global_last = sheet.max_row
+    preference_last = sheet.max_row
     _style_table(
         sheet,
         header_row=2,
         first_data_row=3,
-        last_row=global_last,
-        last_column=7,
+        last_row=preference_last,
+        last_column=10,
     )
-    sheet.append(
-        (
-            "全體 max-min gap (bp)",
-            overall.full_time_consecutive_ratio_max_gap_basis_points,
-        )
-    )
-    sheet.append(
-        (
-            "所有人兩兩差總和 (bp)",
-            overall.full_time_consecutive_ratio_total_gap_basis_points,
-        )
-    )
-    for row in range(global_last + 1, global_last + 3):
-        for column in range(1, 3):
-            sheet.cell(row, column).border = _BORDER
-            sheet.cell(row, column).alignment = Alignment(vertical="center")
-        sheet.cell(row, 1).font = Font(bold=True)
 
     category_title_row = sheet.max_row + 2
     sheet.cell(category_title_row, 1, "類別統計")
@@ -455,51 +443,6 @@ def _build_group_sheet(
         header_row=category_header_row,
         first_data_row=category_header_row + 1,
         last_row=category_last,
-        last_column=7,
-    )
-
-    quality_title_row = sheet.max_row + 2
-    sheet.cell(quality_title_row, 1, "A／B 類別品質順位比例")
-    sheet.merge_cells(
-        start_row=quality_title_row,
-        start_column=1,
-        end_row=quality_title_row,
-        end_column=7,
-    )
-    _header(sheet.cell(quality_title_row, 1))
-    quality_header_row = quality_title_row + 1
-    quality_headers = (
-        "正職類別",
-        "人員",
-        "總出勤日",
-        "品質順位",
-        "班型日數",
-        "比例 (bp)",
-        "A/B 差距 (bp)",
-    )
-    for column, value in enumerate(quality_headers, start=1):
-        sheet.cell(quality_header_row, column, value)
-    for class_stats in output.full_time_class_quality_statistics:
-        for quality_level, days in class_stats.quality_level_days.items():
-            ratio = class_stats.quality_level_ratio_basis_points[quality_level]
-            sheet.append(
-                (
-                    _full_time_class_label(class_stats.full_time_class),
-                    ", ".join(class_stats.employee_ids),
-                    class_stats.attendance_days,
-                    quality_level,
-                    days,
-                    "N/A" if ratio is None else ratio,
-                    overall.class_quality_ratio_gaps_basis_points[
-                        quality_level
-                    ],
-                )
-            )
-    _style_table(
-        sheet,
-        header_row=quality_header_row,
-        first_data_row=quality_header_row + 1,
-        last_row=sheet.max_row,
         last_column=7,
     )
 
@@ -625,6 +568,77 @@ def _build_solver_sheet(
         tuple(overall.objective_vector.items()),
     )
     row += 1
+    sheet.cell(row, 1, "類別偏好理想值 benchmark")
+    sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=10)
+    _header(sheet.cell(row, 1))
+    row += 1
+    benchmark_header = row
+    benchmark_headers = (
+        "正職類別",
+        "順位",
+        "指標",
+        "方向",
+        "狀態",
+        "理想值",
+        "鎖定實際值",
+        "機會日數",
+        "solver status",
+        "wall time (秒)",
+    )
+    for column, value in enumerate(benchmark_headers, start=1):
+        sheet.cell(row, column, value)
+    for benchmark in output.preference_benchmarks:
+        row += 1
+        values = (
+            benchmark.full_time_class.value,
+            benchmark.rank.value,
+            benchmark.metric.value,
+            benchmark.direction.value,
+            benchmark.status.value,
+            benchmark.ideal_value,
+            benchmark.locked_actual_value,
+            benchmark.opportunity_days,
+            benchmark.raw_solver_status,
+            benchmark.wall_time_seconds,
+        )
+        for column, value in enumerate(values, start=1):
+            sheet.cell(row, column, value)
+    _style_table(
+        sheet,
+        header_row=benchmark_header,
+        first_data_row=benchmark_header + 1,
+        last_row=row,
+        last_column=10,
+    )
+    row += 2
+    sheet.cell(row, 1, "剩餘班型類別鎖")
+    sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=3)
+    _header(sheet.cell(row, 1))
+    row += 1
+    pattern_lock_header = row
+    for column, value in enumerate(
+        ("正職類別", "指標", "鎖定實際值"), start=1
+    ):
+        sheet.cell(row, column, value)
+    for item in output.class_pattern_locks:
+        row += 1
+        for column, value in enumerate(
+            (
+                item.full_time_class.value,
+                item.metric.value,
+                item.locked_value,
+            ),
+            start=1,
+        ):
+            sheet.cell(row, column, value)
+    _style_table(
+        sheet,
+        header_row=pattern_lock_header,
+        first_data_row=pattern_lock_header + 1,
+        last_row=row,
+        last_column=3,
+    )
+    row += 2
     sheet.cell(row, 1, "最佳化階段")
     sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=9)
     _header(sheet.cell(row, 1))

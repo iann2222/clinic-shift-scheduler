@@ -13,6 +13,13 @@ from typing import Mapping
 
 from ortools.sat.python import cp_model
 
+from .class_preferences import (
+    CLASS_PREFERENCES,
+    ClassPreferenceMetric,
+    PreferenceDirection,
+    PreferenceRank,
+    class_opportunity_days,
+)
 from .daily_patterns import PATTERN_PERIODS, DailyPattern
 from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period, ShiftMode
 from .feasibility import (
@@ -52,7 +59,40 @@ class OptimizationStage(StrEnum):
     FULL_TIME_CLASS_QUALITY_RATIO_TOTAL_GAP = (
         "full_time_class_quality_ratio_total_gap"
     )
+    FULL_TIME_PREFERENCE_RANK1_MAX_REGRET = (
+        "full_time_preference_rank1_max_regret"
+    )
+    FULL_TIME_PREFERENCE_RANK1_TOTAL_REGRET = (
+        "full_time_preference_rank1_total_regret"
+    )
+    FULL_TIME_PREFERENCE_RANK2_MAX_REGRET = (
+        "full_time_preference_rank2_max_regret"
+    )
+    FULL_TIME_PREFERENCE_RANK2_TOTAL_REGRET = (
+        "full_time_preference_rank2_total_regret"
+    )
+    FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP = (
+        "full_time_preference_rank1_person_ratio_max_gap"
+    )
+    FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_TOTAL_GAP = (
+        "full_time_preference_rank1_person_ratio_total_gap"
+    )
+    FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP = (
+        "full_time_preference_rank2_person_ratio_max_gap"
+    )
+    FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_TOTAL_GAP = (
+        "full_time_preference_rank2_person_ratio_total_gap"
+    )
+    FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP = (
+        "full_time_remaining_pattern_ratio_max_gap"
+    )
+    FULL_TIME_REMAINING_PATTERN_RATIO_TOTAL_GAP = (
+        "full_time_remaining_pattern_ratio_total_gap"
+    )
     FULL_TIME_PATTERN_RATIO_MAX_GAP = "full_time_pattern_ratio_max_gap"
+    FULL_TIME_FIRST_PREFERENCE_RATIO_TOTAL_GAP = (
+        "full_time_first_preference_ratio_total_gap"
+    )
     FULL_TIME_PATTERN_RATIO_TOTAL_GAP = "full_time_pattern_ratio_total_gap"
     FULL_TIME_PATTERN_INTEGER_FAIRNESS = "full_time_pattern_integer_fairness"
     PART_TIME_GROUP_FAIRNESS = "part_time_group_fairness"
@@ -133,6 +173,27 @@ class OptimizationStageResult:
 
 
 @dataclass(frozen=True, slots=True)
+class PreferenceBenchmarkResult:
+    full_time_class: FullTimeClass
+    rank: PreferenceRank
+    metric: ClassPreferenceMetric
+    direction: PreferenceDirection
+    status: OptimizationStageStatus
+    ideal_value: int | None
+    locked_actual_value: int | None
+    opportunity_days: int
+    raw_solver_status: str
+    wall_time_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
+class ClassPatternLockResult:
+    full_time_class: FullTimeClass
+    metric: FairnessMetric
+    locked_value: int
+
+
+@dataclass(frozen=True, slots=True)
 class OptimizationModel:
     feasibility: FeasibilityModel
     target_differences: Mapping[str, cp_model.IntVar]
@@ -145,6 +206,19 @@ class OptimizationModel:
     consecutive_double_objective: cp_model.LinearExpr | int
     single_shift_objective: cp_model.LinearExpr | int
     secondary_pattern_objective: cp_model.LinearExpr | int
+    class_preference_values: Mapping[
+        tuple[FullTimeClass, PreferenceRank], cp_model.IntVar
+    ]
+    class_remaining_pattern_values: Mapping[FullTimeClass, cp_model.IntVar]
+    class_preference_regret_basis_points: Mapping[
+        tuple[FullTimeClass, PreferenceRank], cp_model.IntVar
+    ]
+    class_preference_max_regret_variables: Mapping[
+        PreferenceRank, cp_model.IntVar
+    ]
+    class_preference_total_regret_objectives: Mapping[
+        PreferenceRank, cp_model.LinearExpr | int
+    ]
     employee_fairness_metrics: Mapping[
         tuple[str, FairnessMetric], cp_model.IntVar
     ]
@@ -174,6 +248,16 @@ class OptimizationModel:
     ]
     ratio_fairness_max_gap_variable: cp_model.IntVar | None
     ratio_fairness_total_objective: cp_model.LinearExpr | int
+    preference_ratio_gap_variables: Mapping[
+        OptimizationStage,
+        Mapping[tuple[str, FairnessMetric], cp_model.IntVar],
+    ]
+    preference_ratio_max_gap_variables: Mapping[
+        OptimizationStage, cp_model.IntVar | None
+    ]
+    preference_ratio_total_objectives: Mapping[
+        OptimizationStage, cp_model.LinearExpr | int
+    ]
     fairness_gap_variables: Mapping[
         OptimizationStage,
         Mapping[tuple[str, FairnessMetric], cp_model.IntVar],
@@ -210,6 +294,8 @@ class LexicographicResult:
     target_deviations: Mapping[str, int]
     part_time_total: int | None
     stages: tuple[OptimizationStageResult, ...]
+    preference_benchmarks: tuple[PreferenceBenchmarkResult, ...]
+    class_pattern_locks: tuple[ClassPatternLockResult, ...]
     precheck: PrecheckResult
     implemented_objective_prefix_optimal: bool
 
@@ -624,6 +710,75 @@ def build_optimization_model(
         ),
     }
 
+    preference_metric_map = {
+        ClassPreferenceMetric.CONSECUTIVE_DOUBLES: (
+            FairnessMetric.CONSECUTIVE_DOUBLES
+        ),
+        ClassPreferenceMetric.SINGLE_SHIFT_DAYS: (
+            FairnessMetric.SINGLE_SHIFT_DAYS
+        ),
+        ClassPreferenceMetric.MORNING_EVENING_DAYS: (
+            FairnessMetric.MORNING_EVENING_DAYS
+        ),
+    }
+    class_preference_values: dict[
+        tuple[FullTimeClass, PreferenceRank], cp_model.IntVar
+    ] = {}
+    for definition in CLASS_PREFERENCES:
+        members = tuple(
+            employee
+            for employee in data.source.employees
+            if employee.full_time_class is definition.full_time_class
+        )
+        value = model.new_int_var(
+            0,
+            len(members) * len(data.dates),
+            (
+                "class_preference_value"
+                f"[{definition.full_time_class.value},{definition.rank.value}]"
+            ),
+        )
+        model.add(
+            value
+            == sum(
+                employee_metrics[
+                    (
+                        employee.employee_id,
+                        preference_metric_map[definition.metric],
+                    )
+                ]
+                for employee in members
+            )
+        )
+        class_preference_values[
+            (definition.full_time_class, definition.rank)
+        ] = value
+
+    remaining_pattern_metrics = {
+        FullTimeClass.A: FairnessMetric.SINGLE_SHIFT_DAYS,
+        FullTimeClass.B: FairnessMetric.TRIPLE_DAYS,
+    }
+    class_remaining_pattern_values: dict[FullTimeClass, cp_model.IntVar] = {}
+    for full_time_class, metric in remaining_pattern_metrics.items():
+        members = tuple(
+            employee
+            for employee in data.source.employees
+            if employee.full_time_class is full_time_class
+        )
+        value = model.new_int_var(
+            0,
+            len(members) * len(data.dates),
+            f"class_remaining_pattern_value[{full_time_class.value}]",
+        )
+        model.add(
+            value
+            == sum(
+                employee_metrics[(employee.employee_id, metric)]
+                for employee in members
+            )
+        )
+        class_remaining_pattern_values[full_time_class] = value
+
     class_quality = (
         _build_class_quality_model(data, model, employee_metrics)
         if include_class_quality
@@ -797,6 +952,34 @@ def build_optimization_model(
                 global_consecutive_pairwise_gaps[(left_id, right_id)] = pair_gap
 
     ratio_gaps: dict[tuple[str, FairnessMetric], cp_model.IntVar] = {}
+    preference_ratio_gaps: dict[
+        OptimizationStage,
+        dict[tuple[str, FairnessMetric], cp_model.IntVar],
+    ] = {
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP: {},
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP: {},
+        OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP: {},
+    }
+    preference_ratio_stage = {
+        (FullTimeClass.A, FairnessMetric.CONSECUTIVE_DOUBLES): (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
+        ),
+        (FullTimeClass.B, FairnessMetric.SINGLE_SHIFT_DAYS): (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
+        ),
+        (FullTimeClass.A, FairnessMetric.MORNING_EVENING_DAYS): (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP
+        ),
+        (FullTimeClass.B, FairnessMetric.CONSECUTIVE_DOUBLES): (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP
+        ),
+        (FullTimeClass.A, FairnessMetric.SINGLE_SHIFT_DAYS): (
+            OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP
+        ),
+        (FullTimeClass.B, FairnessMetric.TRIPLE_DAYS): (
+            OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP
+        ),
+    }
     for full_time_class, metrics in full_time_classes.items():
         groups: dict[str, list[Employee]] = defaultdict(list)
         for employee in data.source.employees:
@@ -854,12 +1037,33 @@ def build_optimization_model(
                 )
                 model.add(gap == 0).only_enforce_if(any_active.Not())
                 ratio_gaps[(group, metric)] = gap
+                preference_ratio_gaps[
+                    preference_ratio_stage[(full_time_class, metric)]
+                ][(group, metric)] = gap
     ratio_max_gap: cp_model.IntVar | None = None
     if ratio_gaps:
         ratio_max_gap = model.new_int_var(
             0, BASIS_POINTS_SCALE, "full_time_pattern_ratio_max_gap"
         )
         model.add_max_equality(ratio_max_gap, list(ratio_gaps.values()))
+
+    preference_ratio_max_gaps: dict[
+        OptimizationStage, cp_model.IntVar | None
+    ] = {}
+    preference_ratio_totals: dict[
+        OptimizationStage, cp_model.LinearExpr | int
+    ] = {}
+    for stage, gaps in preference_ratio_gaps.items():
+        maximum: cp_model.IntVar | None = None
+        if gaps:
+            maximum = model.new_int_var(
+                0,
+                BASIS_POINTS_SCALE,
+                f"{stage.value}_value",
+            )
+            model.add_max_equality(maximum, list(gaps.values()))
+        preference_ratio_max_gaps[stage] = maximum
+        preference_ratio_totals[stage] = sum(gaps.values())
 
     stage_members_and_metrics = {
         OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS: (
@@ -948,6 +1152,13 @@ def build_optimization_model(
         consecutive_double_objective=sum(consecutive_variables.values()),
         single_shift_objective=sum(single_variables.values()),
         secondary_pattern_objective=sum(secondary_variables.values()),
+        class_preference_values=MappingProxyType(class_preference_values),
+        class_remaining_pattern_values=MappingProxyType(
+            class_remaining_pattern_values
+        ),
+        class_preference_regret_basis_points=MappingProxyType({}),
+        class_preference_max_regret_variables=MappingProxyType({}),
+        class_preference_total_regret_objectives=MappingProxyType({}),
         employee_fairness_metrics=MappingProxyType(employee_metrics),
         employee_pattern_ratio_basis_points=MappingProxyType(employee_ratios),
         employee_attendance_active=MappingProxyType(employee_attendance_active),
@@ -967,6 +1178,18 @@ def build_optimization_model(
         ratio_fairness_gap_variables=MappingProxyType(ratio_gaps),
         ratio_fairness_max_gap_variable=ratio_max_gap,
         ratio_fairness_total_objective=sum(ratio_gaps.values()),
+        preference_ratio_gap_variables=MappingProxyType(
+            {
+                stage: MappingProxyType(gaps)
+                for stage, gaps in preference_ratio_gaps.items()
+            }
+        ),
+        preference_ratio_max_gap_variables=MappingProxyType(
+            preference_ratio_max_gaps
+        ),
+        preference_ratio_total_objectives=MappingProxyType(
+            preference_ratio_totals
+        ),
         fairness_gap_variables=MappingProxyType(fairness_gaps),
         fairness_objectives=MappingProxyType(fairness_objectives),
     )
@@ -992,6 +1215,79 @@ def _attach_class_quality_model(
     )
 
 
+def _attach_preference_regret_model(
+    data: NormalizedScheduleInput,
+    built: OptimizationModel,
+    benchmarks: tuple[PreferenceBenchmarkResult, ...],
+    rank: PreferenceRank,
+) -> OptimizationModel:
+    model = built.feasibility.model
+    regret_basis_points = dict(built.class_preference_regret_basis_points)
+    max_regrets = dict(built.class_preference_max_regret_variables)
+    total_regrets = dict(built.class_preference_total_regret_objectives)
+    active_regrets: list[cp_model.IntVar] = []
+    for definition in CLASS_PREFERENCES:
+        if definition.rank is not rank:
+            continue
+        benchmark = next(
+            item
+            for item in benchmarks
+            if item.full_time_class is definition.full_time_class
+            and item.rank is rank
+        )
+        if benchmark.opportunity_days == 0:
+            continue
+        assert benchmark.ideal_value is not None
+        actual = built.class_preference_values[
+            (definition.full_time_class, rank)
+        ]
+        regret_days = model.new_int_var(
+            0,
+            benchmark.opportunity_days,
+            (
+                "class_preference_regret_days"
+                f"[{definition.full_time_class.value},{rank.value}]"
+            ),
+        )
+        if definition.direction is PreferenceDirection.MAXIMIZE:
+            model.add(regret_days == benchmark.ideal_value - actual)
+        else:
+            model.add(regret_days == actual - benchmark.ideal_value)
+        lookup = [
+            ratio_basis_points(value, benchmark.opportunity_days) or 0
+            for value in range(benchmark.opportunity_days + 1)
+        ]
+        regret_bp = model.new_int_var(
+            0,
+            BASIS_POINTS_SCALE,
+            (
+                "class_preference_regret_bp"
+                f"[{definition.full_time_class.value},{rank.value}]"
+            ),
+        )
+        model.add_element(regret_days, lookup, regret_bp)
+        regret_basis_points[(definition.full_time_class, rank)] = regret_bp
+        active_regrets.append(regret_bp)
+
+    if active_regrets:
+        maximum = model.new_int_var(
+            0,
+            BASIS_POINTS_SCALE,
+            f"class_preference_max_regret[{rank.value}]",
+        )
+        model.add_max_equality(maximum, active_regrets)
+        max_regrets[rank] = maximum
+        total_regrets[rank] = sum(active_regrets)
+    return replace(
+        built,
+        class_preference_regret_basis_points=MappingProxyType(
+            regret_basis_points
+        ),
+        class_preference_max_regret_variables=MappingProxyType(max_regrets),
+        class_preference_total_regret_objectives=MappingProxyType(
+            total_regrets
+        ),
+    )
 def build_phase_four_model(data: NormalizedScheduleInput) -> OptimizationModel:
     """Compatibility alias for the former public builder name."""
 
@@ -1273,6 +1569,158 @@ def _objective_specs(
     )
 
 
+def _formal_objective_specs(
+    data: NormalizedScheduleInput,
+    built: OptimizationModel,
+    precheck: PrecheckResult,
+) -> tuple[_ObjectiveSpec, ...]:
+    """Return the revised class-specific formal objective sequence."""
+
+    target_constant, target_proof = _target_constant(data, precheck)
+    part_time_constant, part_time_proof = _part_time_constant(data, precheck)
+    part_time_variables = tuple(
+        built.feasibility.employee_shift_counts[employee.employee_id]
+        for employee in data.source.employees
+        if employee.employment_type is EmploymentType.PART_TIME
+    )
+    specs: list[_ObjectiveSpec] = [
+        _ObjectiveSpec(
+            stage=OptimizationStage.FULL_TIME_TARGET_DEVIATION,
+            direction=ObjectiveDirection.MINIMIZE,
+            variables=tuple(built.target_deviations.values()),
+            expression=built.target_objective,
+            constant_value=target_constant,
+            constant_proof=target_proof,
+        ),
+        _ObjectiveSpec(
+            stage=OptimizationStage.PART_TIME_USAGE,
+            direction=ObjectiveDirection.MINIMIZE,
+            variables=part_time_variables,
+            expression=built.part_time_objective,
+            constant_value=part_time_constant,
+            constant_proof=part_time_proof,
+        ),
+    ]
+
+    regret_stages = {
+        PreferenceRank.FIRST: (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_MAX_REGRET,
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_TOTAL_REGRET,
+        ),
+        PreferenceRank.SECOND: (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_MAX_REGRET,
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_TOTAL_REGRET,
+        ),
+    }
+    for rank in PreferenceRank:
+        maximum_stage, total_stage = regret_stages[rank]
+        maximum = built.class_preference_max_regret_variables.get(rank)
+        regrets = tuple(
+            value
+            for (full_time_class, item_rank), value in (
+                built.class_preference_regret_basis_points.items()
+            )
+            if item_rank is rank
+        )
+        constant = None if maximum is not None else 0
+        proof = (
+            None
+            if maximum is not None
+            else ConstantProof.NO_COMPARABLE_FULL_TIME_CLASSES
+        )
+        specs.extend(
+            (
+                _ObjectiveSpec(
+                    stage=maximum_stage,
+                    direction=ObjectiveDirection.MINIMIZE,
+                    variables=(maximum,) if maximum is not None else (),
+                    expression=maximum if maximum is not None else 0,
+                    constant_value=constant,
+                    constant_proof=proof,
+                ),
+                _ObjectiveSpec(
+                    stage=total_stage,
+                    direction=ObjectiveDirection.MINIMIZE,
+                    variables=regrets,
+                    expression=built.class_preference_total_regret_objectives.get(
+                        rank, 0
+                    ),
+                    constant_value=constant,
+                    constant_proof=proof,
+                ),
+            )
+        )
+
+    all_ratio_gaps = built.ratio_fairness_gap_variables
+    first_preference_gaps = built.preference_ratio_gap_variables[
+        OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
+    ]
+    ratio_constant = None if all_ratio_gaps else 0
+    ratio_proof = (
+        None
+        if all_ratio_gaps
+        else ConstantProof.NO_COMPARABLE_FAIRNESS_GROUPS
+    )
+    specs.extend(
+        (
+            _ObjectiveSpec(
+                stage=OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP,
+                direction=ObjectiveDirection.MINIMIZE,
+                variables=(built.ratio_fairness_max_gap_variable,)
+                if built.ratio_fairness_max_gap_variable is not None
+                else (),
+                expression=(
+                    built.ratio_fairness_max_gap_variable
+                    if built.ratio_fairness_max_gap_variable is not None
+                    else 0
+                ),
+                constant_value=ratio_constant,
+                constant_proof=ratio_proof,
+            ),
+            _ObjectiveSpec(
+                stage=(
+                    OptimizationStage.FULL_TIME_FIRST_PREFERENCE_RATIO_TOTAL_GAP
+                ),
+                direction=ObjectiveDirection.MINIMIZE,
+                variables=tuple(first_preference_gaps.values()),
+                expression=sum(first_preference_gaps.values()),
+                constant_value=ratio_constant,
+                constant_proof=ratio_proof,
+            ),
+            _ObjectiveSpec(
+                stage=OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP,
+                direction=ObjectiveDirection.MINIMIZE,
+                variables=tuple(all_ratio_gaps.values()),
+                expression=built.ratio_fairness_total_objective,
+                constant_value=ratio_constant,
+                constant_proof=ratio_proof,
+            ),
+        )
+    )
+
+    for stage in (
+        OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS,
+        OptimizationStage.PART_TIME_GROUP_FAIRNESS,
+        OptimizationStage.COMMON_GROUP_FAIRNESS,
+    ):
+        gaps = built.fairness_gap_variables[stage]
+        specs.append(
+            _ObjectiveSpec(
+                stage=stage,
+                direction=ObjectiveDirection.MINIMIZE,
+                variables=tuple(gaps.values()),
+                expression=built.fairness_objectives[stage],
+                constant_value=None if gaps else 0,
+                constant_proof=(
+                    None
+                    if gaps
+                    else ConstantProof.NO_COMPARABLE_FAIRNESS_GROUPS
+                ),
+            )
+        )
+    return tuple(specs)
+
+
 def _solve_once(
     model: cp_model.CpModel,
     config: LexicographicSolverConfig,
@@ -1339,6 +1787,8 @@ def _empty_result(
         target_deviations=MappingProxyType({}),
         part_time_total=None,
         stages=stages,
+        preference_benchmarks=(),
+        class_pattern_locks=(),
         precheck=precheck,
         implemented_objective_prefix_optimal=False,
     )
@@ -1350,6 +1800,8 @@ def _result_from_snapshot(
     stages: list[OptimizationStageResult],
     precheck: PrecheckResult,
     *,
+    preference_benchmarks: tuple[PreferenceBenchmarkResult, ...] = (),
+    class_pattern_locks: tuple[ClassPatternLockResult, ...] = (),
     implemented_objective_prefix_optimal: bool = False,
 ) -> LexicographicResult:
     return LexicographicResult(
@@ -1360,12 +1812,88 @@ def _result_from_snapshot(
         target_deviations=snapshot.target_deviations,
         part_time_total=snapshot.part_time_total,
         stages=tuple(stages),
+        preference_benchmarks=preference_benchmarks,
+        class_pattern_locks=class_pattern_locks,
         precheck=precheck,
         implemented_objective_prefix_optimal=implemented_objective_prefix_optimal,
     )
 
 
-def solve_lexicographic(
+def _discover_preference_benchmarks(
+    data: NormalizedScheduleInput,
+    built: OptimizationModel,
+    rank: PreferenceRank,
+    config: LexicographicSolverConfig,
+) -> tuple[tuple[PreferenceBenchmarkResult, ...], _SolverRun | None]:
+    """Prove independent per-class ideals without locking either class first."""
+
+    results: list[PreferenceBenchmarkResult] = []
+    last_run: _SolverRun | None = None
+    for definition in CLASS_PREFERENCES:
+        if definition.rank is not rank:
+            continue
+        opportunity_days = class_opportunity_days(
+            data, definition.full_time_class
+        )
+        if opportunity_days == 0:
+            results.append(
+                PreferenceBenchmarkResult(
+                    full_time_class=definition.full_time_class,
+                    rank=rank,
+                    metric=definition.metric,
+                    direction=definition.direction,
+                    status=OptimizationStageStatus.SKIPPED_CONSTANT,
+                    ideal_value=0,
+                    locked_actual_value=None,
+                    opportunity_days=0,
+                    raw_solver_status="NOT_RUN",
+                    wall_time_seconds=0.0,
+                )
+            )
+            continue
+        expression = built.class_preference_values[
+            (definition.full_time_class, rank)
+        ]
+        if definition.direction is PreferenceDirection.MAXIMIZE:
+            built.feasibility.model.maximize(expression)
+        else:
+            built.feasibility.model.minimize(expression)
+        run = _solve_once(built.feasibility.model, config)
+        last_run = run
+        status = (
+            OptimizationStageStatus.OPTIMAL
+            if run.raw_status == cp_model.OPTIMAL
+            else OptimizationStageStatus.FEASIBLE
+            if run.raw_status == cp_model.FEASIBLE
+            else OptimizationStageStatus.INFEASIBLE
+            if run.raw_status == cp_model.INFEASIBLE
+            else OptimizationStageStatus.UNKNOWN
+        )
+        ideal_value = (
+            run.solver.value(expression)
+            if run.raw_status in (cp_model.OPTIMAL, cp_model.FEASIBLE)
+            else None
+        )
+        results.append(
+            PreferenceBenchmarkResult(
+                full_time_class=definition.full_time_class,
+                rank=rank,
+                metric=definition.metric,
+                direction=definition.direction,
+                status=status,
+                ideal_value=ideal_value,
+                locked_actual_value=None,
+                opportunity_days=opportunity_days,
+                raw_solver_status=run.raw_status_name,
+                wall_time_seconds=run.wall_time_seconds,
+            )
+        )
+        if status is not OptimizationStageStatus.OPTIMAL:
+            break
+    return tuple(results), last_run
+
+
+def _solve_lexicographic_legacy(
     data: NormalizedScheduleInput,
     config: LexicographicSolverConfig | None = None,
 ) -> LexicographicResult:
@@ -1544,5 +2072,262 @@ def solve_lexicographic(
         snapshot,
         stages,
         precheck,
+        implemented_objective_prefix_optimal=True,
+    )
+
+
+def solve_lexicographic(
+    data: NormalizedScheduleInput,
+    config: LexicographicSolverConfig | None = None,
+) -> LexicographicResult:
+    """Solve revised class-specific preferences with fair normalized regrets."""
+
+    config = config or LexicographicSolverConfig()
+    precheck = run_prechecks(data)
+    if precheck.status is PrecheckStatus.PRECHECK_INFEASIBLE:
+        return _empty_result(FeasibilityStatus.PRECHECK_INFEASIBLE, precheck)
+
+    built = build_optimization_model(data, include_class_quality=False)
+    stages: list[OptimizationStageResult] = []
+    benchmarks: list[PreferenceBenchmarkResult] = []
+    class_pattern_locks: list[ClassPatternLockResult] = []
+    hard_run = _solve_once(built.feasibility.model, config)
+    if hard_run.raw_status == cp_model.INFEASIBLE:
+        stages.append(
+            OptimizationStageResult(
+                stage=OptimizationStage.HARD_FEASIBILITY,
+                direction=ObjectiveDirection.NONE,
+                status=OptimizationStageStatus.INFEASIBLE,
+                objective_value=None,
+                raw_solver_status=hard_run.raw_status_name,
+                wall_time_seconds=hard_run.wall_time_seconds,
+                locked=False,
+            )
+        )
+        return _empty_result(
+            FeasibilityStatus.INFEASIBLE, precheck, tuple(stages)
+        )
+    if hard_run.raw_status not in (cp_model.FEASIBLE, cp_model.OPTIMAL):
+        stages.append(
+            OptimizationStageResult(
+                stage=OptimizationStage.HARD_FEASIBILITY,
+                direction=ObjectiveDirection.NONE,
+                status=OptimizationStageStatus.UNKNOWN,
+                objective_value=None,
+                raw_solver_status=hard_run.raw_status_name,
+                wall_time_seconds=hard_run.wall_time_seconds,
+                locked=False,
+            )
+        )
+        return _empty_result(
+            FeasibilityStatus.UNKNOWN, precheck, tuple(stages)
+        )
+
+    stages.append(
+        OptimizationStageResult(
+            stage=OptimizationStage.HARD_FEASIBILITY,
+            direction=ObjectiveDirection.NONE,
+            status=OptimizationStageStatus.FEASIBLE,
+            objective_value=None,
+            raw_solver_status=hard_run.raw_status_name,
+            wall_time_seconds=hard_run.wall_time_seconds,
+            locked=False,
+        )
+    )
+    snapshot = _snapshot(data, built, hard_run.solver)
+    last_solver: cp_model.CpSolver | None = hard_run.solver
+
+    def execute_specs(
+        specs: tuple[_ObjectiveSpec, ...] | list[_ObjectiveSpec],
+    ) -> LexicographicResult | None:
+        nonlocal last_solver, snapshot
+        for objective in specs:
+            if objective.constant_value is not None:
+                stages.append(
+                    OptimizationStageResult(
+                        stage=objective.stage,
+                        direction=objective.direction,
+                        status=OptimizationStageStatus.SKIPPED_CONSTANT,
+                        objective_value=objective.constant_value,
+                        raw_solver_status="NOT_RUN",
+                        wall_time_seconds=0.0,
+                        locked=False,
+                        constant_proof=objective.constant_proof,
+                    )
+                )
+                continue
+            if objective.direction is ObjectiveDirection.MAXIMIZE:
+                built.feasibility.model.maximize(objective.expression)
+            else:
+                built.feasibility.model.minimize(objective.expression)
+            run = _solve_once(built.feasibility.model, config)
+            if run.raw_status == cp_model.OPTIMAL:
+                objective_value = int(run.solver.value(objective.expression))
+                built.feasibility.model.add(
+                    objective.expression == objective_value
+                )
+                stages.append(
+                    OptimizationStageResult(
+                        stage=objective.stage,
+                        direction=objective.direction,
+                        status=OptimizationStageStatus.OPTIMAL,
+                        objective_value=objective_value,
+                        raw_solver_status=run.raw_status_name,
+                        wall_time_seconds=run.wall_time_seconds,
+                        locked=True,
+                    )
+                )
+                snapshot = _snapshot(data, built, run.solver)
+                last_solver = run.solver
+                continue
+            if run.raw_status == cp_model.FEASIBLE:
+                objective_value = int(run.solver.value(objective.expression))
+                stages.append(
+                    OptimizationStageResult(
+                        stage=objective.stage,
+                        direction=objective.direction,
+                        status=OptimizationStageStatus.FEASIBLE,
+                        objective_value=objective_value,
+                        raw_solver_status=run.raw_status_name,
+                        wall_time_seconds=run.wall_time_seconds,
+                        locked=False,
+                    )
+                )
+                snapshot = _snapshot(data, built, run.solver)
+                last_solver = run.solver
+            else:
+                stages.append(
+                    OptimizationStageResult(
+                        stage=objective.stage,
+                        direction=objective.direction,
+                        status=(
+                            OptimizationStageStatus.INFEASIBLE
+                            if run.raw_status == cp_model.INFEASIBLE
+                            else OptimizationStageStatus.UNKNOWN
+                        ),
+                        objective_value=None,
+                        raw_solver_status=run.raw_status_name,
+                        wall_time_seconds=run.wall_time_seconds,
+                        locked=False,
+                    )
+                )
+            return _result_from_snapshot(
+                FeasibilityStatus.FEASIBLE,
+                snapshot,
+                stages,
+                precheck,
+                preference_benchmarks=tuple(benchmarks),
+                class_pattern_locks=tuple(class_pattern_locks),
+            )
+        return None
+
+    base_specs = _formal_objective_specs(data, built, precheck)[:2]
+    incomplete = execute_specs(base_specs)
+    if incomplete is not None:
+        return incomplete
+
+    rank_stage_pairs = {
+        PreferenceRank.FIRST: (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_MAX_REGRET,
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_TOTAL_REGRET,
+        ),
+        PreferenceRank.SECOND: (
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_MAX_REGRET,
+            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_TOTAL_REGRET,
+        ),
+    }
+    for rank in PreferenceRank:
+        discovered, last_run = _discover_preference_benchmarks(
+            data, built, rank, config
+        )
+        benchmarks.extend(discovered)
+        if any(
+            item.status
+            not in (
+                OptimizationStageStatus.OPTIMAL,
+                OptimizationStageStatus.SKIPPED_CONSTANT,
+            )
+            for item in discovered
+        ):
+            if last_run is not None and last_run.raw_status in (
+                cp_model.FEASIBLE,
+                cp_model.OPTIMAL,
+            ):
+                snapshot = _snapshot(data, built, last_run.solver)
+            return _result_from_snapshot(
+                FeasibilityStatus.FEASIBLE,
+                snapshot,
+                stages,
+                precheck,
+                preference_benchmarks=tuple(benchmarks),
+                class_pattern_locks=tuple(class_pattern_locks),
+            )
+        built = _attach_preference_regret_model(
+            data, built, tuple(benchmarks), rank
+        )
+        wanted = set(rank_stage_pairs[rank])
+        rank_specs = tuple(
+            item
+            for item in _formal_objective_specs(data, built, precheck)
+            if item.stage in wanted
+        )
+        incomplete = execute_specs(rank_specs)
+        if incomplete is not None:
+            return incomplete
+        assert last_solver is not None
+        for definition in CLASS_PREFERENCES:
+            if definition.rank is not rank:
+                continue
+            key = (definition.full_time_class, rank)
+            locked_actual = int(
+                last_solver.value(built.class_preference_values[key])
+            )
+            built.feasibility.model.add(
+                built.class_preference_values[key] == locked_actual
+            )
+            for index, benchmark in enumerate(benchmarks):
+                if (
+                    benchmark.full_time_class is definition.full_time_class
+                    and benchmark.rank is rank
+                ):
+                    benchmarks[index] = replace(
+                        benchmark,
+                        locked_actual_value=locked_actual,
+                    )
+                    break
+        if rank is PreferenceRank.SECOND:
+            for full_time_class, metric in (
+                (FullTimeClass.A, FairnessMetric.SINGLE_SHIFT_DAYS),
+                (FullTimeClass.B, FairnessMetric.TRIPLE_DAYS),
+            ):
+                variable = built.class_remaining_pattern_values[
+                    full_time_class
+                ]
+                locked_value = int(last_solver.value(variable))
+                built.feasibility.model.add(variable == locked_value)
+                class_pattern_locks.append(
+                    ClassPatternLockResult(
+                        full_time_class=full_time_class,
+                        metric=metric,
+                        locked_value=locked_value,
+                    )
+                )
+
+    completed = {item.stage for item in stages}
+    remaining_specs = tuple(
+        item
+        for item in _formal_objective_specs(data, built, precheck)
+        if item.stage not in completed
+    )
+    incomplete = execute_specs(remaining_specs)
+    if incomplete is not None:
+        return incomplete
+    return _result_from_snapshot(
+        FeasibilityStatus.FEASIBLE,
+        snapshot,
+        stages,
+        precheck,
+        preference_benchmarks=tuple(benchmarks),
+        class_pattern_locks=tuple(class_pattern_locks),
         implemented_objective_prefix_optimal=True,
     )

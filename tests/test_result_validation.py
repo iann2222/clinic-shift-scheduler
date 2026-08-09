@@ -32,7 +32,13 @@ class IndependentResultValidationTests(unittest.TestCase):
         cls.result = solve_lexicographic(cls.data)
 
     def validate_assignments(self, assignments: tuple[Assignment, ...]):
-        return validate_schedule_result(self.data, assignments, self.result.stages)
+        return validate_schedule_result(
+            self.data,
+            assignments,
+            self.result.stages,
+            self.result.preference_benchmarks,
+            self.result.class_pattern_locks,
+        )
 
     def test_valid_result_is_promoted_only_after_independent_validation(self) -> None:
         output = finalize_schedule_output(self.data, self.result)
@@ -146,6 +152,97 @@ class IndependentResultValidationTests(unittest.TestCase):
         self.assertIn("objective_value_mismatch", issue_codes(output.validation_report))
         self.assertFalse(output.has_formal_schedule)
 
+    def test_tampered_preference_benchmark_is_detected(self) -> None:
+        original = self.result.preference_benchmarks[0]
+        changed_ideal = (
+            (original.ideal_value or 0) - 1
+            if original.direction.value == "MAXIMIZE"
+            else (original.ideal_value or 0) + 1
+        )
+        benchmarks = list(self.result.preference_benchmarks)
+        benchmarks[0] = replace(original, ideal_value=changed_ideal)
+        tampered = replace(
+            self.result,
+            preference_benchmarks=tuple(benchmarks),
+        )
+
+        output = finalize_schedule_output(self.data, tampered)
+
+        self.assertEqual(output.status, FeasibilityStatus.VALIDATION_FAILED)
+        self.assertIn(
+            "preference_benchmark_ideal_violated",
+            issue_codes(output.validation_report),
+        )
+
+    def test_tampered_locked_class_actual_is_detected(self) -> None:
+        original = self.result.preference_benchmarks[0]
+        benchmarks = list(self.result.preference_benchmarks)
+        benchmarks[0] = replace(
+            original,
+            locked_actual_value=(original.locked_actual_value or 0) + 1,
+        )
+        tampered = replace(
+            self.result,
+            preference_benchmarks=tuple(benchmarks),
+        )
+
+        output = finalize_schedule_output(self.data, tampered)
+
+        self.assertEqual(output.status, FeasibilityStatus.VALIDATION_FAILED)
+        self.assertIn(
+            "preference_locked_actual_mismatch",
+            issue_codes(output.validation_report),
+        )
+
+    def test_tampered_remaining_pattern_class_lock_is_detected(self) -> None:
+        original = self.result.class_pattern_locks[0]
+        locks = list(self.result.class_pattern_locks)
+        locks[0] = replace(original, locked_value=original.locked_value + 1)
+        tampered = replace(self.result, class_pattern_locks=tuple(locks))
+
+        output = finalize_schedule_output(self.data, tampered)
+
+        self.assertEqual(output.status, FeasibilityStatus.VALIDATION_FAILED)
+        self.assertIn(
+            "class_pattern_lock_value_mismatch",
+            issue_codes(output.validation_report),
+        )
+
+    def test_b_monthly_single_shift_limit_is_independently_validated(self) -> None:
+        days = ("2024-10-01", "2024-10-02")
+        payload = synthetic_schedule_input(
+            start_date=days[0],
+            end_date=days[-1],
+            roles=["assistant"],
+            employees=[
+                {
+                    "employee_id": "B",
+                    "name": "B",
+                    "employment_type": "full_time",
+                    "full_time_class": "B",
+                    "roles": ["assistant"],
+                    "fairness_group": "B_ONLY",
+                    "shift_mode": "EXACT",
+                    "required_shifts": 2,
+                }
+            ],
+            positive_demands={
+                (day, "morning", "assistant"): 1 for day in days
+            },
+        )
+        data = validate_and_normalize(payload)
+        assignments = tuple(
+            Assignment("B", date.fromisoformat(day), Period.MORNING, "assistant")
+            for day in days
+        )
+
+        report = validate_schedule_result(data, assignments, (), ())
+
+        self.assertIn(
+            "b_monthly_single_shift_limit_exceeded",
+            issue_codes(report),
+        )
+
     def test_leave_closed_dates_and_shift_bounds_are_revalidated(self) -> None:
         leave_payload = minimal_valid_input()
         leave_payload["leave_requests"] = [
@@ -153,21 +250,33 @@ class IndependentResultValidationTests(unittest.TestCase):
         ]
         leave_data = validate_and_normalize(leave_payload)
         leave_report = validate_schedule_result(
-            leave_data, self.result.assignments, self.result.stages
+            leave_data,
+            self.result.assignments,
+            self.result.stages,
+            self.result.preference_benchmarks,
+            self.result.class_pattern_locks,
         )
 
         range_payload = minimal_valid_input()
         range_payload["employees"][2]["min_shifts"] = 1
         range_data = validate_and_normalize(range_payload)
         range_report = validate_schedule_result(
-            range_data, self.result.assignments, self.result.stages
+            range_data,
+            self.result.assignments,
+            self.result.stages,
+            self.result.preference_benchmarks,
+            self.result.class_pattern_locks,
         )
 
         target_payload = minimal_valid_input()
         target_payload["employees"][1]["min_shifts"] = 4
         target_data = validate_and_normalize(target_payload)
         target_report = validate_schedule_result(
-            target_data, self.result.assignments, self.result.stages
+            target_data,
+            self.result.assignments,
+            self.result.stages,
+            self.result.preference_benchmarks,
+            self.result.class_pattern_locks,
         )
 
         self.assertIn("assignment_on_unavailable_period", issue_codes(leave_report))

@@ -9,20 +9,26 @@ from enum import Enum, StrEnum
 from types import MappingProxyType
 from typing import Any, Mapping
 
+from .class_preferences import (
+    CLASS_PREFERENCES,
+    PreferenceDirection,
+    PreferenceRank,
+)
 from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period, Weekday
 from .feasibility import Assignment, FeasibilityStatus
 from .models import NormalizedScheduleInput
 from .optimization import (
+    ClassPatternLockResult,
     FairnessMetric,
     LexicographicResult,
     OptimizationStage,
     OptimizationStageResult,
     OptimizationStageStatus,
+    PreferenceBenchmarkResult,
 )
 from .result_metrics import EmployeeResultMetrics, RecomputedScheduleMetrics
 from .ratio_fairness import (
     BASIS_POINTS_SCALE,
-    PatternQualityLevel,
     ratio_basis_points,
 )
 from .result_validation import (
@@ -154,12 +160,18 @@ class CategoryStatistics:
 
 
 @dataclass(frozen=True, slots=True)
-class FullTimeClassQualityStatistics:
+class ClassPreferenceStatistics:
     full_time_class: FullTimeClass
+    rank: PreferenceRank
+    metric: str
+    direction: PreferenceDirection
     employee_ids: tuple[str, ...]
-    attendance_days: int
-    quality_level_days: Mapping[str, int]
-    quality_level_ratio_basis_points: Mapping[str, int | None]
+    actual_value: int
+    locked_actual_value: int | None
+    ideal_value: int
+    regret_days: int
+    opportunity_days: int
+    regret_basis_points: int | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -173,9 +185,6 @@ class OverallStatistics:
     part_time_shifts: int
     role_counts: Mapping[str, int]
     period_counts: Mapping[str, int]
-    full_time_consecutive_ratio_max_gap_basis_points: int
-    full_time_consecutive_ratio_total_gap_basis_points: int
-    class_quality_ratio_gaps_basis_points: Mapping[str, int]
     objective_vector: Mapping[str, int]
     implemented_objective_prefix_optimal: bool
 
@@ -188,12 +197,12 @@ class FormalScheduleOutput:
     monthly_schedule: MonthlyScheduleTable | None
     individual_statistics: tuple[IndividualStatistics, ...]
     category_statistics: tuple[CategoryStatistics, ...]
-    full_time_class_quality_statistics: tuple[
-        FullTimeClassQualityStatistics, ...
-    ]
+    class_preference_statistics: tuple[ClassPreferenceStatistics, ...]
     fairness_group_statistics: tuple[FairnessGroupStatistics, ...]
     overall_statistics: OverallStatistics | None
     optimization_stages: tuple[OptimizationStageResult, ...]
+    preference_benchmarks: tuple[PreferenceBenchmarkResult, ...]
+    class_pattern_locks: tuple[ClassPatternLockResult, ...]
 
     @property
     def has_formal_schedule(self) -> bool:
@@ -519,43 +528,39 @@ def _build_category_statistics(
     )
 
 
-def _build_class_quality_statistics(
+def _build_class_preference_statistics(
     data: NormalizedScheduleInput,
     metrics: RecomputedScheduleMetrics,
-) -> tuple[FullTimeClassQualityStatistics, ...]:
-    result: list[FullTimeClassQualityStatistics] = []
-    for full_time_class in FullTimeClass:
-        employee_ids = tuple(
-            sorted(
-                employee.employee_id
-                for employee in data.source.employees
-                if employee.full_time_class is full_time_class
-            )
-        )
+) -> tuple[ClassPreferenceStatistics, ...]:
+    result: list[ClassPreferenceStatistics] = []
+    for definition in CLASS_PREFERENCES:
+        key = (definition.full_time_class, definition.rank)
         result.append(
-            FullTimeClassQualityStatistics(
-                full_time_class=full_time_class,
-                employee_ids=employee_ids,
-                attendance_days=metrics.class_attendance_days[
-                    full_time_class
-                ],
-                quality_level_days=MappingProxyType(
-                    {
-                        quality_level.value: metrics.class_quality_days[
-                            (full_time_class, quality_level)
-                        ]
-                        for quality_level in PatternQualityLevel
-                    }
+            ClassPreferenceStatistics(
+                full_time_class=definition.full_time_class,
+                rank=definition.rank,
+                metric=definition.metric.value,
+                direction=definition.direction,
+                employee_ids=tuple(
+                    sorted(
+                        employee.employee_id
+                        for employee in data.source.employees
+                        if employee.full_time_class is definition.full_time_class
+                    )
                 ),
-                quality_level_ratio_basis_points=MappingProxyType(
-                    {
-                        quality_level.value: (
-                            metrics.class_quality_ratio_basis_points[
-                                (full_time_class, quality_level)
-                            ]
-                        )
-                        for quality_level in PatternQualityLevel
-                    }
+                actual_value=metrics.class_preference_actual_values[key],
+                locked_actual_value=(
+                    metrics.class_preference_locked_actual_values[key]
+                ),
+                ideal_value=metrics.class_preference_ideal_values[key],
+                regret_days=metrics.class_preference_regret_days[key],
+                opportunity_days=(
+                    metrics.class_preference_opportunity_days[
+                        definition.full_time_class
+                    ]
+                ),
+                regret_basis_points=(
+                    metrics.class_preference_regret_basis_points[key]
                 ),
             )
         )
@@ -604,22 +609,6 @@ def _build_overall_statistics(
         period_counts=MappingProxyType(
             {period.value: assignment_periods[period] for period in PERIODS_V1}
         ),
-        full_time_consecutive_ratio_max_gap_basis_points=(
-            metrics.full_time_consecutive_ratio_max_gap_basis_points
-        ),
-        full_time_consecutive_ratio_total_gap_basis_points=(
-            metrics.full_time_consecutive_ratio_total_gap_basis_points
-        ),
-        class_quality_ratio_gaps_basis_points=MappingProxyType(
-            {
-                quality_level.value: (
-                    metrics.class_quality_ratio_gaps_basis_points[
-                        quality_level
-                    ]
-                )
-                for quality_level in PatternQualityLevel
-            }
-        ),
         objective_vector=MappingProxyType(
             {
                 stage.value: metrics.objective_values[stage]
@@ -646,13 +635,21 @@ def finalize_schedule_output(
             monthly_schedule=None,
             individual_statistics=(),
             category_statistics=(),
-            full_time_class_quality_statistics=(),
+            class_preference_statistics=(),
             fairness_group_statistics=(),
             overall_statistics=None,
             optimization_stages=result.stages,
+            preference_benchmarks=result.preference_benchmarks,
+            class_pattern_locks=result.class_pattern_locks,
         )
 
-    report = validate_schedule_result(data, result.assignments, result.stages)
+    report = validate_schedule_result(
+        data,
+        result.assignments,
+        result.stages,
+        result.preference_benchmarks,
+        result.class_pattern_locks,
+    )
     if not report.is_valid:
         return FormalScheduleOutput(
             status=FeasibilityStatus.VALIDATION_FAILED,
@@ -661,10 +658,12 @@ def finalize_schedule_output(
             monthly_schedule=None,
             individual_statistics=(),
             category_statistics=(),
-            full_time_class_quality_statistics=(),
+            class_preference_statistics=(),
             fairness_group_statistics=(),
             overall_statistics=None,
             optimization_stages=result.stages,
+            preference_benchmarks=result.preference_benchmarks,
+            class_pattern_locks=result.class_pattern_locks,
         )
 
     stage_by_name = {item.stage: item for item in result.stages}
@@ -690,12 +689,14 @@ def finalize_schedule_output(
         monthly_schedule=_build_monthly_table(data, result.assignments),
         individual_statistics=_build_individual_statistics(data, metrics),
         category_statistics=_build_category_statistics(data, metrics),
-        full_time_class_quality_statistics=(
-            _build_class_quality_statistics(data, metrics)
+        class_preference_statistics=(
+            _build_class_preference_statistics(data, metrics)
         ),
         fairness_group_statistics=_build_group_statistics(data, metrics),
         overall_statistics=_build_overall_statistics(data, result, metrics),
         optimization_stages=result.stages,
+        preference_benchmarks=result.preference_benchmarks,
+        class_pattern_locks=result.class_pattern_locks,
     )
 
 

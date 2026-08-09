@@ -5,6 +5,14 @@ from .authoring import (
     expand_weekly_template,
     validate_and_normalize_weekly,
 )
+from .class_preferences import (
+    CLASS_PREFERENCES,
+    ClassPreferenceDefinition,
+    ClassPreferenceMetric,
+    PreferenceDirection,
+    PreferenceRank,
+    class_opportunity_days,
+)
 from .errors import InputValidationError, ValidationIssue
 from .exporters import (
     DEFAULT_OUTPUT_DIRECTORY,
@@ -33,9 +41,9 @@ from .feasibility import (
 from .models import NormalizedScheduleInput, ScheduleInput
 from .output import (
     CategoryStatistics,
+    ClassPreferenceStatistics,
     FairnessGroupStatistics,
     FormalScheduleOutput,
-    FullTimeClassQualityStatistics,
     IndividualStatistics,
     MonthlyScheduleRow,
     MonthlyScheduleTable,
@@ -47,6 +55,7 @@ from .output import (
     to_primitive,
 )
 from .optimization import (
+    ClassPatternLockResult,
     ConstantProof,
     FairnessMetric,
     LexicographicResult,
@@ -56,6 +65,7 @@ from .optimization import (
     OptimizationStageResult,
     OptimizationStageStatus,
     OptimizationModel,
+    PreferenceBenchmarkResult,
     build_optimization_model,
     build_phase_four_model,
     solve_lexicographic,
@@ -83,8 +93,13 @@ from .validation import validate_and_normalize
 
 __all__ = [
     "Assignment",
+    "ClassPatternLockResult",
     "ConstantProof",
     "CategoryStatistics",
+    "ClassPreferenceDefinition",
+    "ClassPreferenceMetric",
+    "ClassPreferenceStatistics",
+    "CLASS_PREFERENCES",
     "DailyPattern",
     "DEFAULT_OUTPUT_DIRECTORY",
     "ExportFileExistsError",
@@ -94,7 +109,6 @@ __all__ = [
     "FairnessMetric",
     "FairnessGroupStatistics",
     "FormalExportError",
-    "FullTimeClassQualityStatistics",
     "InputValidationError",
     "IndividualStatistics",
     "LexicographicResult",
@@ -108,6 +122,9 @@ __all__ = [
     "PatternQualityLevel",
     "OverallStatistics",
     "OptimizationModel",
+    "PreferenceBenchmarkResult",
+    "PreferenceDirection",
+    "PreferenceRank",
     "PrecheckDiagnostic",
     "PrecheckDiagnosticCode",
     "PrecheckResult",
@@ -130,6 +147,7 @@ __all__ = [
     "ValidationIssue",
     "WEEKLY_AUTHORING_VERSION",
     "build_feasibility_model",
+    "class_opportunity_days",
     "build_optimization_model",
     "build_output_paths",
     "build_phase_four_model",

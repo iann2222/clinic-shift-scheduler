@@ -14,7 +14,11 @@ from clinic_shift_scheduler import (
 )
 from clinic_shift_scheduler.feasibility import PATTERN_PERIODS
 
-from tests.fixtures import clone_fixture, single_employee_pattern_input
+from tests.fixtures import (
+    clone_fixture,
+    single_employee_pattern_input,
+    synthetic_schedule_input,
+)
 
 
 NO_PRECHECK = FeasibilitySolverConfig(enable_precheck=False)
@@ -68,6 +72,52 @@ class FeasibilityTests(unittest.TestCase):
                 self.assertEqual(result.status, expected)
                 if result.is_feasible:
                     self.assertEqual(result.daily_patterns[("E001", date(2024, 10, 1))], pattern)
+
+    def test_class_b_has_at_most_one_single_shift_day_per_schedule(self) -> None:
+        days = ("2024-10-01", "2024-10-02")
+        employee = {
+            "employee_id": "B",
+            "name": "B",
+            "employment_type": "full_time",
+            "full_time_class": "B",
+            "roles": ["assistant"],
+            "fairness_group": "B_ONLY",
+            "shift_mode": "EXACT",
+            "required_shifts": 2,
+        }
+        two_singles = synthetic_schedule_input(
+            start_date=days[0],
+            end_date=days[-1],
+            roles=["assistant"],
+            employees=[employee],
+            positive_demands={
+                (day, "morning", "assistant"): 1 for day in days
+            },
+        )
+        self.assertEqual(
+            solve_feasibility(
+                validate_and_normalize(two_singles), NO_PRECHECK
+            ).status,
+            FeasibilityStatus.INFEASIBLE,
+        )
+
+        one_single = synthetic_schedule_input(
+            start_date=days[0],
+            end_date=days[-1],
+            roles=["assistant"],
+            employees=[{**employee, "required_shifts": 3}],
+            positive_demands={
+                (days[0], "morning", "assistant"): 1,
+                (days[0], "afternoon", "assistant"): 1,
+                (days[1], "morning", "assistant"): 1,
+            },
+        )
+        self.assertEqual(
+            solve_feasibility(
+                validate_and_normalize(one_single), NO_PRECHECK
+            ).status,
+            FeasibilityStatus.FEASIBLE,
+        )
 
     def test_part_time_allows_seven_patterns_and_forbids_triple(self) -> None:
         for pattern in DailyPattern:
