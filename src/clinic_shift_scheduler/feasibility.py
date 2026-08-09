@@ -31,6 +31,7 @@ class FeasibilityStatus(StrEnum):
     OPTIMAL = "OPTIMAL"
     INFEASIBLE = "INFEASIBLE"
     UNKNOWN = "UNKNOWN"
+    VALIDATION_FAILED = "VALIDATION_FAILED"
 
 
 @dataclass(frozen=True, slots=True)

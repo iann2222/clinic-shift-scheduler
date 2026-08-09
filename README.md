@@ -1,6 +1,6 @@
 # Clinic Shift Scheduler
 
-本 repository 依據 `診所排班系統.md` 實作診所排班系統。目前完成 v1 資料契約、輸入驗證、正規化、OR-Tools CP-SAT 硬性可行性模型、保守前置可行性檢查，以及 TARGET 偏差、兼職用量、A+B 班型品質與群組公平性的完整嚴格字典序目標；尚未加入獨立結果驗證器或正式班表輸出。
+本 repository 依據 `診所排班系統.md` 實作診所排班系統。目前完成 v1 資料契約、輸入驗證、正規化、OR-Tools CP-SAT 硬性可行性模型、保守前置可行性檢查、完整嚴格字典序目標、獨立結果驗證器，以及媒介無關的正式班表與統計輸出模型。Excel、JSON 檔案等最終輸出 adapter 尚未決定。
 
 ## 專案結構
 
@@ -13,13 +13,17 @@
 - `src/clinic_shift_scheduler/feasibility.py`：無目標函數的 CP-SAT 硬性可行性模型。
 - `src/clinic_shift_scheduler/precheck.py`：總量、個人容量、職務容量及同時段匹配的必要條件檢查。
 - `src/clinic_shift_scheduler/optimization.py`：TARGET 偏差、兼職用量、A+B 班型品質、各群組整數公平性與最佳值鎖定控制器。
+- `src/clinic_shift_scheduler/result_metrics.py`：只從最終 assignments 重算每日模式、統計、公平性 gap 與完整目標向量。
+- `src/clinic_shift_scheduler/result_validation.py`：獨立驗證硬性規則、階段順序及鎖定目標值。
+- `src/clinic_shift_scheduler/output.py`：媒介無關的日期橫向班表、個人／群組／整體統計與正式狀態提升。
 - `tests/`：synthetic fixtures 與單元測試。
 - `排班資料/`：本機實際排班資料；直接放在此層的真名檔案由 Git 忽略，只有 `排班資料/匿名範本/` 會納入版本控制並作為開發與整合驗證資料。
 
 `solve_lexicographic` 會以各階段的 `OPTIMAL`／`SKIPPED_CONSTANT` 及
-`implemented_objective_prefix_optimal` 表示目前所有正式目標均已證明最佳，
-但在獨立結果驗證器完成前，正式整體狀態仍只回傳 `FEASIBLE`，不得宣稱
-完整 v1 `OPTIMAL`。
+`implemented_objective_prefix_optimal` 表示所有正式目標均已證明最佳，
+但求解結果本身仍只回傳 `FEASIBLE`。將結果交給
+`finalize_schedule_output` 後，只有獨立驗證全部通過才會提升為完整 v1
+`OPTIMAL`；驗證失敗則回傳 `VALIDATION_FAILED` 且不建立正式月班表。
 
 ## 使用方式
 

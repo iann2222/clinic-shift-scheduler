@@ -1,7 +1,4 @@
-"""Clinic scheduler data contracts, feasibility, and optimization APIs.
-
-Later optimization objectives and formal output APIs remain future phases.
-"""
+"""Clinic scheduler data, solving, independent validation, and output APIs."""
 
 from .authoring import (
     WEEKLY_AUTHORING_VERSION,
@@ -19,6 +16,20 @@ from .feasibility import (
     solve_feasibility,
 )
 from .models import NormalizedScheduleInput, ScheduleInput
+from .output import (
+    CategoryStatistics,
+    FairnessGroupStatistics,
+    FormalScheduleOutput,
+    IndividualStatistics,
+    MonthlyScheduleRow,
+    MonthlyScheduleTable,
+    OverallStatistics,
+    RatioValue,
+    ScheduleCell,
+    ScheduleCellKind,
+    finalize_schedule_output,
+    to_primitive,
+)
 from .optimization import (
     ConstantProof,
     FairnessMetric,
@@ -40,17 +51,31 @@ from .precheck import (
     PrecheckStatus,
     run_prechecks,
 )
+from .result_metrics import (
+    EmployeeResultMetrics,
+    RecomputedScheduleMetrics,
+    recompute_schedule_metrics,
+)
+from .result_validation import (
+    ResultValidationIssue,
+    ResultValidationStatus,
+    ValidationReport,
+    validate_schedule_result,
+)
 from .validation import validate_and_normalize
 
 __all__ = [
     "Assignment",
     "ConstantProof",
+    "CategoryStatistics",
     "DailyPattern",
     "FeasibilityResult",
     "FeasibilitySolverConfig",
     "FeasibilityStatus",
     "FairnessMetric",
+    "FairnessGroupStatistics",
     "InputValidationError",
+    "IndividualStatistics",
     "LexicographicResult",
     "LexicographicSolverConfig",
     "NormalizedScheduleInput",
@@ -58,21 +83,37 @@ __all__ = [
     "OptimizationStage",
     "OptimizationStageResult",
     "OptimizationStageStatus",
+    "OverallStatistics",
     "OptimizationModel",
     "PrecheckDiagnostic",
     "PrecheckDiagnosticCode",
     "PrecheckResult",
     "PrecheckStatus",
+    "RatioValue",
+    "RecomputedScheduleMetrics",
+    "ResultValidationIssue",
+    "ResultValidationStatus",
+    "ScheduleCell",
+    "ScheduleCellKind",
     "ScheduleInput",
+    "FormalScheduleOutput",
+    "MonthlyScheduleRow",
+    "MonthlyScheduleTable",
+    "EmployeeResultMetrics",
+    "ValidationReport",
     "ValidationIssue",
     "WEEKLY_AUTHORING_VERSION",
     "build_feasibility_model",
     "build_optimization_model",
     "build_phase_four_model",
     "expand_weekly_template",
+    "finalize_schedule_output",
+    "recompute_schedule_metrics",
     "run_prechecks",
     "solve_feasibility",
     "solve_lexicographic",
     "validate_and_normalize",
     "validate_and_normalize_weekly",
+    "validate_schedule_result",
+    "to_primitive",
 ]
