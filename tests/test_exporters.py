@@ -60,11 +60,12 @@ class JsonExporterTests(unittest.TestCase):
             document["contract"],
             {"name": RESULT_CONTRACT_NAME, "version": RESULT_CONTRACT_VERSION},
         )
-        self.assertEqual(RESULT_CONTRACT_VERSION, "1.6")
+        self.assertEqual(RESULT_CONTRACT_VERSION, "1.7")
         self.assertEqual(document["input_schema_version"], "v1")
         self.assertEqual(document["generated_at"], "2024-10-02T03:04:05Z")
         self.assertEqual(document["month"], "2024-10")
         self.assertEqual(document["status"], "OPTIMAL")
+        self.assertIsNone(document["execution_timing"])
         self.assertEqual(document["validation"]["status"], "PASS")
         self.assertNotIn("recomputed", document["validation"])
         self.assertEqual(
@@ -392,7 +393,10 @@ class PdfExporterTests(unittest.TestCase):
             self.assertEqual(len(reader.pages), 1)
             self.assertIn("月班表", text)
             self.assertIn("日期", text)
+            self.assertIn("連續雙班日／出勤日", text)
+            self.assertIn("單節日／出勤日", text)
             self.assertIn(self.output.individual_statistics[0].name, text)
+            self.assertNotIn("個人班型摘要", text)
             self.assertNotIn("Objective vector", text)
             self.assertEqual(list(Path(directory).glob("*.tmp")), [])
 

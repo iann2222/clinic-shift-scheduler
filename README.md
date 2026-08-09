@@ -19,8 +19,11 @@
 - `src/clinic_shift_scheduler/result_validation.py`：獨立驗證硬性規則、階段順序及鎖定目標值。
 - `src/clinic_shift_scheduler/output.py`：媒介無關的日期橫向班表、個人／群組／整體統計與正式狀態提升。
 - `src/clinic_shift_scheduler/exporters/`：版本化 JSON、Excel 等檔案媒介 adapter 與安全輸出路徑管理；不得放入排班或統計邏輯。
+- `src/clinic_shift_scheduler/runner.py`：串接一次完整排班、正式輸出及端到端計時。
+- `src/clinic_shift_scheduler/__main__.py`：`python -m clinic_shift_scheduler` 的正式命令列入口。
 - `tests/`：synthetic fixtures 與單元測試。
-- `排班資料/`：本機實際排班資料；直接放在此層的真名檔案由 Git 忽略，只有 `排班資料/匿名範本/` 會納入版本控制並作為開發與整合驗證資料。
+- `input/`：本機實際排班資料；直接放在此層的真名檔案由 Git 忽略，只有 `input/匿名範本/` 會納入版本控制並作為開發與整合驗證資料。
+- `runtime/expanded-input/`：由 weekly-v1 自動展開的逐日 canonical 輸入；每次排班會先清空再重建，整個 `runtime/` 不納入 Git。
 
 `solve_lexicographic` 將 A 類「連續雙班、早晚雙班、單節日」與 B 類
 「避免單節日、連續雙班、三節班 fallback」視為不同偏好順位；B 類另有每人每個
@@ -41,8 +44,9 @@ Git 忽略，避免真實姓名或排班內容進入版本控制。正式檔名�
 月班表、個人班型摘要、個人詳細統計、類別與公平性統計及求解與驗證資訊五個工作表。
 工作表依一般使用者的閱讀順序排列，完整技術與稽核資料仍保留。預設拒絕覆寫，只有呼叫端
 明確指定 `overwrite=True` 才會替換既有檔案。
-PDF 使用 `reportlab` 直接讀取已完成驗證的正式 Excel，只輸出單頁 A4 橫向「月班表」，
-供快速查看與列印；PDF exporter 不重新計算排班規則或統計，Excel 不是
+PDF 使用 `reportlab` 直接讀取已完成驗證的正式 Excel，輸出單頁 A4 橫向「月班表」，
+並在月班表下方直接接續「個人班型摘要」表格，不另加摘要標題，供快速查看與列印；
+PDF exporter 不重新計算排班規則或統計，Excel 不是
 `OPTIMAL + validation PASS` 時拒絕產生正式 PDF。
 
 ## 使用方式
@@ -61,20 +65,63 @@ conda activate clinic_shift_scheduler
 conda activate clinic_shift_scheduler
 ```
 
+### 完整執行一次排班
+
+日常使用的主要檔案是 `src/run_scheduler.py`。先修改檔案最上方的
+`INPUT_FILENAME`，例如 `排班輸入_2026-08.json`；程式會固定到 repository
+root 的 `input/` 尋找該檔案。在 repository root 執行：
+
+```powershell
+python src/run_scheduler.py
+```
+
+此入口會明確使用覆寫模式更新同月份結果，並依序完成讀檔、weekly-v1 逐日展開、
+validation、normalization、precheck、完整
+lexicographic optimization、獨立結果驗證，以及 JSON、Excel、PDF 輸出。
+展開後的逐日 `demands` 只寫入 `runtime/expanded-input/`，供除錯與稽核；該資料夾
+每次執行都會清空重建，不是使用者要維護的輸入。
+
+若需要從命令列臨時指定其他輸入，而不修改主檔，也可使用套件入口：
+
+```powershell
+python -m clinic_shift_scheduler "input/排班輸入_2026-08.json" --overwrite
+```
+
+也可以使用安裝專案時由 `pyproject.toml` 建立的同義指令：
+
+```powershell
+clinic-shift-scheduler "input/排班輸入_2026-08.json" --overwrite
+```
+
+若不允許取代同月份既有輸出，省略 `--overwrite`；另可用
+`--output-dir <資料夾>` 指定輸出位置。入口會自動辨識 `weekly-v1` 精簡輸入與
+canonical v1 輸入。執行完成時，終端會列印輸入、驗證、precheck、CP-SAT、
+獨立驗證、各輸出媒介及端到端總時間。排班管線的時間紀錄亦會保存於正式 JSON
+的 `execution_timing`，並顯示在 Excel 的「求解與驗證資訊」工作表。
+
 ```python
 from clinic_shift_scheduler import validate_and_normalize_weekly
 
 normalized = validate_and_normalize_weekly(raw_weekly_mapping)
 ```
 
-建議使用者維護 `weekly-v1` 精簡輸入，例如
-`排班資料/匿名範本/排班輸入_匿名_2026-08.weekly-v1.json`。每個星期必須恰好由一條
-週規則涵蓋；`is_open: true` 時完整填寫早、午、晚各職務人數，
+使用者正式維護 `weekly-v1` 精簡輸入，例如
+`input/匿名範本/排班輸入_匿名_2026-08.json`。每個星期必須恰好由一條
+週規則涵蓋，通常分為週一至週五、週六、週日三組；`is_open: true` 時完整填寫
+早、午、晚各職務人數，
 `is_open: false` 時省略 `staffing`。`date_overrides` 可讓原本營業的特定
 日期臨時休診，或以完整的當日 `staffing` 取代週規則。前處理會展開為
-canonical v1 的逐日 `demands`，再交給既有嚴格驗證與求解流程。
+canonical v1 的逐日 `demands`，再交給既有嚴格驗證與求解流程。相同 JSON 亦包含
+每位員工姓名、職務資格、正職類別、`fairness_group`、班次模式與當月節數、
+兼職明確可排時段、請假及不可排時段，均可按月修改。
 
-若上游系統本來就會產生完整 canonical v1 資料，仍可直接使用：
+使用者檔名不放格式版號；格式由 JSON 內部欄位辨識。`schema_version: v1`
+代表排班資料與規則契約版本，`authoring_version: weekly-v1` 則代表這份輸入使用
+「每週規則展開成逐日需求」的編輯格式。兩者分開版本化，才能在排班規則仍是 v1
+時，辨識 weekly authoring 與 canonical 等不同資料表示方式。
+
+canonical v1 是 solver-facing 中間契約；只有上游系統本來就會產生完整逐日資料時，
+才需要直接使用：
 
 ```python
 from clinic_shift_scheduler import validate_and_normalize

@@ -42,6 +42,7 @@ from .models import NormalizedScheduleInput, ScheduleInput
 from .output import (
     CategoryStatistics,
     ClassPreferenceStatistics,
+    ExecutionTiming,
     FairnessGroupStatistics,
     FormalScheduleOutput,
     IndividualStatistics,
@@ -89,6 +90,7 @@ from .result_validation import (
     ValidationReport,
     validate_schedule_result,
 )
+from .runner import ScheduleRunError, ScheduleRunResult, run_schedule_file
 from .validation import validate_and_normalize
 
 __all__ = [
@@ -103,6 +105,7 @@ __all__ = [
     "DailyPattern",
     "DEFAULT_OUTPUT_DIRECTORY",
     "ExportFileExistsError",
+    "ExecutionTiming",
     "FeasibilityResult",
     "FeasibilitySolverConfig",
     "FeasibilityStatus",
@@ -139,6 +142,8 @@ __all__ = [
     "ScheduleCell",
     "ScheduleCellKind",
     "ScheduleInput",
+    "ScheduleRunError",
+    "ScheduleRunResult",
     "FormalScheduleOutput",
     "MonthlyScheduleRow",
     "MonthlyScheduleTable",
@@ -160,6 +165,7 @@ __all__ = [
     "finalize_schedule_output",
     "recompute_schedule_metrics",
     "run_prechecks",
+    "run_schedule_file",
     "solve_feasibility",
     "solve_lexicographic",
     "validate_and_normalize",

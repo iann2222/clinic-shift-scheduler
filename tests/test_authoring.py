@@ -16,9 +16,9 @@ from clinic_shift_scheduler import (
 
 EXAMPLE = (
     Path(__file__).parents[1]
-    / "排班資料"
+    / "input"
     / "匿名範本"
-    / "排班輸入_匿名_2026-08.weekly-v1.json"
+    / "排班輸入_匿名_2026-08.json"
 )
 
 

@@ -190,6 +190,18 @@ class OverallStatistics:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionTiming:
+    """Wall-clock time for one complete scheduling pipeline before file export."""
+
+    input_loading_seconds: float
+    validation_normalization_seconds: float
+    precheck_seconds: float
+    optimization_seconds: float
+    result_validation_and_build_seconds: float
+    scheduling_pipeline_seconds: float
+
+
+@dataclass(frozen=True, slots=True)
 class FormalScheduleOutput:
     status: FeasibilityStatus
     assignments: tuple[Assignment, ...]
@@ -203,6 +215,7 @@ class FormalScheduleOutput:
     optimization_stages: tuple[OptimizationStageResult, ...]
     preference_benchmarks: tuple[PreferenceBenchmarkResult, ...]
     class_pattern_locks: tuple[ClassPatternLockResult, ...]
+    execution_timing: ExecutionTiming | None = None
 
     @property
     def has_formal_schedule(self) -> bool:

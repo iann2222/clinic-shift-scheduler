@@ -25,6 +25,7 @@ from .files import FormalExportError, prepare_target
 
 
 _SCHEDULE_SHEET = "月班表"
+_INDIVIDUAL_SUMMARY_SHEET = "個人班型摘要"
 _SOLVER_SHEET = "求解與驗證資訊"
 _CJK_FONT = "ClinicScheduleCJK"
 _CJK_FONT_ENVIRONMENT_VARIABLE = "CLINIC_SCHEDULER_PDF_FONT"
@@ -61,7 +62,7 @@ def _key_value(sheet: Worksheet, label: str) -> Any | None:
     return None
 
 
-def _validate_formal_workbook(workbook: Any) -> Worksheet:
+def _validate_formal_workbook(workbook: Any) -> tuple[Worksheet, Worksheet]:
     if tuple(workbook.sheetnames) != WORKSHEET_NAMES:
         raise FormalExportError(
             "PDF export requires the complete formal Excel workbook structure"
@@ -69,12 +70,17 @@ def _validate_formal_workbook(workbook: Any) -> Worksheet:
     schedule = workbook[_SCHEDULE_SHEET]
     if schedule["A1"].value != "日期" or schedule["A2"].value != "星期":
         raise FormalExportError("PDF export requires a valid monthly schedule sheet")
+    summary = workbook[_INDIVIDUAL_SUMMARY_SHEET]
+    if summary["A1"].value != "姓名" or summary["E1"].value != "連續雙班日／出勤日":
+        raise FormalExportError(
+            "PDF export requires a valid individual pattern summary sheet"
+        )
     solver = workbook[_SOLVER_SHEET]
     if _key_value(solver, "正式狀態") != "OPTIMAL":
         raise FormalExportError("PDF export requires Excel formal status OPTIMAL")
     if _key_value(solver, "Validation") != "PASS":
         raise FormalExportError("PDF export requires Excel validation PASS")
-    return schedule
+    return schedule, summary
 
 
 def _cell_text(cell: Cell) -> str:
@@ -168,10 +174,49 @@ def _schedule_table(sheet: Worksheet) -> Table:
     return table
 
 
+def _individual_summary_table(sheet: Worksheet) -> Table:
+    values: list[list[Paragraph]] = []
+    table_style: list[tuple[Any, ...]] = [
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#B7C9D6")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTNAME", (0, 0), (-1, -1), _CJK_FONT),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9EAF7")),
+        ("LEFTPADDING", (0, 0), (-1, -1), 1.5),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
+        ("TOPPADDING", (0, 0), (-1, -1), 1.8),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 1.8),
+    ]
+    for row_index, row in enumerate(
+        sheet.iter_rows(
+            min_row=1,
+            max_row=sheet.max_row,
+            min_col=1,
+            max_col=sheet.max_column,
+        )
+    ):
+        values.append(
+            [
+                _paragraph(_cell_text(cell), header=row_index == 0)
+                for cell in row
+            ]
+        )
+
+    widths_mm = (16, 18, 12, 12, 36, 30, 36, 30)
+    table = Table(
+        values,
+        colWidths=[width * mm for width in widths_mm],
+        repeatRows=1,
+        hAlign="LEFT",
+    )
+    table.setStyle(TableStyle(table_style))
+    return table
+
+
 def _render_pdf(source: Path, target: Path) -> None:
     workbook = load_workbook(source, read_only=False, data_only=True)
     try:
-        schedule = _validate_formal_workbook(workbook)
+        schedule, summary = _validate_formal_workbook(workbook)
         title = workbook.properties.title or f"{source.stem} 月班表"
         _register_cjk_font()
         document = SimpleDocTemplate(
@@ -198,6 +243,8 @@ def _render_pdf(source: Path, target: Path) -> None:
                 Paragraph(f"{title}｜月班表", title_style),
                 Spacer(1, 2 * mm),
                 _schedule_table(schedule),
+                Spacer(1, 3 * mm),
+                _individual_summary_table(summary),
             ]
         )
     finally:

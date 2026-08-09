@@ -542,23 +542,42 @@ def _build_solver_sheet(
     report = output.validation_report
     overall = output.overall_statistics
     assert report is not None and overall is not None
+    formal_values: list[tuple[str, Any]] = [
+        ("月份", schedule_month(data)),
+        ("輸入 Schema", data.source.schema_version),
+        ("正式狀態", output.status.value),
+        ("Validation", report.status.value),
+        ("總需求", overall.total_demand),
+        ("總安排", overall.total_assignments),
+        ("未填需求", overall.unfilled_shifts),
+        (
+            "已完成目標前綴最佳",
+            overall.implemented_objective_prefix_optimal,
+        ),
+    ]
+    timing = output.execution_timing
+    if timing is not None:
+        formal_values.extend(
+            (
+                ("輸入讀取（秒）", timing.input_loading_seconds),
+                (
+                    "驗證與正規化（秒）",
+                    timing.validation_normalization_seconds,
+                ),
+                ("前置可行性檢查（秒）", timing.precheck_seconds),
+                ("CP-SAT 最佳化（秒）", timing.optimization_seconds),
+                (
+                    "獨立驗證與結果建立（秒）",
+                    timing.result_validation_and_build_seconds,
+                ),
+                ("排班管線總時間（秒）", timing.scheduling_pipeline_seconds),
+            )
+        )
     row = _write_key_values(
         sheet,
         1,
         "正式結果",
-        (
-            ("月份", schedule_month(data)),
-            ("輸入 Schema", data.source.schema_version),
-            ("正式狀態", output.status.value),
-            ("Validation", report.status.value),
-            ("總需求", overall.total_demand),
-            ("總安排", overall.total_assignments),
-            ("未填需求", overall.unfilled_shifts),
-            (
-                "已完成目標前綴最佳",
-                overall.implemented_objective_prefix_optimal,
-            ),
-        ),
+        tuple(formal_values),
     )
     row += 1
     row = _write_key_values(
