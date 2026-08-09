@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import unittest
 from dataclasses import replace
+from datetime import date
 from unittest.mock import patch
 
 from ortools.sat.python import cp_model
@@ -9,7 +10,9 @@ from ortools.sat.python import cp_model
 import clinic_shift_scheduler.optimization as optimization
 from clinic_shift_scheduler import (
     ConstantProof,
+    DailyPattern,
     FeasibilityStatus,
+    ObjectiveDirection,
     OptimizationStage,
     OptimizationStageStatus,
     solve_lexicographic,
@@ -29,6 +32,7 @@ def available(day: str, *periods: str) -> list[dict]:
 def full_time(
     employee_id: str,
     *,
+    full_time_class: str = "B",
     shift_mode: str,
     required: int | None = None,
     target: int | None = None,
@@ -40,9 +44,9 @@ def full_time(
         "employee_id": employee_id,
         "name": employee_id,
         "employment_type": "full_time",
-        "full_time_class": "B",
+        "full_time_class": full_time_class,
         "roles": ["assistant"],
-        "fairness_group": f"B_{employee_id}",
+        "fairness_group": f"{full_time_class}_{employee_id}",
         "shift_mode": shift_mode,
     }
     if shift_mode == "EXACT":
@@ -99,7 +103,7 @@ def stage(result, name: OptimizationStage):
     return next(item for item in result.stages if item.stage is name)
 
 
-class PhaseFourOptimizationTests(unittest.TestCase):
+class LexicographicOptimizationTests(unittest.TestCase):
     def test_target_uses_symmetric_absolute_deviation(self) -> None:
         cases = (
             (3, ("morning",), 1, 2),
@@ -217,6 +221,9 @@ class PhaseFourOptimizationTests(unittest.TestCase):
                 OptimizationStage.HARD_FEASIBILITY,
                 OptimizationStage.FULL_TIME_TARGET_DEVIATION,
                 OptimizationStage.PART_TIME_USAGE,
+                OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES,
+                OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS,
+                OptimizationStage.FULL_TIME_SECONDARY_PATTERNS,
             ),
         )
 
@@ -361,6 +368,228 @@ class PhaseFourOptimizationTests(unittest.TestCase):
             OptimizationStageStatus.UNKNOWN,
         )
         self.assertFalse(result.stages[-1].locked)
+
+
+class PatternQualityOptimizationTests(unittest.TestCase):
+    def test_b_triple_is_not_counted_as_consecutive_double(self) -> None:
+        payload = one_day_input(
+            [
+                full_time(
+                    "B",
+                    full_time_class="B",
+                    shift_mode="EXACT",
+                    required=3,
+                )
+            ],
+            ("morning", "afternoon", "evening"),
+        )
+
+        result = solve_lexicographic(validate_and_normalize(payload))
+        consecutive = stage(
+            result, OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES
+        )
+        singles = stage(result, OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS)
+        secondary = stage(
+            result, OptimizationStage.FULL_TIME_SECONDARY_PATTERNS
+        )
+
+        self.assertEqual(
+            result.daily_patterns[("B", date(2024, 10, 1))],
+            DailyPattern.TRIPLE,
+        )
+        self.assertEqual(consecutive.direction, ObjectiveDirection.MAXIMIZE)
+        self.assertEqual(consecutive.objective_value, 0)
+        self.assertEqual(singles.objective_value, 0)
+        self.assertEqual(secondary.objective_value, 1)
+        self.assertTrue(consecutive.locked)
+        self.assertTrue(singles.locked)
+        self.assertTrue(secondary.locked)
+
+    def test_single_day_objective_cannot_replace_locked_double_with_triple(self) -> None:
+        payload = one_day_input(
+            [
+                full_time(
+                    "B1",
+                    full_time_class="B",
+                    shift_mode="RANGE",
+                    minimum=0,
+                    maximum=3,
+                ),
+                full_time(
+                    "B2",
+                    full_time_class="B",
+                    shift_mode="RANGE",
+                    minimum=0,
+                    maximum=3,
+                ),
+            ],
+            ("morning", "afternoon", "evening"),
+        )
+
+        result = solve_lexicographic(validate_and_normalize(payload))
+        consecutive = stage(
+            result, OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES
+        )
+        singles = stage(result, OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS)
+        secondary = stage(
+            result, OptimizationStage.FULL_TIME_SECONDARY_PATTERNS
+        )
+        patterns = [
+            result.daily_patterns[(employee_id, date(2024, 10, 1))]
+            for employee_id in ("B1", "B2")
+        ]
+
+        self.assertEqual(consecutive.objective_value, 1)
+        self.assertTrue(consecutive.locked)
+        self.assertEqual(singles.objective_value, 1)
+        self.assertTrue(singles.locked)
+        self.assertEqual(secondary.objective_value, 0)
+        self.assertEqual(patterns.count(DailyPattern.TRIPLE), 0)
+        self.assertEqual(
+            sum(
+                pattern
+                in (
+                    DailyPattern.MORNING_AFTERNOON,
+                    DailyPattern.AFTERNOON_EVENING,
+                )
+                for pattern in patterns
+            ),
+            1,
+        )
+
+    def test_secondary_objective_cannot_break_locked_single_day_optimum(self) -> None:
+        payload = one_day_input(
+            [
+                full_time(
+                    "A1",
+                    full_time_class="A",
+                    shift_mode="RANGE",
+                    minimum=0,
+                    maximum=2,
+                ),
+                full_time(
+                    "A2",
+                    full_time_class="A",
+                    shift_mode="RANGE",
+                    minimum=0,
+                    maximum=2,
+                ),
+            ],
+            ("morning", "evening"),
+        )
+
+        result = solve_lexicographic(validate_and_normalize(payload))
+        consecutive = stage(
+            result, OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES
+        )
+        singles = stage(result, OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS)
+        secondary = stage(
+            result, OptimizationStage.FULL_TIME_SECONDARY_PATTERNS
+        )
+
+        patterns = [
+            result.daily_patterns[(employee_id, date(2024, 10, 1))]
+            for employee_id in ("A1", "A2")
+        ]
+        self.assertEqual(consecutive.objective_value, 0)
+        self.assertEqual(
+            consecutive.status,
+            OptimizationStageStatus.SKIPPED_CONSTANT,
+        )
+        self.assertEqual(singles.objective_value, 0)
+        self.assertTrue(singles.locked)
+        self.assertEqual(secondary.objective_value, 1)
+        self.assertTrue(secondary.locked)
+        self.assertEqual(patterns.count(DailyPattern.MORNING_EVENING), 1)
+        self.assertEqual(patterns.count(DailyPattern.OFF), 1)
+
+    def test_a_and_b_consecutive_doubles_share_one_combined_objective(self) -> None:
+        payload = synthetic_schedule_input(
+            start_date="2024-10-01",
+            end_date="2024-10-02",
+            roles=["assistant"],
+            employees=[
+                full_time(
+                    "A",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=2,
+                    available_slots=available(
+                        "2024-10-01", "morning", "afternoon"
+                    ),
+                ),
+                full_time(
+                    "B",
+                    full_time_class="B",
+                    shift_mode="EXACT",
+                    required=2,
+                    available_slots=available(
+                        "2024-10-02", "afternoon", "evening"
+                    ),
+                ),
+            ],
+            positive_demands={
+                ("2024-10-01", "morning", "assistant"): 1,
+                ("2024-10-01", "afternoon", "assistant"): 1,
+                ("2024-10-02", "afternoon", "assistant"): 1,
+                ("2024-10-02", "evening", "assistant"): 1,
+            },
+        )
+
+        result = solve_lexicographic(validate_and_normalize(payload))
+        consecutive = stage(
+            result, OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES
+        )
+
+        self.assertEqual(consecutive.objective_value, 2)
+        self.assertEqual(consecutive.direction, ObjectiveDirection.MAXIMIZE)
+        self.assertTrue(consecutive.locked)
+        self.assertEqual(
+            result.daily_patterns[("A", date(2024, 10, 1))],
+            DailyPattern.MORNING_AFTERNOON,
+        )
+        self.assertEqual(
+            result.daily_patterns[("B", date(2024, 10, 2))],
+            DailyPattern.AFTERNOON_EVENING,
+        )
+        self.assertEqual(
+            sum(
+                item.stage is OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES
+                for item in result.stages
+            ),
+            1,
+        )
+
+    def test_pattern_stages_are_skipped_when_there_are_no_full_time_staff(self) -> None:
+        payload = one_day_input(
+            [
+                part_time(
+                    "PT",
+                    minimum=1,
+                    maximum=1,
+                    available_slots=available("2024-10-01", "morning"),
+                )
+            ],
+            ("morning",),
+        )
+
+        result = solve_lexicographic(validate_and_normalize(payload))
+
+        for stage_name in (
+            OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES,
+            OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS,
+            OptimizationStage.FULL_TIME_SECONDARY_PATTERNS,
+        ):
+            stage_result = stage(result, stage_name)
+            self.assertEqual(
+                stage_result.status,
+                OptimizationStageStatus.SKIPPED_CONSTANT,
+            )
+            self.assertEqual(stage_result.objective_value, 0)
+            self.assertEqual(
+                stage_result.constant_proof,
+                ConstantProof.NO_FULL_TIME_EMPLOYEES,
+            )
 
 
 if __name__ == "__main__":

@@ -1,7 +1,6 @@
-"""Phase-four strict lexicographic optimization controller.
+"""Strict lexicographic optimization through A+B daily-pattern quality.
 
-The implemented objective prefix is full-time TARGET deviation followed by
-part-time usage. Later v1 objectives are intentionally outside this module's
+Fairness objectives and formal output validation remain outside this module's
 current scope.
 """
 
@@ -14,12 +13,13 @@ from typing import Mapping
 
 from ortools.sat.python import cp_model
 
-from .daily_patterns import DailyPattern
-from .enums import EmploymentType, ShiftMode
+from .daily_patterns import PATTERN_PERIODS, DailyPattern
+from .enums import EmploymentType, FullTimeClass, ShiftMode
 from .feasibility import (
     Assignment,
     FeasibilityModel,
     FeasibilityStatus,
+    PatternKey,
     PersonDayKey,
     build_feasibility_model,
     extract_model_solution,
@@ -32,11 +32,15 @@ class OptimizationStage(StrEnum):
     HARD_FEASIBILITY = "hard_feasibility"
     FULL_TIME_TARGET_DEVIATION = "full_time_target_deviation"
     PART_TIME_USAGE = "part_time_usage"
+    FULL_TIME_CONSECUTIVE_DOUBLES = "full_time_consecutive_doubles"
+    FULL_TIME_SINGLE_SHIFT_DAYS = "full_time_single_shift_days"
+    FULL_TIME_SECONDARY_PATTERNS = "full_time_secondary_patterns"
 
 
 class ObjectiveDirection(StrEnum):
     NONE = "NONE"
     MINIMIZE = "MINIMIZE"
+    MAXIMIZE = "MAXIMIZE"
 
 
 class OptimizationStageStatus(StrEnum):
@@ -55,6 +59,8 @@ class ConstantProof(StrEnum):
     ALL_FULL_TIME_COUNTS_HARD_FIXED_BY_COVERAGE = (
         "ALL_FULL_TIME_COUNTS_HARD_FIXED_BY_COVERAGE"
     )
+    NO_FULL_TIME_EMPLOYEES = "NO_FULL_TIME_EMPLOYEES"
+    NO_PATTERN_OPPORTUNITY = "NO_PATTERN_OPPORTUNITY"
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,12 +92,22 @@ class OptimizationStageResult:
 
 
 @dataclass(frozen=True, slots=True)
-class PhaseFourModel:
+class OptimizationModel:
     feasibility: FeasibilityModel
     target_differences: Mapping[str, cp_model.IntVar]
     target_deviations: Mapping[str, cp_model.IntVar]
     target_objective: cp_model.LinearExpr | int
     part_time_objective: cp_model.LinearExpr | int
+    consecutive_double_variables: Mapping[PatternKey, cp_model.IntVar]
+    single_shift_variables: Mapping[PatternKey, cp_model.IntVar]
+    secondary_pattern_variables: Mapping[PatternKey, cp_model.IntVar]
+    consecutive_double_objective: cp_model.LinearExpr | int
+    single_shift_objective: cp_model.LinearExpr | int
+    secondary_pattern_objective: cp_model.LinearExpr | int
+
+
+# Backwards-compatible public name retained for existing phase-four callers.
+PhaseFourModel = OptimizationModel
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +132,7 @@ class LexicographicResult:
 @dataclass(frozen=True, slots=True)
 class _ObjectiveSpec:
     stage: OptimizationStage
+    direction: ObjectiveDirection
     variables: tuple[cp_model.IntVar, ...]
     expression: cp_model.LinearExpr | int
     constant_value: int | None
@@ -143,8 +160,8 @@ def _var_name(prefix: str, employee_id: str) -> str:
     return f"{prefix}[{employee_id}]"
 
 
-def build_phase_four_model(data: NormalizedScheduleInput) -> PhaseFourModel:
-    """Add phase-four derived variables to the shared hard-feasibility model."""
+def build_optimization_model(data: NormalizedScheduleInput) -> OptimizationModel:
+    """Add all currently implemented objectives to the shared hard model."""
 
     feasibility = build_feasibility_model(data)
     model = feasibility.model
@@ -186,13 +203,65 @@ def build_phase_four_model(data: NormalizedScheduleInput) -> PhaseFourModel:
         for employee in data.source.employees
         if employee.employment_type is EmploymentType.PART_TIME
     )
-    return PhaseFourModel(
+    available_periods: dict[PersonDayKey, set] = {}
+    for employee_id, day, period, _role in data.allowed_assignments:
+        available_periods.setdefault((employee_id, day), set()).add(period)
+
+    consecutive_patterns = (
+        DailyPattern.MORNING_AFTERNOON,
+        DailyPattern.AFTERNOON_EVENING,
+    )
+    single_patterns = (
+        DailyPattern.MORNING_ONLY,
+        DailyPattern.AFTERNOON_ONLY,
+        DailyPattern.EVENING_ONLY,
+    )
+    consecutive_variables: dict[PatternKey, cp_model.IntVar] = {}
+    single_variables: dict[PatternKey, cp_model.IntVar] = {}
+    secondary_variables: dict[PatternKey, cp_model.IntVar] = {}
+    for employee in data.source.employees:
+        if employee.employment_type is not EmploymentType.FULL_TIME:
+            continue
+        for day in data.dates:
+            possible_periods = available_periods.get(
+                (employee.employee_id, day), set()
+            )
+            for pattern in consecutive_patterns:
+                if PATTERN_PERIODS[pattern].issubset(possible_periods):
+                    key = (employee.employee_id, day, pattern)
+                    consecutive_variables[key] = feasibility.daily_patterns[key]
+            for pattern in single_patterns:
+                if PATTERN_PERIODS[pattern].issubset(possible_periods):
+                    key = (employee.employee_id, day, pattern)
+                    single_variables[key] = feasibility.daily_patterns[key]
+            secondary_pattern = (
+                DailyPattern.MORNING_EVENING
+                if employee.full_time_class is FullTimeClass.A
+                else DailyPattern.TRIPLE
+            )
+            if PATTERN_PERIODS[secondary_pattern].issubset(possible_periods):
+                key = (employee.employee_id, day, secondary_pattern)
+                secondary_variables[key] = feasibility.daily_patterns[key]
+
+    return OptimizationModel(
         feasibility=feasibility,
         target_differences=MappingProxyType(target_differences),
         target_deviations=MappingProxyType(target_deviations),
         target_objective=sum(target_deviations.values()),
         part_time_objective=sum(part_time_counts),
+        consecutive_double_variables=MappingProxyType(consecutive_variables),
+        single_shift_variables=MappingProxyType(single_variables),
+        secondary_pattern_variables=MappingProxyType(secondary_variables),
+        consecutive_double_objective=sum(consecutive_variables.values()),
+        single_shift_objective=sum(single_variables.values()),
+        secondary_pattern_objective=sum(secondary_variables.values()),
     )
+
+
+def build_phase_four_model(data: NormalizedScheduleInput) -> OptimizationModel:
+    """Compatibility alias for the former public builder name."""
+
+    return build_optimization_model(data)
 
 
 def _hard_minimum(employee: Employee) -> int:
@@ -280,7 +349,7 @@ def _part_time_constant(
 
 def _objective_specs(
     data: NormalizedScheduleInput,
-    built: PhaseFourModel,
+    built: OptimizationModel,
     precheck: PrecheckResult,
 ) -> tuple[_ObjectiveSpec, ...]:
     target_constant, target_proof = _target_constant(data, precheck)
@@ -290,9 +359,33 @@ def _objective_specs(
         for employee in data.source.employees
         if employee.employment_type is EmploymentType.PART_TIME
     )
+    full_time_exists = any(
+        employee.employment_type is EmploymentType.FULL_TIME
+        for employee in data.source.employees
+    )
+
+    def pattern_constant(
+        variables: Mapping[PatternKey, cp_model.IntVar],
+    ) -> tuple[int | None, ConstantProof | None]:
+        if not full_time_exists:
+            return 0, ConstantProof.NO_FULL_TIME_EMPLOYEES
+        if not variables:
+            return 0, ConstantProof.NO_PATTERN_OPPORTUNITY
+        return None, None
+
+    consecutive_constant, consecutive_proof = pattern_constant(
+        built.consecutive_double_variables
+    )
+    single_constant, single_proof = pattern_constant(
+        built.single_shift_variables
+    )
+    secondary_constant, secondary_proof = pattern_constant(
+        built.secondary_pattern_variables
+    )
     return (
         _ObjectiveSpec(
             stage=OptimizationStage.FULL_TIME_TARGET_DEVIATION,
+            direction=ObjectiveDirection.MINIMIZE,
             variables=tuple(built.target_deviations.values()),
             expression=built.target_objective,
             constant_value=target_constant,
@@ -300,10 +393,35 @@ def _objective_specs(
         ),
         _ObjectiveSpec(
             stage=OptimizationStage.PART_TIME_USAGE,
+            direction=ObjectiveDirection.MINIMIZE,
             variables=part_time_variables,
             expression=built.part_time_objective,
             constant_value=part_time_constant,
             constant_proof=part_time_proof,
+        ),
+        _ObjectiveSpec(
+            stage=OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES,
+            direction=ObjectiveDirection.MAXIMIZE,
+            variables=tuple(built.consecutive_double_variables.values()),
+            expression=built.consecutive_double_objective,
+            constant_value=consecutive_constant,
+            constant_proof=consecutive_proof,
+        ),
+        _ObjectiveSpec(
+            stage=OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS,
+            direction=ObjectiveDirection.MINIMIZE,
+            variables=tuple(built.single_shift_variables.values()),
+            expression=built.single_shift_objective,
+            constant_value=single_constant,
+            constant_proof=single_proof,
+        ),
+        _ObjectiveSpec(
+            stage=OptimizationStage.FULL_TIME_SECONDARY_PATTERNS,
+            direction=ObjectiveDirection.MINIMIZE,
+            variables=tuple(built.secondary_pattern_variables.values()),
+            expression=built.secondary_pattern_objective,
+            constant_value=secondary_constant,
+            constant_proof=secondary_proof,
         ),
     )
 
@@ -332,7 +450,7 @@ def _solve_once(
 
 def _snapshot(
     data: NormalizedScheduleInput,
-    built: PhaseFourModel,
+    built: OptimizationModel,
     solver: cp_model.CpSolver,
 ) -> _SolutionSnapshot:
     assignments, daily_patterns = extract_model_solution(
@@ -407,7 +525,7 @@ def solve_lexicographic(
     if precheck.status is PrecheckStatus.PRECHECK_INFEASIBLE:
         return _empty_result(FeasibilityStatus.PRECHECK_INFEASIBLE, precheck)
 
-    built = build_phase_four_model(data)
+    built = build_optimization_model(data)
     stages: list[OptimizationStageResult] = []
     hard_run = _solve_once(built.feasibility.model, config)
     if hard_run.raw_status == cp_model.INFEASIBLE:
@@ -463,7 +581,7 @@ def solve_lexicographic(
             stages.append(
                 OptimizationStageResult(
                     stage=objective.stage,
-                    direction=ObjectiveDirection.MINIMIZE,
+                    direction=objective.direction,
                     status=OptimizationStageStatus.SKIPPED_CONSTANT,
                     objective_value=objective.constant_value,
                     raw_solver_status="NOT_RUN",
@@ -474,7 +592,10 @@ def solve_lexicographic(
             )
             continue
 
-        built.feasibility.model.minimize(objective.expression)
+        if objective.direction is ObjectiveDirection.MAXIMIZE:
+            built.feasibility.model.maximize(objective.expression)
+        else:
+            built.feasibility.model.minimize(objective.expression)
         run = _solve_once(built.feasibility.model, config)
         if run.raw_status == cp_model.OPTIMAL:
             objective_value = sum(
@@ -486,7 +607,7 @@ def solve_lexicographic(
             stages.append(
                 OptimizationStageResult(
                     stage=objective.stage,
-                    direction=ObjectiveDirection.MINIMIZE,
+                    direction=objective.direction,
                     status=OptimizationStageStatus.OPTIMAL,
                     objective_value=objective_value,
                     raw_solver_status=run.raw_status_name,
@@ -504,7 +625,7 @@ def solve_lexicographic(
             stages.append(
                 OptimizationStageResult(
                     stage=objective.stage,
-                    direction=ObjectiveDirection.MINIMIZE,
+                    direction=objective.direction,
                     status=OptimizationStageStatus.FEASIBLE,
                     objective_value=objective_value,
                     raw_solver_status=run.raw_status_name,
@@ -528,7 +649,7 @@ def solve_lexicographic(
         stages.append(
             OptimizationStageResult(
                 stage=objective.stage,
-                direction=ObjectiveDirection.MINIMIZE,
+                direction=objective.direction,
                 status=stage_status,
                 objective_value=None,
                 raw_solver_status=run.raw_status_name,

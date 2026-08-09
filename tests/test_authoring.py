@@ -7,6 +7,7 @@ from pathlib import Path
 
 from clinic_shift_scheduler import (
     InputValidationError,
+    LexicographicSolverConfig,
     expand_weekly_template,
     solve_lexicographic,
     validate_and_normalize_weekly,
@@ -47,7 +48,10 @@ class WeeklyAuthoringTests(unittest.TestCase):
 
     def test_anonymous_example_runs_through_phase_four(self) -> None:
         normalized = validate_and_normalize_weekly(load_example())
-        result = solve_lexicographic(normalized)
+        result = solve_lexicographic(
+            normalized,
+            LexicographicSolverConfig(num_search_workers=8),
+        )
 
         self.assertTrue(result.is_feasible)
         self.assertEqual(len(result.assignments), 161)
