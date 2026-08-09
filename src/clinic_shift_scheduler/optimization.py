@@ -6,8 +6,12 @@ Formal independent output validation remains outside this module's scope.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass, replace
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
+import signal
+import threading
+from time import perf_counter
 from types import MappingProxyType
 from typing import Mapping
 
@@ -160,6 +164,48 @@ class LexicographicSolverConfig:
             raise ValueError("num_search_workers must be greater than 0")
 
 
+class EquivalentSolutionDiagnosticStatus(StrEnum):
+    """Proof status for bounded enumeration of equal-quality alternatives."""
+
+    EXACT_COUNT = "EXACT_COUNT"
+    AT_LEAST_LIMIT = "AT_LEAST_LIMIT"
+    TIME_LIMIT = "TIME_LIMIT"
+    INTERRUPTED = "INTERRUPTED"
+
+
+@dataclass(frozen=True, slots=True)
+class EquivalentSolutionDiagnosticConfig:
+    """Optional post-output search limits for equal-quality assignments."""
+
+    max_alternatives: int = 100
+    max_time_seconds: float | None = None
+    num_search_workers: int = 1
+    random_seed: int = 0
+
+    def __post_init__(self) -> None:
+        if self.max_alternatives <= 0:
+            raise ValueError("max_alternatives must be greater than 0")
+        if self.max_time_seconds is not None and self.max_time_seconds <= 0:
+            raise ValueError("max_time_seconds must be greater than 0")
+        if self.num_search_workers <= 0:
+            raise ValueError("num_search_workers must be greater than 0")
+
+
+@dataclass(frozen=True, slots=True)
+class EquivalentSolutionDiagnosticResult:
+    """Bounded count of alternatives excluding the formal assignment."""
+
+    status: EquivalentSolutionDiagnosticStatus
+    alternative_count: int
+    search_limit: int
+    time_limit_seconds: float
+    wall_time_seconds: float
+
+    @property
+    def is_exact(self) -> bool:
+        return self.status is EquivalentSolutionDiagnosticStatus.EXACT_COUNT
+
+
 @dataclass(frozen=True, slots=True)
 class OptimizationStageResult:
     stage: OptimizationStage
@@ -298,6 +344,11 @@ class LexicographicResult:
     class_pattern_locks: tuple[ClassPatternLockResult, ...]
     precheck: PrecheckResult
     implemented_objective_prefix_optimal: bool
+    _locked_model: OptimizationModel | None = field(
+        default=None,
+        repr=False,
+        compare=False,
+    )
 
     @property
     def is_feasible(self) -> bool:
@@ -1803,6 +1854,7 @@ def _result_from_snapshot(
     preference_benchmarks: tuple[PreferenceBenchmarkResult, ...] = (),
     class_pattern_locks: tuple[ClassPatternLockResult, ...] = (),
     implemented_objective_prefix_optimal: bool = False,
+    locked_model: OptimizationModel | None = None,
 ) -> LexicographicResult:
     return LexicographicResult(
         status=status,
@@ -1816,6 +1868,7 @@ def _result_from_snapshot(
         class_pattern_locks=class_pattern_locks,
         precheck=precheck,
         implemented_objective_prefix_optimal=implemented_objective_prefix_optimal,
+        _locked_model=locked_model,
     )
 
 
@@ -2330,4 +2383,161 @@ def solve_lexicographic(
         preference_benchmarks=tuple(benchmarks),
         class_pattern_locks=tuple(class_pattern_locks),
         implemented_objective_prefix_optimal=True,
+        locked_model=built,
     )
+
+
+def _add_assignment_exclusion(
+    model: cp_model.CpModel,
+    variables: tuple[cp_model.IntVar, ...],
+    signature: tuple[bool, ...],
+) -> None:
+    """Exclude exactly one core-x assignment, ignoring auxiliary variables."""
+
+    if len(variables) != len(signature):
+        raise ValueError("assignment signature length does not match x variables")
+    if not variables:
+        model.add(0 == 1)
+        return
+    matching_literals = tuple(
+        variable if value else variable.Not()
+        for variable, value in zip(variables, signature, strict=True)
+    )
+    model.add(sum(matching_literals) <= len(matching_literals) - 1)
+
+
+def diagnose_equivalent_solutions(
+    result: LexicographicResult,
+    config: EquivalentSolutionDiagnosticConfig | None = None,
+    *,
+    progress: Callable[[int], None] | None = None,
+) -> EquivalentSolutionDiagnosticResult:
+    """Count distinct equal-quality assignments up to a bound and time limit.
+
+    The formal assignment itself is excluded.  Every formal objective and
+    class-level value lock remains in the retained CP-SAT model, while the
+    final objective is cleared so the model becomes a pure satisfaction
+    problem.  Distinctness is defined only by the core x variables.
+    """
+
+    config = config or EquivalentSolutionDiagnosticConfig()
+    if not result.implemented_objective_prefix_optimal:
+        raise ValueError("equivalent-solution diagnosis requires an optimal prefix")
+    built = result._locked_model
+    if built is None:
+        raise ValueError("locked optimization model is unavailable")
+
+    model = built.feasibility.model.clone()
+    model.clear_objective()
+    x_items = tuple(
+        (
+            key,
+            model.get_int_var_from_proto_index(variable.index),
+        )
+        for key, variable in built.feasibility.x.items()
+    )
+    variables = tuple(variable for _, variable in x_items)
+    selected_keys = {
+        (item.employee_id, item.date, item.period, item.role)
+        for item in result.assignments
+    }
+    selected_signature = tuple(key in selected_keys for key, _ in x_items)
+    _add_assignment_exclusion(model, variables, selected_signature)
+
+    time_limit_seconds = config.max_time_seconds
+    if time_limit_seconds is None:
+        measured_solver_seconds = sum(
+            item.wall_time_seconds for item in result.stages
+        ) + sum(
+            item.wall_time_seconds for item in result.preference_benchmarks
+        )
+        time_limit_seconds = max(measured_solver_seconds / 5, 0.001)
+
+    started = perf_counter()
+    alternative_count = 0
+    interrupted = False
+    active_solver: cp_model.CpSolver | None = None
+    previous_sigint_handler = None
+    handles_sigint = threading.current_thread() is threading.main_thread()
+
+    if handles_sigint:
+        previous_sigint_handler = signal.getsignal(signal.SIGINT)
+
+        def stop_diagnostic(_signum: int, _frame: object) -> None:
+            nonlocal interrupted
+            interrupted = True
+            if active_solver is not None:
+                active_solver.stop_search()
+
+        signal.signal(signal.SIGINT, stop_diagnostic)
+
+    try:
+        while alternative_count < config.max_alternatives:
+            if interrupted:
+                return EquivalentSolutionDiagnosticResult(
+                    status=EquivalentSolutionDiagnosticStatus.INTERRUPTED,
+                    alternative_count=alternative_count,
+                    search_limit=config.max_alternatives,
+                    time_limit_seconds=time_limit_seconds,
+                    wall_time_seconds=perf_counter() - started,
+                )
+            remaining = time_limit_seconds - (perf_counter() - started)
+            if remaining <= 0:
+                return EquivalentSolutionDiagnosticResult(
+                    status=EquivalentSolutionDiagnosticStatus.TIME_LIMIT,
+                    alternative_count=alternative_count,
+                    search_limit=config.max_alternatives,
+                    time_limit_seconds=time_limit_seconds,
+                    wall_time_seconds=perf_counter() - started,
+                )
+
+            solver = cp_model.CpSolver()
+            active_solver = solver
+            solver.parameters.num_search_workers = config.num_search_workers
+            solver.parameters.random_seed = config.random_seed
+            solver.parameters.max_time_in_seconds = remaining
+            try:
+                raw_status = solver.solve(model)
+            except KeyboardInterrupt:
+                interrupted = True
+                continue
+            finally:
+                active_solver = None
+
+            if interrupted:
+                continue
+            if raw_status in (cp_model.FEASIBLE, cp_model.OPTIMAL):
+                signature = tuple(
+                    bool(solver.value(variable)) for variable in variables
+                )
+                _add_assignment_exclusion(model, variables, signature)
+                alternative_count += 1
+                if progress is not None:
+                    progress(alternative_count)
+                continue
+            if raw_status == cp_model.INFEASIBLE:
+                return EquivalentSolutionDiagnosticResult(
+                    status=EquivalentSolutionDiagnosticStatus.EXACT_COUNT,
+                    alternative_count=alternative_count,
+                    search_limit=config.max_alternatives,
+                    time_limit_seconds=time_limit_seconds,
+                    wall_time_seconds=perf_counter() - started,
+                )
+            return EquivalentSolutionDiagnosticResult(
+                status=EquivalentSolutionDiagnosticStatus.TIME_LIMIT,
+                alternative_count=alternative_count,
+                search_limit=config.max_alternatives,
+                time_limit_seconds=time_limit_seconds,
+                wall_time_seconds=perf_counter() - started,
+            )
+
+        return EquivalentSolutionDiagnosticResult(
+            status=EquivalentSolutionDiagnosticStatus.AT_LEAST_LIMIT,
+            alternative_count=alternative_count,
+            search_limit=config.max_alternatives,
+            time_limit_seconds=time_limit_seconds,
+            wall_time_seconds=perf_counter() - started,
+        )
+    finally:
+        if handles_sigint:
+            signal.signal(signal.SIGINT, previous_sigint_handler)

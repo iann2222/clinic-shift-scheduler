@@ -6,22 +6,87 @@ import unittest
 from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
+from time import sleep
 from unittest.mock import patch
 
 from openpyxl import load_workbook
 
 from clinic_shift_scheduler import (
+    EquivalentSolutionDiagnosticConfig,
+    EquivalentSolutionDiagnosticStatus,
     FeasibilityStatus,
     RESULT_CONTRACT_VERSION,
     run_schedule_file,
 )
+import clinic_shift_scheduler.cli as cli_module
 from clinic_shift_scheduler.cli import main
+import clinic_shift_scheduler.runner as runner_module
 import run_scheduler
 
 from tests.fixtures import minimal_valid_input
 
 
 class ScheduleRunnerTests(unittest.TestCase):
+    def test_interactive_console_overwrites_heartbeat_line(self) -> None:
+        class InteractiveBuffer(StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        stream = InteractiveBuffer()
+        printer = cli_module._ConsoleProgressPrinter("[排班]", stream)
+
+        printer("嚴格分階段最佳化進行中：已耗時 10 秒")
+        printer("嚴格分階段最佳化進行中：已耗時 20 秒")
+        heartbeat_output = stream.getvalue()
+        self.assertNotIn("\n", heartbeat_output)
+        self.assertEqual(heartbeat_output.count("\r"), 2)
+
+        printer("嚴格分階段最佳化完成：共耗時 20.123 秒")
+        final_output = stream.getvalue()
+        self.assertIn("\r", final_output)
+        self.assertTrue(final_output.endswith("20.123 秒\n"))
+
+    def test_noninteractive_console_keeps_heartbeat_lines(self) -> None:
+        stream = StringIO()
+        printer = cli_module._ConsoleProgressPrinter("[排班]", stream)
+
+        printer("嚴格分階段最佳化進行中：已耗時 10 秒")
+        printer("嚴格分階段最佳化進行中：已耗時 20 秒")
+
+        self.assertEqual(stream.getvalue().count("\n"), 2)
+        self.assertNotIn("\r", stream.getvalue())
+
+    def test_elapsed_heartbeat_reports_progress_and_completion(self) -> None:
+        messages: list[str] = []
+
+        def operation() -> str:
+            sleep(0.035)
+            return "done"
+
+        result, elapsed = runner_module._run_with_elapsed_heartbeat(
+            operation,
+            messages.append,
+            interval_seconds=0.01,
+        )
+
+        self.assertEqual(result, "done")
+        self.assertGreaterEqual(elapsed, 0.03)
+        self.assertTrue(any("進行中" in message for message in messages))
+        self.assertIn("最佳化完成", messages[-1])
+
+    def test_default_diagnostic_time_is_one_fifth_of_optimization(self) -> None:
+        automatic = runner_module._resolve_diagnostic_config(
+            EquivalentSolutionDiagnosticConfig(),
+            125.0,
+        )
+        explicit = runner_module._resolve_diagnostic_config(
+            EquivalentSolutionDiagnosticConfig(max_time_seconds=7.5),
+            125.0,
+        )
+
+        self.assertEqual(automatic.max_time_seconds, 25.0)
+        self.assertEqual(explicit.max_time_seconds, 7.5)
+
     def test_primary_script_uses_configured_file_from_root_input(self) -> None:
         with patch.object(run_scheduler, "run_cli", return_value=0) as run_cli:
             exit_code = run_scheduler.main()
@@ -96,6 +161,12 @@ class ScheduleRunnerTests(unittest.TestCase):
                 input_path,
                 output_directory=root / "output",
                 intermediate_directory=intermediate_directory,
+                equivalent_solution_diagnostic_config=(
+                    EquivalentSolutionDiagnosticConfig(
+                        max_alternatives=1,
+                        max_time_seconds=30,
+                    )
+                ),
                 progress=messages.append,
             )
 
@@ -116,7 +187,32 @@ class ScheduleRunnerTests(unittest.TestCase):
             self.assertGreaterEqual(result.json_export_seconds, 0)
             self.assertGreaterEqual(result.excel_export_seconds, 0)
             self.assertGreaterEqual(result.pdf_export_seconds, 0)
+            self.assertGreaterEqual(result.formal_output_seconds, 0)
+            self.assertIsNotNone(result.equivalent_solution_diagnostic)
+            assert result.equivalent_solution_diagnostic is not None
+            self.assertIn(
+                result.equivalent_solution_diagnostic.status,
+                (
+                    EquivalentSolutionDiagnosticStatus.EXACT_COUNT,
+                    EquivalentSolutionDiagnosticStatus.AT_LEAST_LIMIT,
+                ),
+            )
+            self.assertGreaterEqual(
+                result.equivalent_solution_diagnostic_seconds,
+                0,
+            )
             self.assertTrue(any("最佳化" in message for message in messages))
+            self.assertTrue(any("最佳化完成" in message for message in messages))
+            self.assertTrue(
+                any(
+                    "完成：OPTIMAL + validation PASS" in message
+                    for message in messages
+                )
+            )
+            self.assertTrue(any("輸出檔案" in message for message in messages))
+            self.assertTrue(
+                any(str(result.json_path) in message for message in messages)
+            )
 
             timing = result.output.execution_timing
             self.assertIsNotNone(timing)
@@ -158,16 +254,33 @@ class ScheduleRunnerTests(unittest.TestCase):
                 workbook.close()
 
             stdout = StringIO()
+
+            def fake_run(*_args, **kwargs):
+                config = kwargs["equivalent_solution_diagnostic_config"]
+                self.assertIsNone(config.max_time_seconds)
+                kwargs["progress"](
+                    "完成：OPTIMAL + validation PASS\n"
+                    "  CP-SAT 最佳化：1.000 秒\n"
+                    "  從讀檔到正式輸出：2.000 秒\n"
+                    "  輸出檔案：output/result.json"
+                )
+                kwargs["diagnostic_progress"](
+                    "開始搜尋同品質候選班表"
+                )
+                return result
+
             with patch(
                 "clinic_shift_scheduler.cli.run_schedule_file",
-                return_value=result,
+                side_effect=fake_run,
             ), redirect_stdout(stdout):
                 exit_code = main([str(input_path)])
             self.assertEqual(exit_code, 0)
             printed = stdout.getvalue()
             self.assertIn("完成：OPTIMAL + validation PASS", printed)
             self.assertIn("CP-SAT 最佳化", printed)
-            self.assertIn("從讀檔到全部輸出", printed)
+            self.assertIn("從讀檔到正式輸出", printed)
+            self.assertIn("[候選診斷] 開始搜尋", printed)
+            self.assertNotIn("[排班] 開始搜尋", printed)
 
 
 if __name__ == "__main__":

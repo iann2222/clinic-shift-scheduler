@@ -58,6 +58,9 @@ from .output import (
 from .optimization import (
     ClassPatternLockResult,
     ConstantProof,
+    EquivalentSolutionDiagnosticConfig,
+    EquivalentSolutionDiagnosticResult,
+    EquivalentSolutionDiagnosticStatus,
     FairnessMetric,
     LexicographicResult,
     LexicographicSolverConfig,
@@ -69,6 +72,7 @@ from .optimization import (
     PreferenceBenchmarkResult,
     build_optimization_model,
     build_phase_four_model,
+    diagnose_equivalent_solutions,
     solve_lexicographic,
 )
 from .precheck import (
@@ -106,6 +110,9 @@ __all__ = [
     "DEFAULT_OUTPUT_DIRECTORY",
     "ExportFileExistsError",
     "ExecutionTiming",
+    "EquivalentSolutionDiagnosticConfig",
+    "EquivalentSolutionDiagnosticResult",
+    "EquivalentSolutionDiagnosticStatus",
     "FeasibilityResult",
     "FeasibilitySolverConfig",
     "FeasibilityStatus",
@@ -156,6 +163,7 @@ __all__ = [
     "build_optimization_model",
     "build_output_paths",
     "build_phase_four_model",
+    "diagnose_equivalent_solutions",
     "build_result_document",
     "build_workbook",
     "expand_weekly_template",

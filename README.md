@@ -78,6 +78,13 @@ python src/run_scheduler.py
 此入口會明確使用覆寫模式更新同月份結果，並依序完成讀檔、weekly-v1 逐日展開、
 validation、normalization、precheck、完整
 lexicographic optimization、獨立結果驗證，以及 JSON、Excel、PDF 輸出。
+三份正式檔案完成後，程式才開始搜尋與正式班表具有完全相同鎖定品質、但核心
+assignment 不同的候選班表；因此不想等待診斷時，可在看到「正式 JSON／Excel／PDF
+已完成」後按 `Ctrl+C`，已產出的正式班表不受影響。候選數不包含正式輸出的那一份。
+若搜尋空間已完整證明，程式會列印精確數量；達到預設 100 份上限或本次 CP-SAT
+最佳化時間五分之一的診斷時限時，只列印「至少找到 N 份」並明確註明尚未證明
+是否還有更多。正式輸出完成時會先列印排班時間與全部檔案路徑，後續訊息改用
+`[候選診斷]` 標籤，不會讓使用者誤以為正式排班仍未完成。
 展開後的逐日 `demands` 只寫入 `runtime/expanded-input/`，供除錯與稽核；該資料夾
 每次執行都會清空重建，不是使用者要維護的輸入。
 
@@ -98,6 +105,14 @@ clinic-shift-scheduler "input/排班輸入_2026-08.json" --overwrite
 canonical v1 輸入。執行完成時，終端會列印輸入、驗證、precheck、CP-SAT、
 獨立驗證、各輸出媒介及端到端總時間。排班管線的時間紀錄亦會保存於正式 JSON
 的 `execution_timing`，並顯示在 Excel 的「求解與驗證資訊」工作表。
+嚴格分階段最佳化執行期間每 10 秒會更新一次累積耗時；在互動式終端中固定覆寫
+同一行，完成時清除進度行並列印該段總時間，用來確認長時間 CP-SAT 求解仍在運作。
+輸出重新導向到檔案或 CI log 時則保留逐行紀錄。由於各階段搜尋難度並不平均，
+系統不顯示可能誤導的百分比進度。
+候選診斷可用 `--equivalent-limit` 與 `--equivalent-time-limit` 調整上限；明確提供
+秒數時會取代「CP-SAT 最佳化時間五分之一」的動態預設。若完全不需診斷，可加上
+`--skip-equivalent-diagnostic`。此診斷在正式輸出之後執行，不屬於正式 result
+contract，也不改變 `OPTIMAL + validation PASS`。
 
 ```python
 from clinic_shift_scheduler import validate_and_normalize_weekly

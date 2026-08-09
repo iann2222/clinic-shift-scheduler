@@ -5,11 +5,12 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+import threading
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 from time import perf_counter
-from typing import Any
+from typing import Any, TypeVar
 
 from .authoring import WEEKLY_AUTHORING_VERSION, expand_weekly_template
 from .exporters import (
@@ -22,11 +23,17 @@ from .feasibility import FeasibilityStatus
 from .output import ExecutionTiming, FormalScheduleOutput, finalize_schedule_output
 from .precheck import PrecheckResult, run_prechecks
 from .validation import validate_and_normalize
-from .optimization import solve_lexicographic
+from .optimization import (
+    EquivalentSolutionDiagnosticConfig,
+    EquivalentSolutionDiagnosticResult,
+    diagnose_equivalent_solutions,
+    solve_lexicographic,
+)
 
 
 ProgressCallback = Callable[[str], None]
 DEFAULT_INTERMEDIATE_DIRECTORY = Path("runtime/expanded-input")
+T = TypeVar("T")
 
 
 class ScheduleRunError(RuntimeError):
@@ -46,12 +53,73 @@ class ScheduleRunResult:
     json_export_seconds: float
     excel_export_seconds: float
     pdf_export_seconds: float
+    formal_output_seconds: float
+    equivalent_solution_diagnostic: EquivalentSolutionDiagnosticResult | None
+    equivalent_solution_diagnostic_seconds: float
     total_execution_seconds: float
 
 
 def _notify(callback: ProgressCallback | None, message: str) -> None:
     if callback is not None:
         callback(message)
+
+
+def _resolve_diagnostic_config(
+    config: EquivalentSolutionDiagnosticConfig,
+    optimization_seconds: float,
+) -> EquivalentSolutionDiagnosticConfig:
+    if config.max_time_seconds is not None:
+        return config
+    return replace(
+        config,
+        max_time_seconds=max(optimization_seconds / 5, 0.001),
+    )
+
+
+def _run_with_elapsed_heartbeat(
+    operation: Callable[[], T],
+    progress: ProgressCallback | None,
+    *,
+    interval_seconds: float = 10.0,
+) -> tuple[T, float]:
+    """Run a blocking operation while periodically reporting elapsed time."""
+
+    if interval_seconds <= 0:
+        raise ValueError("interval_seconds must be greater than 0")
+    started = perf_counter()
+    stop = threading.Event()
+    heartbeat: threading.Thread | None = None
+    if progress is not None:
+
+        def report_elapsed() -> None:
+            while not stop.wait(interval_seconds):
+                elapsed = perf_counter() - started
+                _notify(
+                    progress,
+                    "嚴格分階段最佳化進行中："
+                    f"已耗時 {elapsed:.0f} 秒",
+                )
+
+        heartbeat = threading.Thread(
+            target=report_elapsed,
+            name="schedule-optimization-heartbeat",
+            daemon=True,
+        )
+        heartbeat.start()
+
+    try:
+        result = operation()
+    finally:
+        stop.set()
+        if heartbeat is not None:
+            heartbeat.join(timeout=interval_seconds)
+
+    elapsed = perf_counter() - started
+    _notify(
+        progress,
+        f"嚴格分階段最佳化完成：共耗時 {elapsed:.3f} 秒",
+    )
+    return result, elapsed
 
 
 def _load_payload(path: Path) -> Mapping[str, Any]:
@@ -110,7 +178,11 @@ def run_schedule_file(
     output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY,
     intermediate_directory: str | Path = DEFAULT_INTERMEDIATE_DIRECTORY,
     overwrite: bool = False,
+    equivalent_solution_diagnostic_config: (
+        EquivalentSolutionDiagnosticConfig | None
+    ) = None,
     progress: ProgressCallback | None = None,
+    diagnostic_progress: ProgressCallback | None = None,
 ) -> ScheduleRunResult:
     """Run input loading through validated JSON, Excel, and PDF exports."""
 
@@ -147,9 +219,10 @@ def run_schedule_file(
         raise ScheduleRunError(f"{precheck.status.value}: {details}")
 
     _notify(progress, "執行嚴格分階段最佳化")
-    step_started = perf_counter()
-    solver_result = solve_lexicographic(data)
-    optimization_seconds = perf_counter() - step_started
+    solver_result, optimization_seconds = _run_with_elapsed_heartbeat(
+        lambda: solve_lexicographic(data),
+        progress,
+    )
 
     _notify(progress, "執行獨立結果驗證並建立正式結果")
     step_started = perf_counter()
@@ -208,6 +281,67 @@ def run_schedule_file(
     )
     pdf_export_seconds = perf_counter() - step_started
 
+    formal_output_seconds = perf_counter() - started
+    _notify(
+        progress,
+        "\n".join(
+            (
+                "完成：OPTIMAL + validation PASS",
+                "執行時間紀錄：",
+                f"  輸入讀取：{input_loading_seconds:.3f} 秒",
+                (
+                    "  驗證與正規化："
+                    f"{validation_normalization_seconds:.3f} 秒"
+                ),
+                f"  前置可行性檢查：{precheck_seconds:.3f} 秒",
+                f"  CP-SAT 最佳化：{optimization_seconds:.3f} 秒",
+                (
+                    "  獨立驗證與結果建立："
+                    f"{result_validation_and_build_seconds:.3f} 秒"
+                ),
+                f"  正式 JSON：{json_export_seconds:.3f} 秒",
+                f"  正式 Excel：{excel_export_seconds:.3f} 秒",
+                f"  月班表 PDF：{pdf_export_seconds:.3f} 秒",
+                f"  從讀檔到正式輸出：{formal_output_seconds:.3f} 秒",
+                "輸出檔案：",
+                f"  中間輸入：{intermediate_input_path}",
+                f"  {json_path}",
+                f"  {excel_path}",
+                f"  {pdf_path}",
+            )
+        ),
+    )
+
+    equivalent_solution_diagnostic = None
+    equivalent_solution_diagnostic_seconds = 0.0
+    if equivalent_solution_diagnostic_config is not None:
+        resolved_diagnostic_config = _resolve_diagnostic_config(
+            equivalent_solution_diagnostic_config,
+            optimization_seconds,
+        )
+        candidate_progress = diagnostic_progress or progress
+        _notify(
+            candidate_progress,
+            "開始搜尋同品質候選班表；"
+            f"時間上限 {resolved_diagnostic_config.max_time_seconds:.3f} 秒，"
+            "按 Ctrl+C 可只中止此診斷",
+        )
+        step_started = perf_counter()
+
+        def report_alternative(count: int) -> None:
+            if count == 1 or count % 10 == 0:
+                _notify(
+                    candidate_progress,
+                    f"已找到 {count} 份同品質候選班表",
+                )
+
+        equivalent_solution_diagnostic = diagnose_equivalent_solutions(
+            solver_result,
+            resolved_diagnostic_config,
+            progress=report_alternative,
+        )
+        equivalent_solution_diagnostic_seconds = perf_counter() - step_started
+
     return ScheduleRunResult(
         output=output,
         precheck=precheck,
@@ -218,5 +352,10 @@ def run_schedule_file(
         json_export_seconds=json_export_seconds,
         excel_export_seconds=excel_export_seconds,
         pdf_export_seconds=pdf_export_seconds,
+        formal_output_seconds=formal_output_seconds,
+        equivalent_solution_diagnostic=equivalent_solution_diagnostic,
+        equivalent_solution_diagnostic_seconds=(
+            equivalent_solution_diagnostic_seconds
+        ),
         total_execution_seconds=perf_counter() - started,
     )
