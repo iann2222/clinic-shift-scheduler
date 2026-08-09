@@ -1,6 +1,6 @@
 # Clinic Shift Scheduler
 
-本 repository 依據 `診所排班系統.md` 實作診所排班系統。目前完成 v1 資料契約、輸入驗證、正規化、OR-Tools CP-SAT 硬性可行性模型、保守前置可行性檢查、完整嚴格字典序目標、獨立結果驗證器、媒介無關的正式班表與統計輸出模型，以及 JSON／Excel 正式輸出 adapter。
+本 repository 依據 `診所排班系統.md` 實作診所排班系統。目前完成 v1 資料契約、輸入驗證、正規化、OR-Tools CP-SAT 硬性可行性模型、保守前置可行性檢查、完整嚴格字典序目標、獨立結果驗證器、媒介無關的正式班表與統計輸出模型，以及 JSON／Excel／PDF 正式輸出 adapter。
 
 ## 專案結構
 
@@ -21,7 +21,9 @@
 - `tests/`：synthetic fixtures 與單元測試。
 - `排班資料/`：本機實際排班資料；直接放在此層的真名檔案由 Git 忽略，只有 `排班資料/匿名範本/` 會納入版本控制並作為開發與整合驗證資料。
 
-`solve_lexicographic` 會以各階段的 `OPTIMAL`／`SKIPPED_CONSTANT` 及
+`solve_lexicographic` 會先鎖定 A+B 連續雙班總數，再跨 A／B 類與
+`fairness_group` 最小化全體正職個人的連續雙班比例最大差距及兩兩差總和；
+其餘班型公平性仍依正式規格分組處理。各階段的 `OPTIMAL`／`SKIPPED_CONSTANT` 及
 `implemented_objective_prefix_optimal` 表示所有正式目標均已證明最佳，
 但求解結果本身仍只回傳 `FEASIBLE`。將結果交給
 `finalize_schedule_output` 後，只有獨立驗證全部通過才會提升為完整 v1
@@ -29,10 +31,13 @@
 
 正式執行產物預設寫入 repository root 的 `output/`，整個資料夾均由
 Git 忽略，避免真實姓名或排班內容進入版本控制。正式檔名固定為
-`排班結果_YYYY-MM.result-v1.json`／`.xlsx`；Excel 使用 `openpyxl` 建立
+`排班結果_YYYY-MM.result-v1.json`／`.xlsx`／`.pdf`；Excel 使用 `openpyxl` 建立
 月班表、個人班型摘要、個人詳細統計、類別與公平性統計及求解與驗證資訊五個工作表。
 工作表依一般使用者的閱讀順序排列，完整技術與稽核資料仍保留。預設拒絕覆寫，只有呼叫端
 明確指定 `overwrite=True` 才會替換既有檔案。
+PDF 使用 `reportlab` 直接讀取已完成驗證的正式 Excel，只輸出單頁 A4 橫向「月班表」，
+供快速查看與列印；PDF exporter 不重新計算排班規則或統計，Excel 不是
+`OPTIMAL + validation PASS` 時拒絕產生正式 PDF。
 
 ## 使用方式
 

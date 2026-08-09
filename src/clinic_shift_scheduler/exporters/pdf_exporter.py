@@ -1,0 +1,234 @@
+"""Printable monthly-schedule PDF derived exclusively from the formal Excel file."""
+
+from __future__ import annotations
+
+import os
+import tempfile
+from datetime import date, datetime
+from pathlib import Path
+from typing import Any
+
+from openpyxl import load_workbook
+from openpyxl.cell import Cell
+from openpyxl.worksheet.worksheet import Worksheet
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.styles import ParagraphStyle
+from reportlab.lib.units import mm
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
+from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+from .excel_exporter import WORKSHEET_NAMES
+from .files import FormalExportError, prepare_target
+
+
+_SCHEDULE_SHEET = "月班表"
+_SOLVER_SHEET = "求解與驗證資訊"
+_CJK_FONT = "ClinicScheduleCJK"
+_CJK_FONT_ENVIRONMENT_VARIABLE = "CLINIC_SCHEDULER_PDF_FONT"
+_CJK_FONT_CANDIDATES = (
+    Path("C:/Windows/Fonts/NotoSansTC-VF.ttf"),
+    Path("C:/Windows/Fonts/msjh.ttc"),
+    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+    Path("/usr/share/fonts/truetype/noto/NotoSansTC-Regular.ttf"),
+    Path("/System/Library/Fonts/PingFang.ttc"),
+)
+
+
+def _register_cjk_font() -> None:
+    configured = os.environ.get(_CJK_FONT_ENVIRONMENT_VARIABLE)
+    candidates = (
+        (Path(configured), *_CJK_FONT_CANDIDATES)
+        if configured
+        else _CJK_FONT_CANDIDATES
+    )
+    source = next((path for path in candidates if path.is_file()), None)
+    if source is None:
+        raise FormalExportError(
+            "PDF export requires an embeddable Traditional Chinese font; "
+            f"set {_CJK_FONT_ENVIRONMENT_VARIABLE} to a TTF/TTC font path"
+        )
+    if _CJK_FONT not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(_CJK_FONT, str(source)))
+
+
+def _key_value(sheet: Worksheet, label: str) -> Any | None:
+    for row in sheet.iter_rows(min_col=1, max_col=2):
+        if row[0].value == label:
+            return row[1].value
+    return None
+
+
+def _validate_formal_workbook(workbook: Any) -> Worksheet:
+    if tuple(workbook.sheetnames) != WORKSHEET_NAMES:
+        raise FormalExportError(
+            "PDF export requires the complete formal Excel workbook structure"
+        )
+    schedule = workbook[_SCHEDULE_SHEET]
+    if schedule["A1"].value != "日期" or schedule["A2"].value != "星期":
+        raise FormalExportError("PDF export requires a valid monthly schedule sheet")
+    solver = workbook[_SOLVER_SHEET]
+    if _key_value(solver, "正式狀態") != "OPTIMAL":
+        raise FormalExportError("PDF export requires Excel formal status OPTIMAL")
+    if _key_value(solver, "Validation") != "PASS":
+        raise FormalExportError("PDF export requires Excel validation PASS")
+    return schedule
+
+
+def _cell_text(cell: Cell) -> str:
+    value = cell.value
+    if value is None:
+        return ""
+    if isinstance(value, (date, datetime)):
+        return f"{value.month}/{value.day}"
+    return str(value)
+
+
+def _fill_color(cell: Cell) -> colors.Color | None:
+    fill = cell.fill
+    if fill.fill_type != "solid":
+        return None
+    rgb = fill.fgColor.rgb
+    if not isinstance(rgb, str) or len(rgb) not in (6, 8):
+        return None
+    return colors.HexColor(f"#{rgb[-6:]}")
+
+
+def _paragraph(text: str, *, header: bool = False) -> Paragraph:
+    style = ParagraphStyle(
+        name="schedule-header" if header else "schedule-cell",
+        fontName=_CJK_FONT,
+        fontSize=7 if header else 6.2,
+        leading=8 if header else 7.1,
+        alignment=TA_CENTER,
+        textColor=colors.black,
+        wordWrap="CJK",
+    )
+    escaped = (
+        text.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace("\n", "<br/>")
+    )
+    return Paragraph(escaped, style)
+
+
+def _schedule_table(sheet: Worksheet) -> Table:
+    values: list[list[Paragraph]] = []
+    table_style: list[tuple[Any, ...]] = [
+        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#B7C9D6")),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+        ("FONTNAME", (0, 0), (-1, -1), _CJK_FONT),
+        ("LEFTPADDING", (0, 0), (-1, -1), 1.2),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 1.2),
+        ("TOPPADDING", (0, 0), (-1, -1), 2.2),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 2.2),
+    ]
+    for row_index, row in enumerate(
+        sheet.iter_rows(
+            min_row=1,
+            max_row=sheet.max_row,
+            min_col=1,
+            max_col=sheet.max_column,
+        )
+    ):
+        rendered_row: list[Paragraph] = []
+        for column_index, cell in enumerate(row):
+            rendered_row.append(
+                _paragraph(
+                    _cell_text(cell),
+                    header=row_index < 2 or column_index == 0,
+                )
+            )
+            background = _fill_color(cell)
+            if background is not None:
+                table_style.append(
+                    (
+                        "BACKGROUND",
+                        (column_index, row_index),
+                        (column_index, row_index),
+                        background,
+                    )
+                )
+        values.append(rendered_row)
+
+    usable_width = landscape(A4)[0] - 12 * mm
+    label_width = 24 * mm
+    date_width = (usable_width - label_width) / max(1, sheet.max_column - 1)
+    table = Table(
+        values,
+        colWidths=[label_width, *([date_width] * (sheet.max_column - 1))],
+        repeatRows=2,
+        hAlign="CENTER",
+    )
+    table.setStyle(TableStyle(table_style))
+    return table
+
+
+def _render_pdf(source: Path, target: Path) -> None:
+    workbook = load_workbook(source, read_only=False, data_only=True)
+    try:
+        schedule = _validate_formal_workbook(workbook)
+        title = workbook.properties.title or f"{source.stem} 月班表"
+        _register_cjk_font()
+        document = SimpleDocTemplate(
+            str(target),
+            pagesize=landscape(A4),
+            leftMargin=6 * mm,
+            rightMargin=6 * mm,
+            topMargin=5 * mm,
+            bottomMargin=5 * mm,
+            title=f"{title}｜月班表",
+            author="clinic-shift-scheduler",
+            subject="正式月班表列印版",
+        )
+        title_style = ParagraphStyle(
+            name="schedule-title",
+            fontName=_CJK_FONT,
+            fontSize=11,
+            leading=13,
+            alignment=TA_CENTER,
+            spaceAfter=0,
+        )
+        document.build(
+            [
+                Paragraph(f"{title}｜月班表", title_style),
+                Spacer(1, 2 * mm),
+                _schedule_table(schedule),
+            ]
+        )
+    finally:
+        workbook.close()
+
+
+def export_schedule_pdf_from_excel(
+    excel_path: str | Path,
+    *,
+    output_path: str | Path | None = None,
+    overwrite: bool = False,
+) -> Path:
+    """Create an atomic, single-sheet PDF using only the formal Excel workbook."""
+
+    source = Path(excel_path)
+    if not source.is_file():
+        raise FileNotFoundError(f"formal Excel file not found: {source}")
+    target = Path(output_path) if output_path is not None else source.with_suffix(".pdf")
+    prepare_target(target, overwrite=overwrite)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{target.stem}.",
+            suffix=".pdf",
+            dir=target.parent,
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+        _render_pdf(source, temporary)
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+    return target

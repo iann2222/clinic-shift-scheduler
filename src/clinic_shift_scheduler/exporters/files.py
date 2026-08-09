@@ -28,6 +28,7 @@ class OutputPaths:
     stem: str
     json: Path
     excel: Path
+    pdf: Path
 
 
 def schedule_month(data: NormalizedScheduleInput) -> str:
@@ -47,6 +48,7 @@ def build_output_paths(
         stem=stem,
         json=directory / f"{stem}.json",
         excel=directory / f"{stem}.xlsx",
+        pdf=directory / f"{stem}.pdf",
     )
 
 

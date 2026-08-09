@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
+from itertools import combinations
 from types import MappingProxyType
 from typing import Mapping
 
@@ -65,6 +66,8 @@ class RecomputedScheduleMetrics:
         tuple[FullTimeClass, PatternQualityLevel], int | None
     ]
     class_quality_ratio_gaps_basis_points: Mapping[PatternQualityLevel, int]
+    full_time_consecutive_ratio_max_gap_basis_points: int
+    full_time_consecutive_ratio_total_gap_basis_points: int
     fairness_gaps: Mapping[
         OptimizationStage, Mapping[tuple[str, FairnessMetric], int]
     ]
@@ -256,6 +259,26 @@ def recompute_schedule_metrics(
                     _gap(defined) if len(defined) >= 2 else 0
                 )
 
+    full_time_consecutive_ratios = [
+        pattern_ratios[
+            (employee.employee_id, FairnessMetric.CONSECUTIVE_DOUBLES)
+        ]
+        for employee in data.source.employees
+        if employee.employment_type is EmploymentType.FULL_TIME
+    ]
+    defined_consecutive_ratios = [
+        value for value in full_time_consecutive_ratios if value is not None
+    ]
+    global_consecutive_max_gap = (
+        _gap(defined_consecutive_ratios)
+        if len(defined_consecutive_ratios) >= 2
+        else 0
+    )
+    global_consecutive_total_gap = sum(
+        abs(left - right)
+        for left, right in combinations(defined_consecutive_ratios, 2)
+    )
+
     stage_members_and_metrics = {
         OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS: (
             tuple(
@@ -334,6 +357,12 @@ def recompute_schedule_metrics(
             if data.employees[employee_id].employment_type
             is EmploymentType.FULL_TIME
         ),
+        OptimizationStage.FULL_TIME_CONSECUTIVE_RATIO_MAX_GAP: (
+            global_consecutive_max_gap
+        ),
+        OptimizationStage.FULL_TIME_CONSECUTIVE_RATIO_TOTAL_GAP: (
+            global_consecutive_total_gap
+        ),
         OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS: sum(
             values.single_shift_days
             for employee_id, values in employee_metrics.items()
@@ -387,6 +416,12 @@ def recompute_schedule_metrics(
         class_quality_ratio_basis_points=MappingProxyType(class_quality_ratios),
         class_quality_ratio_gaps_basis_points=MappingProxyType(
             class_quality_gaps
+        ),
+        full_time_consecutive_ratio_max_gap_basis_points=(
+            global_consecutive_max_gap
+        ),
+        full_time_consecutive_ratio_total_gap_basis_points=(
+            global_consecutive_total_gap
         ),
         fairness_gaps=MappingProxyType(fairness_gaps),
         objective_values=MappingProxyType(objective_values),

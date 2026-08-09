@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from openpyxl import load_workbook
+from pypdf import PdfReader
 
 from clinic_shift_scheduler import (
     ExportFileExistsError,
@@ -21,6 +22,7 @@ from clinic_shift_scheduler import (
     build_workbook,
     export_result_excel,
     export_result_json,
+    export_schedule_pdf_from_excel,
     finalize_schedule_output,
     solve_lexicographic,
     validate_and_normalize,
@@ -44,6 +46,7 @@ class JsonExporterTests(unittest.TestCase):
         self.assertEqual(paths.stem, "排班結果_2024-10.result-v1")
         self.assertEqual(paths.json, Path("output/排班結果_2024-10.result-v1.json"))
         self.assertEqual(paths.excel, Path("output/排班結果_2024-10.result-v1.xlsx"))
+        self.assertEqual(paths.pdf, Path("output/排班結果_2024-10.result-v1.pdf"))
 
     def test_result_document_contains_the_versioned_formal_contract(self) -> None:
         generated_at = datetime(2024, 10, 2, 3, 4, 5, tzinfo=UTC)
@@ -57,7 +60,7 @@ class JsonExporterTests(unittest.TestCase):
             document["contract"],
             {"name": RESULT_CONTRACT_NAME, "version": RESULT_CONTRACT_VERSION},
         )
-        self.assertEqual(RESULT_CONTRACT_VERSION, "1.2")
+        self.assertEqual(RESULT_CONTRACT_VERSION, "1.3")
         self.assertEqual(document["input_schema_version"], "v1")
         self.assertEqual(document["generated_at"], "2024-10-02T03:04:05Z")
         self.assertEqual(document["month"], "2024-10")
@@ -68,7 +71,7 @@ class JsonExporterTests(unittest.TestCase):
             document["objective_vector"],
             document["statistics"]["overall"]["objective_vector"],
         )
-        self.assertEqual(len(document["stage_records"]), 13)
+        self.assertEqual(len(document["stage_records"]), 15)
         self.assertEqual(len(document["assignments"]), 5)
         self.assertIn("individual", document["statistics"])
         self.assertIn("fairness_groups", document["statistics"])
@@ -79,6 +82,18 @@ class JsonExporterTests(unittest.TestCase):
         self.assertIn(
             "class_quality_ratio_gaps_basis_points",
             document["statistics"]["overall"],
+        )
+        self.assertIn(
+            "full_time_consecutive_ratio_max_gap_basis_points",
+            document["statistics"]["overall"],
+        )
+        self.assertIn(
+            "full_time_consecutive_ratio_total_gap_basis_points",
+            document["statistics"]["overall"],
+        )
+        self.assertIn(
+            "full_time_consecutive_ratio_max_gap",
+            document["objective_vector"],
         )
         full_time_group = next(
             item
@@ -204,9 +219,20 @@ class ExcelExporterTests(unittest.TestCase):
             self.assertGreaterEqual(individual.max_column, 30)
 
             groups = workbook["類別與公平性統計"]
-            self.assertEqual(groups["A1"].value, "類別統計")
-            self.assertEqual(groups["A2"].value, "類別")
-            self.assertEqual(groups["A3"].value, self.output.category_statistics[0].category)
+            self.assertEqual(groups["A1"].value, "全體正職連續雙班比例公平")
+            self.assertEqual(groups["A2"].value, "employee_id")
+            self.assertTrue(
+                any(
+                    groups.cell(row, 1).value == "類別統計"
+                    for row in range(1, groups.max_row + 1)
+                )
+            )
+            self.assertTrue(
+                any(
+                    groups.cell(row, 1).value == "全體 max-min gap (bp)"
+                    for row in range(1, groups.max_row + 1)
+                )
+            )
             self.assertTrue(
                 any(
                     isinstance(groups.cell(row, 4).value, str)
@@ -331,6 +357,66 @@ class ExcelExporterTests(unittest.TestCase):
                     output_directory=directory,
                 )
             self.assertEqual(list(Path(directory).iterdir()), [])
+
+
+class PdfExporterTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        cls.data = validate_and_normalize(minimal_valid_input())
+        cls.result = solve_lexicographic(cls.data)
+        cls.output = finalize_schedule_output(cls.data, cls.result)
+        assert cls.output.status is FeasibilityStatus.OPTIMAL
+
+    def test_pdf_is_single_page_monthly_schedule_derived_from_excel(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            excel = export_result_excel(
+                self.data,
+                self.output,
+                output_directory=directory,
+            )
+            target = export_schedule_pdf_from_excel(excel)
+            reader = PdfReader(target)
+            text = "\n".join(page.extract_text() or "" for page in reader.pages)
+
+            self.assertEqual(target.name, "排班結果_2024-10.result-v1.pdf")
+            self.assertEqual(len(reader.pages), 1)
+            self.assertIn("月班表", text)
+            self.assertIn("日期", text)
+            self.assertIn(self.output.individual_statistics[0].name, text)
+            self.assertNotIn("Objective vector", text)
+            self.assertEqual(list(Path(directory).glob("*.tmp")), [])
+
+    def test_pdf_refuses_implicit_overwrite(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            excel = export_result_excel(
+                self.data,
+                self.output,
+                output_directory=directory,
+            )
+            target = export_schedule_pdf_from_excel(excel)
+            with self.assertRaises(ExportFileExistsError):
+                export_schedule_pdf_from_excel(excel)
+            self.assertEqual(
+                export_schedule_pdf_from_excel(excel, overwrite=True),
+                target,
+            )
+
+    def test_pdf_rejects_excel_without_formal_pass_status(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            excel = export_result_excel(
+                self.data,
+                self.output,
+                output_directory=directory,
+            )
+            workbook = load_workbook(excel)
+            try:
+                solver = workbook["求解與驗證資訊"]
+                solver["B4"] = "FEASIBLE"
+                workbook.save(excel)
+            finally:
+                workbook.close()
+            with self.assertRaises(FormalExportError):
+                export_schedule_pdf_from_excel(excel)
 
 
 if __name__ == "__main__":

@@ -357,10 +357,74 @@ def _build_group_sheet(
     output: FormalScheduleOutput,
 ) -> None:
     sheet = workbook.create_sheet("類別與公平性統計")
-    sheet.append(("類別統計",))
+    overall = output.overall_statistics
+    assert overall is not None
+    sheet.append(("全體正職連續雙班比例公平",))
     sheet.merge_cells(start_row=1, start_column=1, end_row=1, end_column=7)
     _header(sheet.cell(1, 1))
     sheet.append(
+        (
+            "employee_id",
+            "姓名",
+            "正職類別",
+            "出勤日",
+            "連續雙班日",
+            "比例 (bp)",
+            "比例",
+        )
+    )
+    for stats in output.individual_statistics:
+        if stats.employment_type is not EmploymentType.FULL_TIME:
+            continue
+        ratio = stats.ratios["consecutive_double_days"]
+        sheet.append(
+            (
+                stats.employee_id,
+                stats.name,
+                _full_time_class_label(stats.full_time_class),
+                stats.attendance_days,
+                stats.consecutive_double_days,
+                "N/A" if ratio.basis_points is None else ratio.basis_points,
+                ratio.display,
+            )
+        )
+    global_last = sheet.max_row
+    _style_table(
+        sheet,
+        header_row=2,
+        first_data_row=3,
+        last_row=global_last,
+        last_column=7,
+    )
+    sheet.append(
+        (
+            "全體 max-min gap (bp)",
+            overall.full_time_consecutive_ratio_max_gap_basis_points,
+        )
+    )
+    sheet.append(
+        (
+            "所有人兩兩差總和 (bp)",
+            overall.full_time_consecutive_ratio_total_gap_basis_points,
+        )
+    )
+    for row in range(global_last + 1, global_last + 3):
+        for column in range(1, 3):
+            sheet.cell(row, column).border = _BORDER
+            sheet.cell(row, column).alignment = Alignment(vertical="center")
+        sheet.cell(row, 1).font = Font(bold=True)
+
+    category_title_row = sheet.max_row + 2
+    sheet.cell(category_title_row, 1, "類別統計")
+    sheet.merge_cells(
+        start_row=category_title_row,
+        start_column=1,
+        end_row=category_title_row,
+        end_column=7,
+    )
+    _header(sheet.cell(category_title_row, 1))
+    category_header_row = category_title_row + 1
+    for column, value in enumerate(
         (
             "類別",
             "人員",
@@ -369,8 +433,10 @@ def _build_group_sheet(
             "單節日",
             "早晚雙班",
             "三節班",
-        )
-    )
+        ),
+        start=1,
+    ):
+        sheet.cell(category_header_row, column, value)
     for category in output.category_statistics:
         sheet.append(
             (
@@ -386,8 +452,8 @@ def _build_group_sheet(
     category_last = sheet.max_row
     _style_table(
         sheet,
-        header_row=2,
-        first_data_row=3,
+        header_row=category_header_row,
+        first_data_row=category_header_row + 1,
         last_row=category_last,
         last_column=7,
     )
@@ -413,8 +479,6 @@ def _build_group_sheet(
     )
     for column, value in enumerate(quality_headers, start=1):
         sheet.cell(quality_header_row, column, value)
-    overall = output.overall_statistics
-    assert overall is not None
     for class_stats in output.full_time_class_quality_statistics:
         for quality_level, days in class_stats.quality_level_days.items():
             ratio = class_stats.quality_level_ratio_basis_points[quality_level]

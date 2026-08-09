@@ -38,6 +38,12 @@ class OptimizationStage(StrEnum):
     FULL_TIME_TARGET_DEVIATION = "full_time_target_deviation"
     PART_TIME_USAGE = "part_time_usage"
     FULL_TIME_CONSECUTIVE_DOUBLES = "full_time_consecutive_doubles"
+    FULL_TIME_CONSECUTIVE_RATIO_MAX_GAP = (
+        "full_time_consecutive_ratio_max_gap"
+    )
+    FULL_TIME_CONSECUTIVE_RATIO_TOTAL_GAP = (
+        "full_time_consecutive_ratio_total_gap"
+    )
     FULL_TIME_SINGLE_SHIFT_DAYS = "full_time_single_shift_days"
     FULL_TIME_SECONDARY_PATTERNS = "full_time_secondary_patterns"
     FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP = (
@@ -91,6 +97,9 @@ class ConstantProof(StrEnum):
     )
     NO_FULL_TIME_EMPLOYEES = "NO_FULL_TIME_EMPLOYEES"
     NO_PATTERN_OPPORTUNITY = "NO_PATTERN_OPPORTUNITY"
+    NO_COMPARABLE_FULL_TIME_EMPLOYEES = (
+        "NO_COMPARABLE_FULL_TIME_EMPLOYEES"
+    )
     NO_COMPARABLE_FULL_TIME_CLASSES = "NO_COMPARABLE_FULL_TIME_CLASSES"
     NO_COMPARABLE_FAIRNESS_GROUPS = "NO_COMPARABLE_FAIRNESS_GROUPS"
 
@@ -143,6 +152,11 @@ class OptimizationModel:
         tuple[str, FairnessMetric], cp_model.IntVar
     ]
     employee_attendance_active: Mapping[str, cp_model.IntVar]
+    global_consecutive_ratio_gap_variable: cp_model.IntVar | None
+    global_consecutive_ratio_pairwise_gap_variables: Mapping[
+        tuple[str, str], cp_model.IntVar
+    ]
+    global_consecutive_ratio_total_objective: cp_model.LinearExpr | int
     class_attendance_totals: Mapping[FullTimeClass, cp_model.IntVar]
     class_quality_counts: Mapping[
         tuple[FullTimeClass, PatternQualityLevel], cp_model.IntVar
@@ -676,6 +690,112 @@ def build_optimization_model(
             )
             employee_ratios[(employee_id, metric)] = ratio
 
+    full_time_employees = tuple(
+        employee
+        for employee in data.source.employees
+        if employee.employment_type is EmploymentType.FULL_TIME
+    )
+    global_consecutive_gap: cp_model.IntVar | None = None
+    global_consecutive_pairwise_gaps: dict[
+        tuple[str, str], cp_model.IntVar
+    ] = {}
+    if len(full_time_employees) >= 2:
+        ratios = [
+            employee_ratios[
+                (employee.employee_id, FairnessMetric.CONSECUTIVE_DOUBLES)
+            ]
+            for employee in full_time_employees
+        ]
+        active_variables = [
+            employee_attendance_active[employee.employee_id]
+            for employee in full_time_employees
+        ]
+        effective_mins: list[cp_model.IntVar] = []
+        for employee, ratio, active in zip(
+            full_time_employees,
+            ratios,
+            active_variables,
+            strict=True,
+        ):
+            effective = model.new_int_var(
+                0,
+                BASIS_POINTS_SCALE,
+                f"global_consecutive_effective_min[{employee.employee_id}]",
+            )
+            model.add(effective == ratio).only_enforce_if(active)
+            model.add(effective == BASIS_POINTS_SCALE).only_enforce_if(
+                active.Not()
+            )
+            effective_mins.append(effective)
+        maximum = model.new_int_var(
+            0,
+            BASIS_POINTS_SCALE,
+            "global_consecutive_ratio_max",
+        )
+        minimum = model.new_int_var(
+            0,
+            BASIS_POINTS_SCALE,
+            "global_consecutive_ratio_min",
+        )
+        any_active = model.new_bool_var("global_consecutive_ratio_any_active")
+        global_consecutive_gap = model.new_int_var(
+            0,
+            BASIS_POINTS_SCALE,
+            "full_time_consecutive_ratio_max_gap",
+        )
+        model.add_max_equality(maximum, ratios)
+        model.add_min_equality(minimum, effective_mins)
+        model.add_max_equality(any_active, active_variables)
+        model.add(global_consecutive_gap == maximum - minimum).only_enforce_if(
+            any_active
+        )
+        model.add(global_consecutive_gap == 0).only_enforce_if(any_active.Not())
+
+        for left_index, left in enumerate(full_time_employees):
+            for right in full_time_employees[left_index + 1 :]:
+                left_id = left.employee_id
+                right_id = right.employee_id
+                difference = model.new_int_var(
+                    -BASIS_POINTS_SCALE,
+                    BASIS_POINTS_SCALE,
+                    f"global_consecutive_difference[{left_id},{right_id}]",
+                )
+                absolute_difference = model.new_int_var(
+                    0,
+                    BASIS_POINTS_SCALE,
+                    f"global_consecutive_absolute_difference[{left_id},{right_id}]",
+                )
+                pair_active = model.new_bool_var(
+                    f"global_consecutive_pair_active[{left_id},{right_id}]"
+                )
+                pair_gap = model.new_int_var(
+                    0,
+                    BASIS_POINTS_SCALE,
+                    f"global_consecutive_pair_gap[{left_id},{right_id}]",
+                )
+                model.add(
+                    difference
+                    == employee_ratios[
+                        (left_id, FairnessMetric.CONSECUTIVE_DOUBLES)
+                    ]
+                    - employee_ratios[
+                        (right_id, FairnessMetric.CONSECUTIVE_DOUBLES)
+                    ]
+                )
+                model.add_abs_equality(absolute_difference, difference)
+                model.add_min_equality(
+                    pair_active,
+                    [
+                        employee_attendance_active[left_id],
+                        employee_attendance_active[right_id],
+                    ],
+                )
+                model.add(pair_gap == absolute_difference).only_enforce_if(
+                    pair_active
+                )
+                model.add(pair_gap == 0).only_enforce_if(pair_active.Not())
+                global_consecutive_pairwise_gaps[(left_id, right_id)] = pair_gap
+
     ratio_gaps: dict[tuple[str, FairnessMetric], cp_model.IntVar] = {}
     for full_time_class, metrics in full_time_classes.items():
         groups: dict[str, list[Employee]] = defaultdict(list)
@@ -831,6 +951,13 @@ def build_optimization_model(
         employee_fairness_metrics=MappingProxyType(employee_metrics),
         employee_pattern_ratio_basis_points=MappingProxyType(employee_ratios),
         employee_attendance_active=MappingProxyType(employee_attendance_active),
+        global_consecutive_ratio_gap_variable=global_consecutive_gap,
+        global_consecutive_ratio_pairwise_gap_variables=MappingProxyType(
+            global_consecutive_pairwise_gaps
+        ),
+        global_consecutive_ratio_total_objective=sum(
+            global_consecutive_pairwise_gaps.values()
+        ),
         class_attendance_totals=class_quality.attendance_totals,
         class_quality_counts=class_quality.quality_counts,
         class_quality_ratio_basis_points=class_quality.ratios,
@@ -983,6 +1110,18 @@ def _objective_specs(
     consecutive_constant, consecutive_proof = pattern_constant(
         built.consecutive_double_variables
     )
+    global_consecutive_gap = built.global_consecutive_ratio_gap_variable
+    global_consecutive_pairwise_gaps = (
+        built.global_consecutive_ratio_pairwise_gap_variables
+    )
+    global_consecutive_constant = (
+        None if global_consecutive_gap is not None else 0
+    )
+    global_consecutive_proof = (
+        None
+        if global_consecutive_gap is not None
+        else ConstantProof.NO_COMPARABLE_FULL_TIME_EMPLOYEES
+    )
     single_constant, single_proof = pattern_constant(
         built.single_shift_variables
     )
@@ -1091,6 +1230,28 @@ def _objective_specs(
             expression=built.consecutive_double_objective,
             constant_value=consecutive_constant,
             constant_proof=consecutive_proof,
+        ),
+        _ObjectiveSpec(
+            stage=OptimizationStage.FULL_TIME_CONSECUTIVE_RATIO_MAX_GAP,
+            direction=ObjectiveDirection.MINIMIZE,
+            variables=(global_consecutive_gap,)
+            if global_consecutive_gap is not None
+            else (),
+            expression=(
+                global_consecutive_gap
+                if global_consecutive_gap is not None
+                else 0
+            ),
+            constant_value=global_consecutive_constant,
+            constant_proof=global_consecutive_proof,
+        ),
+        _ObjectiveSpec(
+            stage=OptimizationStage.FULL_TIME_CONSECUTIVE_RATIO_TOTAL_GAP,
+            direction=ObjectiveDirection.MINIMIZE,
+            variables=tuple(global_consecutive_pairwise_gaps.values()),
+            expression=built.global_consecutive_ratio_total_objective,
+            constant_value=global_consecutive_constant,
+            constant_proof=global_consecutive_proof,
         ),
         _ObjectiveSpec(
             stage=OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS,
@@ -1215,8 +1376,8 @@ def solve_lexicographic(
     if precheck.status is PrecheckStatus.PRECHECK_INFEASIBLE:
         return _empty_result(FeasibilityStatus.PRECHECK_INFEASIBLE, precheck)
 
-    # Class-level ratio constraints are attached only after the first six
-    # formal layers are locked.  They are irrelevant before then and can make
+    # Class-level ratio constraints are attached only after the secondary
+    # pattern layer is locked.  They are irrelevant before then and can make
     # those earlier CP-SAT proofs substantially more expensive.
     built = build_optimization_model(data, include_class_quality=False)
     stages: list[OptimizationStageResult] = []
@@ -1269,7 +1430,13 @@ def solve_lexicographic(
     )
     snapshot = _snapshot(data, built, hard_run.solver)
 
-    objective_specs = list(_objective_specs(data, built, precheck)[:5])
+    initial_specs = _objective_specs(data, built, precheck)
+    secondary_index = next(
+        index
+        for index, objective in enumerate(initial_specs)
+        if objective.stage is OptimizationStage.FULL_TIME_SECONDARY_PATTERNS
+    )
+    objective_specs = list(initial_specs[: secondary_index + 1])
     for objective in objective_specs:
         if objective.constant_value is not None:
             stages.append(
@@ -1287,7 +1454,9 @@ def solve_lexicographic(
             if objective.stage is OptimizationStage.FULL_TIME_SECONDARY_PATTERNS:
                 built = _attach_class_quality_model(data, built)
                 objective_specs.extend(
-                    _objective_specs(data, built, precheck)[5:]
+                    _objective_specs(data, built, precheck)[
+                        secondary_index + 1 :
+                    ]
                 )
             continue
 
@@ -1318,7 +1487,9 @@ def solve_lexicographic(
             if objective.stage is OptimizationStage.FULL_TIME_SECONDARY_PATTERNS:
                 built = _attach_class_quality_model(data, built)
                 objective_specs.extend(
-                    _objective_specs(data, built, precheck)[5:]
+                    _objective_specs(data, built, precheck)[
+                        secondary_index + 1 :
+                    ]
                 )
             continue
 

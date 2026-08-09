@@ -173,6 +173,8 @@ class OverallStatistics:
     part_time_shifts: int
     role_counts: Mapping[str, int]
     period_counts: Mapping[str, int]
+    full_time_consecutive_ratio_max_gap_basis_points: int
+    full_time_consecutive_ratio_total_gap_basis_points: int
     class_quality_ratio_gaps_basis_points: Mapping[str, int]
     objective_vector: Mapping[str, int]
     implemented_objective_prefix_optimal: bool
@@ -601,6 +603,12 @@ def _build_overall_statistics(
         ),
         period_counts=MappingProxyType(
             {period.value: assignment_periods[period] for period in PERIODS_V1}
+        ),
+        full_time_consecutive_ratio_max_gap_basis_points=(
+            metrics.full_time_consecutive_ratio_max_gap_basis_points
+        ),
+        full_time_consecutive_ratio_total_gap_basis_points=(
+            metrics.full_time_consecutive_ratio_total_gap_basis_points
         ),
         class_quality_ratio_gaps_basis_points=MappingProxyType(
             {

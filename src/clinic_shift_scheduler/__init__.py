@@ -19,6 +19,7 @@ from .exporters import (
     build_workbook,
     export_result_excel,
     export_result_json,
+    export_schedule_pdf_from_excel,
 )
 from .feasibility import (
     Assignment,
@@ -137,6 +138,7 @@ __all__ = [
     "expand_weekly_template",
     "export_result_json",
     "export_result_excel",
+    "export_schedule_pdf_from_excel",
     "finalize_schedule_output",
     "recompute_schedule_metrics",
     "run_prechecks",

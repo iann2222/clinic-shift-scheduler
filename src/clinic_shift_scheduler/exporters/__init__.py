@@ -14,6 +14,7 @@ from .json_exporter import (
     build_result_document,
     export_result_json,
 )
+from .pdf_exporter import export_schedule_pdf_from_excel
 
 __all__ = [
     "DEFAULT_OUTPUT_DIRECTORY",
@@ -28,4 +29,5 @@ __all__ = [
     "build_workbook",
     "export_result_excel",
     "export_result_json",
+    "export_schedule_pdf_from_excel",
 ]
