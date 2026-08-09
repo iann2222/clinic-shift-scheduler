@@ -10,6 +10,7 @@ venv/
 build/
 dist/
 *.egg-info/
+/output/
 
 # Real scheduling data stays local; only anonymized templates are versioned.
 /排班資料/*

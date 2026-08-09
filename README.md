@@ -16,6 +16,7 @@
 - `src/clinic_shift_scheduler/result_metrics.py`：只從最終 assignments 重算每日模式、統計、公平性 gap 與完整目標向量。
 - `src/clinic_shift_scheduler/result_validation.py`：獨立驗證硬性規則、階段順序及鎖定目標值。
 - `src/clinic_shift_scheduler/output.py`：媒介無關的日期橫向班表、個人／群組／整體統計與正式狀態提升。
+- `src/clinic_shift_scheduler/exporters/`：版本化 JSON、Excel 等檔案媒介 adapter 與安全輸出路徑管理；不得放入排班或統計邏輯。
 - `tests/`：synthetic fixtures 與單元測試。
 - `排班資料/`：本機實際排班資料；直接放在此層的真名檔案由 Git 忽略，只有 `排班資料/匿名範本/` 會納入版本控制並作為開發與整合驗證資料。
 
@@ -24,6 +25,11 @@
 但求解結果本身仍只回傳 `FEASIBLE`。將結果交給
 `finalize_schedule_output` 後，只有獨立驗證全部通過才會提升為完整 v1
 `OPTIMAL`；驗證失敗則回傳 `VALIDATION_FAILED` 且不建立正式月班表。
+
+正式執行產物預設寫入 repository root 的 `output/`，整個資料夾均由
+Git 忽略，避免真實姓名或排班內容進入版本控制。正式檔名固定為
+`排班結果_YYYY-MM.result-v1.json`／`.xlsx`；預設拒絕覆寫，只有呼叫端
+明確指定 `overwrite=True` 才會替換既有檔案。
 
 ## 使用方式
 
