@@ -34,6 +34,7 @@ from .output import (
     CategoryStatistics,
     FairnessGroupStatistics,
     FormalScheduleOutput,
+    FullTimeClassQualityStatistics,
     IndividualStatistics,
     MonthlyScheduleRow,
     MonthlyScheduleTable,
@@ -65,6 +66,7 @@ from .precheck import (
     PrecheckStatus,
     run_prechecks,
 )
+from .ratio_fairness import PatternQualityLevel
 from .result_metrics import (
     EmployeeResultMetrics,
     RecomputedScheduleMetrics,
@@ -91,6 +93,7 @@ __all__ = [
     "FairnessMetric",
     "FairnessGroupStatistics",
     "FormalExportError",
+    "FullTimeClassQualityStatistics",
     "InputValidationError",
     "IndividualStatistics",
     "LexicographicResult",
@@ -101,6 +104,7 @@ __all__ = [
     "OptimizationStageResult",
     "OptimizationStageStatus",
     "OutputPaths",
+    "PatternQualityLevel",
     "OverallStatistics",
     "OptimizationModel",
     "PrecheckDiagnostic",

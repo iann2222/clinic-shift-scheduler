@@ -1,6 +1,6 @@
 # Clinic Shift Scheduler
 
-本 repository 依據 `診所排班系統.md` 實作診所排班系統。目前完成 v1 資料契約、輸入驗證、正規化、OR-Tools CP-SAT 硬性可行性模型、保守前置可行性檢查、完整嚴格字典序目標、獨立結果驗證器，以及媒介無關的正式班表與統計輸出模型。Excel、JSON 檔案等最終輸出 adapter 尚未決定。
+本 repository 依據 `診所排班系統.md` 實作診所排班系統。目前完成 v1 資料契約、輸入驗證、正規化、OR-Tools CP-SAT 硬性可行性模型、保守前置可行性檢查、完整嚴格字典序目標、獨立結果驗證器、媒介無關的正式班表與統計輸出模型，以及 JSON／Excel 正式輸出 adapter。
 
 ## 專案結構
 
@@ -12,7 +12,8 @@
 - `src/clinic_shift_scheduler/daily_patterns.py`：CP-SAT 與前置檢查共用的 v1 每日班型規則。
 - `src/clinic_shift_scheduler/feasibility.py`：無目標函數的 CP-SAT 硬性可行性模型。
 - `src/clinic_shift_scheduler/precheck.py`：總量、個人容量、職務容量及同時段匹配的必要條件檢查。
-- `src/clinic_shift_scheduler/optimization.py`：TARGET 偏差、兼職用量、A+B 班型品質、各群組整數公平性與最佳值鎖定控制器。
+- `src/clinic_shift_scheduler/optimization.py`：TARGET 偏差、兼職用量、A+B 班型品質、A／B 類別品質比例、類別內個人比例／整數公平性、其他群組公平性與最佳值鎖定控制器。
+- `src/clinic_shift_scheduler/ratio_fairness.py`：optimizer、結果重算與報表共用的品質順位及整數 basis-points 換算規則。
 - `src/clinic_shift_scheduler/result_metrics.py`：只從最終 assignments 重算每日模式、統計、公平性 gap 與完整目標向量。
 - `src/clinic_shift_scheduler/result_validation.py`：獨立驗證硬性規則、階段順序及鎖定目標值。
 - `src/clinic_shift_scheduler/output.py`：媒介無關的日期橫向班表、個人／群組／整體統計與正式狀態提升。

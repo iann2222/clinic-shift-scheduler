@@ -54,8 +54,11 @@ FORMAL_OBJECTIVE_STAGES: tuple[OptimizationStage, ...] = (
     OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES,
     OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS,
     OptimizationStage.FULL_TIME_SECONDARY_PATTERNS,
-    OptimizationStage.A_GROUP_FAIRNESS,
-    OptimizationStage.B_GROUP_FAIRNESS,
+    OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP,
+    OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_TOTAL_GAP,
+    OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP,
+    OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP,
+    OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS,
     OptimizationStage.PART_TIME_GROUP_FAIRNESS,
     OptimizationStage.COMMON_GROUP_FAIRNESS,
 )

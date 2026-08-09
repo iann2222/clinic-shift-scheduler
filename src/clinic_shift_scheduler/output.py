@@ -20,6 +20,11 @@ from .optimization import (
     OptimizationStageStatus,
 )
 from .result_metrics import EmployeeResultMetrics, RecomputedScheduleMetrics
+from .ratio_fairness import (
+    BASIS_POINTS_SCALE,
+    PatternQualityLevel,
+    ratio_basis_points,
+)
 from .result_validation import (
     FORMAL_OBJECTIVE_STAGES,
     ValidationReport,
@@ -37,14 +42,21 @@ class ScheduleCellKind(StrEnum):
 class RatioValue:
     numerator: int
     denominator: int
+    basis_points: int | None
     value: float | None
 
     @classmethod
     def of(cls, numerator: int, denominator: int) -> "RatioValue":
+        basis_points = ratio_basis_points(numerator, denominator)
         return cls(
             numerator=numerator,
             denominator=denominator,
-            value=None if denominator == 0 else numerator / denominator,
+            basis_points=basis_points,
+            value=(
+                None
+                if basis_points is None
+                else basis_points / BASIS_POINTS_SCALE
+            ),
         )
 
     @property
@@ -126,6 +138,8 @@ class FairnessGroupStatistics:
     employee_ids: tuple[str, ...]
     metric_values: Mapping[str, Mapping[str, int]]
     gaps: Mapping[str, int]
+    ratio_basis_points: Mapping[str, Mapping[str, int | None]]
+    ratio_gaps_basis_points: Mapping[str, int]
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +154,15 @@ class CategoryStatistics:
 
 
 @dataclass(frozen=True, slots=True)
+class FullTimeClassQualityStatistics:
+    full_time_class: FullTimeClass
+    employee_ids: tuple[str, ...]
+    attendance_days: int
+    quality_level_days: Mapping[str, int]
+    quality_level_ratio_basis_points: Mapping[str, int | None]
+
+
+@dataclass(frozen=True, slots=True)
 class OverallStatistics:
     total_demand: int
     total_assignments: int
@@ -150,6 +173,7 @@ class OverallStatistics:
     part_time_shifts: int
     role_counts: Mapping[str, int]
     period_counts: Mapping[str, int]
+    class_quality_ratio_gaps_basis_points: Mapping[str, int]
     objective_vector: Mapping[str, int]
     implemented_objective_prefix_optimal: bool
 
@@ -162,6 +186,9 @@ class FormalScheduleOutput:
     monthly_schedule: MonthlyScheduleTable | None
     individual_statistics: tuple[IndividualStatistics, ...]
     category_statistics: tuple[CategoryStatistics, ...]
+    full_time_class_quality_statistics: tuple[
+        FullTimeClassQualityStatistics, ...
+    ]
     fairness_group_statistics: tuple[FairnessGroupStatistics, ...]
     overall_statistics: OverallStatistics | None
     optimization_stages: tuple[OptimizationStageResult, ...]
@@ -332,6 +359,7 @@ def _build_individual_statistics(
 
 def _metric_value(values: EmployeeResultMetrics, metric: FairnessMetric) -> int:
     return {
+        FairnessMetric.ATTENDANCE_DAYS: values.attendance_days,
         FairnessMetric.CONSECUTIVE_DOUBLES: values.consecutive_double_days,
         FairnessMetric.SINGLE_SHIFT_DAYS: values.single_shift_days,
         FairnessMetric.MORNING_EVENING_DAYS: values.morning_evening_days,
@@ -396,6 +424,36 @@ def _build_group_statistics(
             metric: max(values.values()) - min(values.values())
             for metric, values in metric_values.items()
         }
+        ratio_values: dict[str, Mapping[str, int | None]] = {}
+        ratio_gaps: dict[str, int] = {}
+        if employees[0].employment_type is EmploymentType.FULL_TIME:
+            pattern_metrics = (
+                (
+                    FairnessMetric.CONSECUTIVE_DOUBLES,
+                    FairnessMetric.SINGLE_SHIFT_DAYS,
+                    FairnessMetric.MORNING_EVENING_DAYS,
+                )
+                if employees[0].full_time_class is FullTimeClass.A
+                else (
+                    FairnessMetric.CONSECUTIVE_DOUBLES,
+                    FairnessMetric.SINGLE_SHIFT_DAYS,
+                    FairnessMetric.TRIPLE_DAYS,
+                )
+            )
+            for metric in pattern_metrics:
+                values = MappingProxyType(
+                    {
+                        employee_id: metrics.pattern_ratio_basis_points[
+                            (employee_id, metric)
+                        ]
+                        for employee_id in employee_ids
+                    }
+                )
+                ratio_values[metric.value] = values
+                defined = [value for value in values.values() if value is not None]
+                ratio_gaps[metric.value] = (
+                    max(defined) - min(defined) if len(defined) >= 2 else 0
+                )
         result.append(
             FairnessGroupStatistics(
                 fairness_group=group,
@@ -404,6 +462,8 @@ def _build_group_statistics(
                 employee_ids=employee_ids,
                 metric_values=MappingProxyType(metric_values),
                 gaps=MappingProxyType(gaps),
+                ratio_basis_points=MappingProxyType(ratio_values),
+                ratio_gaps_basis_points=MappingProxyType(ratio_gaps),
             )
         )
     return tuple(result)
@@ -457,6 +517,49 @@ def _build_category_statistics(
     )
 
 
+def _build_class_quality_statistics(
+    data: NormalizedScheduleInput,
+    metrics: RecomputedScheduleMetrics,
+) -> tuple[FullTimeClassQualityStatistics, ...]:
+    result: list[FullTimeClassQualityStatistics] = []
+    for full_time_class in FullTimeClass:
+        employee_ids = tuple(
+            sorted(
+                employee.employee_id
+                for employee in data.source.employees
+                if employee.full_time_class is full_time_class
+            )
+        )
+        result.append(
+            FullTimeClassQualityStatistics(
+                full_time_class=full_time_class,
+                employee_ids=employee_ids,
+                attendance_days=metrics.class_attendance_days[
+                    full_time_class
+                ],
+                quality_level_days=MappingProxyType(
+                    {
+                        quality_level.value: metrics.class_quality_days[
+                            (full_time_class, quality_level)
+                        ]
+                        for quality_level in PatternQualityLevel
+                    }
+                ),
+                quality_level_ratio_basis_points=MappingProxyType(
+                    {
+                        quality_level.value: (
+                            metrics.class_quality_ratio_basis_points[
+                                (full_time_class, quality_level)
+                            ]
+                        )
+                        for quality_level in PatternQualityLevel
+                    }
+                ),
+            )
+        )
+    return tuple(result)
+
+
 def _build_overall_statistics(
     data: NormalizedScheduleInput,
     result: LexicographicResult,
@@ -499,6 +602,16 @@ def _build_overall_statistics(
         period_counts=MappingProxyType(
             {period.value: assignment_periods[period] for period in PERIODS_V1}
         ),
+        class_quality_ratio_gaps_basis_points=MappingProxyType(
+            {
+                quality_level.value: (
+                    metrics.class_quality_ratio_gaps_basis_points[
+                        quality_level
+                    ]
+                )
+                for quality_level in PatternQualityLevel
+            }
+        ),
         objective_vector=MappingProxyType(
             {
                 stage.value: metrics.objective_values[stage]
@@ -525,6 +638,7 @@ def finalize_schedule_output(
             monthly_schedule=None,
             individual_statistics=(),
             category_statistics=(),
+            full_time_class_quality_statistics=(),
             fairness_group_statistics=(),
             overall_statistics=None,
             optimization_stages=result.stages,
@@ -539,6 +653,7 @@ def finalize_schedule_output(
             monthly_schedule=None,
             individual_statistics=(),
             category_statistics=(),
+            full_time_class_quality_statistics=(),
             fairness_group_statistics=(),
             overall_statistics=None,
             optimization_stages=result.stages,
@@ -567,6 +682,9 @@ def finalize_schedule_output(
         monthly_schedule=_build_monthly_table(data, result.assignments),
         individual_statistics=_build_individual_statistics(data, metrics),
         category_statistics=_build_category_statistics(data, metrics),
+        full_time_class_quality_statistics=(
+            _build_class_quality_statistics(data, metrics)
+        ),
         fairness_group_statistics=_build_group_statistics(data, metrics),
         overall_statistics=_build_overall_statistics(data, result, metrics),
         optimization_stages=result.stages,

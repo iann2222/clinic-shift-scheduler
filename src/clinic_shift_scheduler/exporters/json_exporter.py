@@ -22,7 +22,7 @@ from .files import (
 
 
 RESULT_CONTRACT_NAME = "clinic-shift-scheduler-formal-result"
-RESULT_CONTRACT_VERSION = "1.0"
+RESULT_CONTRACT_VERSION = "1.2"
 
 
 def _validation_document(output: FormalScheduleOutput) -> dict[str, Any]:
@@ -88,6 +88,9 @@ def build_result_document(
         "statistics": {
             "individual": to_primitive(output.individual_statistics),
             "category": to_primitive(output.category_statistics),
+            "full_time_class_quality": to_primitive(
+                output.full_time_class_quality_statistics
+            ),
             "fairness_groups": to_primitive(output.fairness_group_statistics),
             "overall": to_primitive(overall),
         },

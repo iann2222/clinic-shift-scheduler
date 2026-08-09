@@ -312,6 +312,53 @@ def _build_group_sheet(
         last_column=7,
     )
 
+    quality_title_row = sheet.max_row + 2
+    sheet.cell(quality_title_row, 1, "A／B 類別品質順位比例")
+    sheet.merge_cells(
+        start_row=quality_title_row,
+        start_column=1,
+        end_row=quality_title_row,
+        end_column=7,
+    )
+    _header(sheet.cell(quality_title_row, 1))
+    quality_header_row = quality_title_row + 1
+    quality_headers = (
+        "正職類別",
+        "人員",
+        "總出勤日",
+        "品質順位",
+        "班型日數",
+        "比例 (bp)",
+        "A/B 差距 (bp)",
+    )
+    for column, value in enumerate(quality_headers, start=1):
+        sheet.cell(quality_header_row, column, value)
+    overall = output.overall_statistics
+    assert overall is not None
+    for class_stats in output.full_time_class_quality_statistics:
+        for quality_level, days in class_stats.quality_level_days.items():
+            ratio = class_stats.quality_level_ratio_basis_points[quality_level]
+            sheet.append(
+                (
+                    _full_time_class_label(class_stats.full_time_class),
+                    ", ".join(class_stats.employee_ids),
+                    class_stats.attendance_days,
+                    quality_level,
+                    days,
+                    "N/A" if ratio is None else ratio,
+                    overall.class_quality_ratio_gaps_basis_points[
+                        quality_level
+                    ],
+                )
+            )
+    _style_table(
+        sheet,
+        header_row=quality_header_row,
+        first_data_row=quality_header_row + 1,
+        last_row=sheet.max_row,
+        last_column=7,
+    )
+
     group_title_row = sheet.max_row + 2
     sheet.cell(group_title_row, 1, "Fairness group 統計")
     sheet.merge_cells(
@@ -347,6 +394,21 @@ def _build_group_sheet(
                     group.gaps[metric],
                 )
             )
+        for metric, values in group.ratio_basis_points.items():
+            sheet.append(
+                (
+                    group.fairness_group,
+                    _employment_label(group.employment_type),
+                    _full_time_class_label(group.full_time_class),
+                    f"{metric} 比例 (bp)",
+                    "; ".join(
+                        f"{employee_id}="
+                        + ("N/A" if value is None else str(value))
+                        for employee_id, value in values.items()
+                    ),
+                    group.ratio_gaps_basis_points[metric],
+                )
+            )
     _style_table(
         sheet,
         header_row=group_header_row,
@@ -355,7 +417,7 @@ def _build_group_sheet(
         last_column=6,
     )
     sheet.freeze_panes = "A3"
-    widths = (22, 12, 12, 28, 48, 12)
+    widths = (22, 24, 14, 28, 48, 16, 18)
     for column, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(column)].width = width
 

@@ -57,6 +57,7 @@ class JsonExporterTests(unittest.TestCase):
             document["contract"],
             {"name": RESULT_CONTRACT_NAME, "version": RESULT_CONTRACT_VERSION},
         )
+        self.assertEqual(RESULT_CONTRACT_VERSION, "1.2")
         self.assertEqual(document["input_schema_version"], "v1")
         self.assertEqual(document["generated_at"], "2024-10-02T03:04:05Z")
         self.assertEqual(document["month"], "2024-10")
@@ -67,10 +68,25 @@ class JsonExporterTests(unittest.TestCase):
             document["objective_vector"],
             document["statistics"]["overall"]["objective_vector"],
         )
-        self.assertEqual(len(document["stage_records"]), 10)
+        self.assertEqual(len(document["stage_records"]), 13)
         self.assertEqual(len(document["assignments"]), 5)
         self.assertIn("individual", document["statistics"])
         self.assertIn("fairness_groups", document["statistics"])
+        self.assertIn("full_time_class_quality", document["statistics"])
+        self.assertEqual(
+            len(document["statistics"]["full_time_class_quality"]), 2
+        )
+        self.assertIn(
+            "class_quality_ratio_gaps_basis_points",
+            document["statistics"]["overall"],
+        )
+        full_time_group = next(
+            item
+            for item in document["statistics"]["fairness_groups"]
+            if item["employment_type"] == "full_time"
+        )
+        self.assertIn("ratio_basis_points", full_time_group)
+        self.assertIn("ratio_gaps_basis_points", full_time_group)
         self.assertIn("rows", document["monthly_schedule"])
 
     def test_naive_generation_timestamp_is_rejected(self) -> None:
@@ -167,6 +183,19 @@ class ExcelExporterTests(unittest.TestCase):
             self.assertEqual(groups["A1"].value, "類別統計")
             self.assertEqual(groups["A2"].value, "類別")
             self.assertEqual(groups["A3"].value, self.output.category_statistics[0].category)
+            self.assertTrue(
+                any(
+                    isinstance(groups.cell(row, 4).value, str)
+                    and "比例 (bp)" in groups.cell(row, 4).value
+                    for row in range(1, groups.max_row + 1)
+                )
+            )
+            self.assertTrue(
+                any(
+                    groups.cell(row, 1).value == "A／B 類別品質順位比例"
+                    for row in range(1, groups.max_row + 1)
+                )
+            )
 
             solver = workbook["求解資訊"]
             self.assertEqual(solver["A1"].value, "正式結果")

@@ -6,7 +6,7 @@ Formal independent output validation remains outside this module's scope.
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from types import MappingProxyType
 from typing import Mapping
@@ -26,6 +26,11 @@ from .feasibility import (
 )
 from .models import Employee, NormalizedScheduleInput
 from .precheck import PrecheckResult, PrecheckStatus, run_prechecks
+from .ratio_fairness import (
+    BASIS_POINTS_SCALE,
+    PatternQualityLevel,
+    ratio_basis_points,
+)
 
 
 class OptimizationStage(StrEnum):
@@ -35,13 +40,21 @@ class OptimizationStage(StrEnum):
     FULL_TIME_CONSECUTIVE_DOUBLES = "full_time_consecutive_doubles"
     FULL_TIME_SINGLE_SHIFT_DAYS = "full_time_single_shift_days"
     FULL_TIME_SECONDARY_PATTERNS = "full_time_secondary_patterns"
-    A_GROUP_FAIRNESS = "a_group_fairness"
-    B_GROUP_FAIRNESS = "b_group_fairness"
+    FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP = (
+        "full_time_class_quality_ratio_max_gap"
+    )
+    FULL_TIME_CLASS_QUALITY_RATIO_TOTAL_GAP = (
+        "full_time_class_quality_ratio_total_gap"
+    )
+    FULL_TIME_PATTERN_RATIO_MAX_GAP = "full_time_pattern_ratio_max_gap"
+    FULL_TIME_PATTERN_RATIO_TOTAL_GAP = "full_time_pattern_ratio_total_gap"
+    FULL_TIME_PATTERN_INTEGER_FAIRNESS = "full_time_pattern_integer_fairness"
     PART_TIME_GROUP_FAIRNESS = "part_time_group_fairness"
     COMMON_GROUP_FAIRNESS = "common_group_fairness"
 
 
 class FairnessMetric(StrEnum):
+    ATTENDANCE_DAYS = "attendance_days"
     CONSECUTIVE_DOUBLES = "consecutive_doubles"
     SINGLE_SHIFT_DAYS = "single_shift_days"
     MORNING_EVENING_DAYS = "morning_evening_days"
@@ -78,6 +91,7 @@ class ConstantProof(StrEnum):
     )
     NO_FULL_TIME_EMPLOYEES = "NO_FULL_TIME_EMPLOYEES"
     NO_PATTERN_OPPORTUNITY = "NO_PATTERN_OPPORTUNITY"
+    NO_COMPARABLE_FULL_TIME_CLASSES = "NO_COMPARABLE_FULL_TIME_CLASSES"
     NO_COMPARABLE_FAIRNESS_GROUPS = "NO_COMPARABLE_FAIRNESS_GROUPS"
 
 
@@ -125,6 +139,27 @@ class OptimizationModel:
     employee_fairness_metrics: Mapping[
         tuple[str, FairnessMetric], cp_model.IntVar
     ]
+    employee_pattern_ratio_basis_points: Mapping[
+        tuple[str, FairnessMetric], cp_model.IntVar
+    ]
+    employee_attendance_active: Mapping[str, cp_model.IntVar]
+    class_attendance_totals: Mapping[FullTimeClass, cp_model.IntVar]
+    class_quality_counts: Mapping[
+        tuple[FullTimeClass, PatternQualityLevel], cp_model.IntVar
+    ]
+    class_quality_ratio_basis_points: Mapping[
+        tuple[FullTimeClass, PatternQualityLevel], cp_model.IntVar
+    ]
+    class_quality_ratio_gap_variables: Mapping[
+        PatternQualityLevel, cp_model.IntVar
+    ]
+    class_quality_ratio_max_gap_variable: cp_model.IntVar | None
+    class_quality_ratio_total_objective: cp_model.LinearExpr | int
+    ratio_fairness_gap_variables: Mapping[
+        tuple[str, FairnessMetric], cp_model.IntVar
+    ]
+    ratio_fairness_max_gap_variable: cp_model.IntVar | None
+    ratio_fairness_total_objective: cp_model.LinearExpr | int
     fairness_gap_variables: Mapping[
         OptimizationStage,
         Mapping[tuple[str, FairnessMetric], cp_model.IntVar],
@@ -132,6 +167,20 @@ class OptimizationModel:
     fairness_objectives: Mapping[
         OptimizationStage, cp_model.LinearExpr | int
     ]
+
+
+@dataclass(frozen=True, slots=True)
+class _ClassQualityModel:
+    attendance_totals: Mapping[FullTimeClass, cp_model.IntVar]
+    quality_counts: Mapping[
+        tuple[FullTimeClass, PatternQualityLevel], cp_model.IntVar
+    ]
+    ratios: Mapping[
+        tuple[FullTimeClass, PatternQualityLevel], cp_model.IntVar
+    ]
+    gaps: Mapping[PatternQualityLevel, cp_model.IntVar]
+    max_gap: cp_model.IntVar | None
+    total_gap: cp_model.LinearExpr | int
 
 
 # Backwards-compatible public name retained for existing phase-four callers.
@@ -189,7 +238,174 @@ def _var_name(prefix: str, employee_id: str) -> str:
     return f"{prefix}[{employee_id}]"
 
 
-def build_optimization_model(data: NormalizedScheduleInput) -> OptimizationModel:
+def _build_class_quality_model(
+    data: NormalizedScheduleInput,
+    model: cp_model.CpModel,
+    employee_metrics: Mapping[tuple[str, FairnessMetric], cp_model.IntVar],
+) -> _ClassQualityModel:
+    quality_metrics = {
+        FullTimeClass.A: {
+            PatternQualityLevel.FIRST: FairnessMetric.CONSECUTIVE_DOUBLES,
+            PatternQualityLevel.SECOND: FairnessMetric.MORNING_EVENING_DAYS,
+            PatternQualityLevel.THIRD: FairnessMetric.SINGLE_SHIFT_DAYS,
+        },
+        FullTimeClass.B: {
+            PatternQualityLevel.FIRST: FairnessMetric.CONSECUTIVE_DOUBLES,
+            PatternQualityLevel.SECOND: FairnessMetric.TRIPLE_DAYS,
+            PatternQualityLevel.THIRD: FairnessMetric.SINGLE_SHIFT_DAYS,
+        },
+    }
+    members_by_class = {
+        full_time_class: tuple(
+            employee
+            for employee in data.source.employees
+            if employee.full_time_class is full_time_class
+        )
+        for full_time_class in FullTimeClass
+    }
+    ratio_lookups: dict[int, list[int]] = {}
+
+    def add_ratio_variable(
+        numerator: cp_model.IntVar,
+        denominator: cp_model.IntVar,
+        maximum_denominator: int,
+        name: str,
+    ) -> cp_model.IntVar:
+        if maximum_denominator not in ratio_lookups:
+            ratio_lookups[maximum_denominator] = [
+                (
+                    ratio_basis_points(candidate_numerator, candidate_denominator)
+                    or 0
+                )
+                if candidate_numerator <= candidate_denominator
+                else 0
+                for candidate_numerator in range(maximum_denominator + 1)
+                for candidate_denominator in range(maximum_denominator + 1)
+            ]
+        index = model.new_int_var(
+            0,
+            (maximum_denominator + 1) ** 2 - 1,
+            f"{name}_index",
+        )
+        model.add(
+            index
+            == numerator * (maximum_denominator + 1) + denominator
+        )
+        ratio = model.new_int_var(0, BASIS_POINTS_SCALE, name)
+        model.add_element(index, ratio_lookups[maximum_denominator], ratio)
+        return ratio
+
+    attendance_totals: dict[FullTimeClass, cp_model.IntVar] = {}
+    quality_counts: dict[
+        tuple[FullTimeClass, PatternQualityLevel], cp_model.IntVar
+    ] = {}
+    ratios: dict[
+        tuple[FullTimeClass, PatternQualityLevel], cp_model.IntVar
+    ] = {}
+    attendance_active: dict[FullTimeClass, cp_model.IntVar] = {}
+    for full_time_class, members in members_by_class.items():
+        maximum_attendance = len(members) * len(data.dates)
+        attendance = model.new_int_var(
+            0,
+            maximum_attendance,
+            f"class_attendance[{full_time_class.value}]",
+        )
+        model.add(
+            attendance
+            == sum(
+                employee_metrics[
+                    (employee.employee_id, FairnessMetric.ATTENDANCE_DAYS)
+                ]
+                for employee in members
+            )
+        )
+        active = model.new_bool_var(
+            f"class_attendance_active[{full_time_class.value}]"
+        )
+        model.add(attendance >= 1).only_enforce_if(active)
+        model.add(attendance == 0).only_enforce_if(active.Not())
+        attendance_totals[full_time_class] = attendance
+        attendance_active[full_time_class] = active
+        for quality_level, metric in quality_metrics[full_time_class].items():
+            count = model.new_int_var(
+                0,
+                maximum_attendance,
+                f"class_quality_count[{full_time_class.value},{quality_level.value}]",
+            )
+            model.add(
+                count
+                == sum(
+                    employee_metrics[(employee.employee_id, metric)]
+                    for employee in members
+                )
+            )
+            ratio = add_ratio_variable(
+                count,
+                attendance,
+                maximum_attendance,
+                f"class_quality_ratio_bp[{full_time_class.value},{quality_level.value}]",
+            )
+            quality_counts[(full_time_class, quality_level)] = count
+            ratios[(full_time_class, quality_level)] = ratio
+
+    gaps: dict[PatternQualityLevel, cp_model.IntVar] = {}
+    if all(members_by_class[item] for item in FullTimeClass):
+        comparable = model.new_bool_var("class_quality_ratio_comparable")
+        model.add_min_equality(
+            comparable,
+            [
+                attendance_active[FullTimeClass.A],
+                attendance_active[FullTimeClass.B],
+            ],
+        )
+        for quality_level in PatternQualityLevel:
+            difference = model.new_int_var(
+                -BASIS_POINTS_SCALE,
+                BASIS_POINTS_SCALE,
+                f"class_quality_ratio_difference[{quality_level.value}]",
+            )
+            absolute_difference = model.new_int_var(
+                0,
+                BASIS_POINTS_SCALE,
+                f"class_quality_ratio_absolute_difference[{quality_level.value}]",
+            )
+            gap = model.new_int_var(
+                0,
+                BASIS_POINTS_SCALE,
+                f"class_quality_ratio_gap[{quality_level.value}]",
+            )
+            model.add(
+                difference
+                == ratios[(FullTimeClass.A, quality_level)]
+                - ratios[(FullTimeClass.B, quality_level)]
+            )
+            model.add_abs_equality(absolute_difference, difference)
+            model.add(gap == absolute_difference).only_enforce_if(comparable)
+            model.add(gap == 0).only_enforce_if(comparable.Not())
+            gaps[quality_level] = gap
+    max_gap: cp_model.IntVar | None = None
+    if gaps:
+        max_gap = model.new_int_var(
+            0,
+            BASIS_POINTS_SCALE,
+            "full_time_class_quality_ratio_max_gap",
+        )
+        model.add_max_equality(max_gap, list(gaps.values()))
+    return _ClassQualityModel(
+        attendance_totals=MappingProxyType(attendance_totals),
+        quality_counts=MappingProxyType(quality_counts),
+        ratios=MappingProxyType(ratios),
+        gaps=MappingProxyType(gaps),
+        max_gap=max_gap,
+        total_gap=sum(gaps.values()),
+    )
+
+
+def build_optimization_model(
+    data: NormalizedScheduleInput,
+    *,
+    include_class_quality: bool = True,
+) -> OptimizationModel:
     """Add all currently implemented objectives to the shared hard model."""
 
     feasibility = build_feasibility_model(data)
@@ -296,6 +512,18 @@ def build_optimization_model(data: NormalizedScheduleInput) -> OptimizationModel
         if employee.employment_type is EmploymentType.FULL_TIME:
             add_count_metric(
                 employee_id,
+                FairnessMetric.ATTENDANCE_DAYS,
+                [
+                    feasibility.daily_patterns[(employee_id, day, pattern)]
+                    for day in data.dates
+                    for pattern in DailyPattern
+                    if pattern is not DailyPattern.OFF
+                    and (employee_id, day, pattern)
+                    in feasibility.daily_patterns
+                ],
+            )
+            add_count_metric(
+                employee_id,
                 FairnessMetric.CONSECUTIVE_DOUBLES,
                 [
                     feasibility.daily_patterns[(employee_id, day, pattern)]
@@ -369,30 +597,158 @@ def build_optimization_model(data: NormalizedScheduleInput) -> OptimizationModel
             ],
         )
 
-    stage_members_and_metrics = {
-        OptimizationStage.A_GROUP_FAIRNESS: (
-            tuple(
-                employee
-                for employee in data.source.employees
-                if employee.full_time_class is FullTimeClass.A
-            ),
-            (
-                FairnessMetric.CONSECUTIVE_DOUBLES,
-                FairnessMetric.SINGLE_SHIFT_DAYS,
-                FairnessMetric.MORNING_EVENING_DAYS,
-            ),
+    full_time_classes = {
+        FullTimeClass.A: (
+            FairnessMetric.CONSECUTIVE_DOUBLES,
+            FairnessMetric.SINGLE_SHIFT_DAYS,
+            FairnessMetric.MORNING_EVENING_DAYS,
         ),
-        OptimizationStage.B_GROUP_FAIRNESS: (
+        FullTimeClass.B: (
+            FairnessMetric.CONSECUTIVE_DOUBLES,
+            FairnessMetric.SINGLE_SHIFT_DAYS,
+            FairnessMetric.TRIPLE_DAYS,
+        ),
+    }
+
+    class_quality = (
+        _build_class_quality_model(data, model, employee_metrics)
+        if include_class_quality
+        else _ClassQualityModel(
+            attendance_totals=MappingProxyType({}),
+            quality_counts=MappingProxyType({}),
+            ratios=MappingProxyType({}),
+            gaps=MappingProxyType({}),
+            max_gap=None,
+            total_gap=0,
+        )
+    )
+
+    individual_maximum_denominator = len(data.dates)
+    individual_ratio_lookup = [
+        (
+            ratio_basis_points(candidate_numerator, candidate_denominator)
+            or 0
+        )
+        if candidate_numerator <= candidate_denominator
+        else 0
+        for candidate_numerator in range(individual_maximum_denominator + 1)
+        for candidate_denominator in range(individual_maximum_denominator + 1)
+    ]
+
+    employee_ratios: dict[
+        tuple[str, FairnessMetric], cp_model.IntVar
+    ] = {}
+    employee_attendance_active: dict[str, cp_model.IntVar] = {}
+    for employee in data.source.employees:
+        if employee.employment_type is not EmploymentType.FULL_TIME:
+            continue
+        employee_id = employee.employee_id
+        attendance = employee_metrics[
+            (employee_id, FairnessMetric.ATTENDANCE_DAYS)
+        ]
+        active = model.new_bool_var(f"ratio_active[{employee_id}]")
+        model.add(attendance >= 1).only_enforce_if(active)
+        model.add(attendance == 0).only_enforce_if(active.Not())
+        employee_attendance_active[employee_id] = active
+        assert employee.full_time_class is not None
+        for metric in full_time_classes[employee.full_time_class]:
+            ratio_name = f"pattern_ratio_bp[{employee_id},{metric.value}]"
+            ratio_index = model.new_int_var(
+                0,
+                (individual_maximum_denominator + 1) ** 2 - 1,
+                f"{ratio_name}_index",
+            )
+            model.add(
+                ratio_index
+                == employee_metrics[(employee_id, metric)]
+                * (individual_maximum_denominator + 1)
+                + attendance
+            )
+            ratio = model.new_int_var(
+                0,
+                BASIS_POINTS_SCALE,
+                ratio_name,
+            )
+            model.add_element(
+                ratio_index,
+                individual_ratio_lookup,
+                ratio,
+            )
+            employee_ratios[(employee_id, metric)] = ratio
+
+    ratio_gaps: dict[tuple[str, FairnessMetric], cp_model.IntVar] = {}
+    for full_time_class, metrics in full_time_classes.items():
+        groups: dict[str, list[Employee]] = defaultdict(list)
+        for employee in data.source.employees:
+            if employee.full_time_class is full_time_class:
+                groups[employee.fairness_group].append(employee)
+        for group, members in sorted(groups.items()):
+            if len(members) < 2:
+                continue
+            for metric in metrics:
+                ratios = [
+                    employee_ratios[(employee.employee_id, metric)]
+                    for employee in members
+                ]
+                effective_mins: list[cp_model.IntVar] = []
+                active_variables = [
+                    employee_attendance_active[employee.employee_id]
+                    for employee in members
+                ]
+                for employee, ratio, active in zip(
+                    members, ratios, active_variables, strict=True
+                ):
+                    effective = model.new_int_var(
+                        0,
+                        BASIS_POINTS_SCALE,
+                        f"ratio_effective_min[{employee.employee_id},{metric.value}]",
+                    )
+                    model.add(effective == ratio).only_enforce_if(active)
+                    model.add(effective == BASIS_POINTS_SCALE).only_enforce_if(
+                        active.Not()
+                    )
+                    effective_mins.append(effective)
+                maximum = model.new_int_var(
+                    0,
+                    BASIS_POINTS_SCALE,
+                    f"ratio_max[{full_time_class.value},{group},{metric.value}]",
+                )
+                minimum = model.new_int_var(
+                    0,
+                    BASIS_POINTS_SCALE,
+                    f"ratio_min[{full_time_class.value},{group},{metric.value}]",
+                )
+                any_active = model.new_bool_var(
+                    f"ratio_any_active[{full_time_class.value},{group},{metric.value}]"
+                )
+                gap = model.new_int_var(
+                    0,
+                    BASIS_POINTS_SCALE,
+                    f"ratio_gap[{full_time_class.value},{group},{metric.value}]",
+                )
+                model.add_max_equality(maximum, ratios)
+                model.add_min_equality(minimum, effective_mins)
+                model.add_max_equality(any_active, active_variables)
+                model.add(gap == maximum - minimum).only_enforce_if(
+                    any_active
+                )
+                model.add(gap == 0).only_enforce_if(any_active.Not())
+                ratio_gaps[(group, metric)] = gap
+    ratio_max_gap: cp_model.IntVar | None = None
+    if ratio_gaps:
+        ratio_max_gap = model.new_int_var(
+            0, BASIS_POINTS_SCALE, "full_time_pattern_ratio_max_gap"
+        )
+        model.add_max_equality(ratio_max_gap, list(ratio_gaps.values()))
+
+    stage_members_and_metrics = {
+        OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS: (
             tuple(
                 employee
                 for employee in data.source.employees
-                if employee.full_time_class is FullTimeClass.B
+                if employee.employment_type is EmploymentType.FULL_TIME
             ),
-            (
-                FairnessMetric.CONSECUTIVE_DOUBLES,
-                FairnessMetric.SINGLE_SHIFT_DAYS,
-                FairnessMetric.TRIPLE_DAYS,
-            ),
+            None,
         ),
         OptimizationStage.PART_TIME_GROUP_FAIRNESS: (
             tuple(
@@ -428,7 +784,12 @@ def build_optimization_model(data: NormalizedScheduleInput) -> OptimizationModel
         for group, members in sorted(groups.items()):
             if len(members) < 2:
                 continue
-            for metric in metrics:
+            group_metrics = (
+                full_time_classes[members[0].full_time_class]
+                if metrics is None
+                else metrics
+            )
+            for metric in group_metrics:
                 member_values = [
                     employee_metrics[(employee.employee_id, metric)]
                     for employee in members
@@ -468,8 +829,39 @@ def build_optimization_model(data: NormalizedScheduleInput) -> OptimizationModel
         single_shift_objective=sum(single_variables.values()),
         secondary_pattern_objective=sum(secondary_variables.values()),
         employee_fairness_metrics=MappingProxyType(employee_metrics),
+        employee_pattern_ratio_basis_points=MappingProxyType(employee_ratios),
+        employee_attendance_active=MappingProxyType(employee_attendance_active),
+        class_attendance_totals=class_quality.attendance_totals,
+        class_quality_counts=class_quality.quality_counts,
+        class_quality_ratio_basis_points=class_quality.ratios,
+        class_quality_ratio_gap_variables=class_quality.gaps,
+        class_quality_ratio_max_gap_variable=class_quality.max_gap,
+        class_quality_ratio_total_objective=class_quality.total_gap,
+        ratio_fairness_gap_variables=MappingProxyType(ratio_gaps),
+        ratio_fairness_max_gap_variable=ratio_max_gap,
+        ratio_fairness_total_objective=sum(ratio_gaps.values()),
         fairness_gap_variables=MappingProxyType(fairness_gaps),
         fairness_objectives=MappingProxyType(fairness_objectives),
+    )
+
+
+def _attach_class_quality_model(
+    data: NormalizedScheduleInput,
+    built: OptimizationModel,
+) -> OptimizationModel:
+    class_quality = _build_class_quality_model(
+        data,
+        built.feasibility.model,
+        built.employee_fairness_metrics,
+    )
+    return replace(
+        built,
+        class_attendance_totals=class_quality.attendance_totals,
+        class_quality_counts=class_quality.quality_counts,
+        class_quality_ratio_basis_points=class_quality.ratios,
+        class_quality_ratio_gap_variables=class_quality.gaps,
+        class_quality_ratio_max_gap_variable=class_quality.max_gap,
+        class_quality_ratio_total_objective=class_quality.total_gap,
     )
 
 
@@ -597,10 +989,66 @@ def _objective_specs(
     secondary_constant, secondary_proof = pattern_constant(
         built.secondary_pattern_variables
     )
-    fairness_specs: list[_ObjectiveSpec] = []
+    ratio_gaps = built.ratio_fairness_gap_variables
+    ratio_constant = None if ratio_gaps else 0
+    ratio_proof = (
+        None if ratio_gaps else ConstantProof.NO_COMPARABLE_FAIRNESS_GROUPS
+    )
+    class_quality_gaps = built.class_quality_ratio_gap_variables
+    class_quality_constant = None if class_quality_gaps else 0
+    class_quality_proof = (
+        None
+        if class_quality_gaps
+        else ConstantProof.NO_COMPARABLE_FULL_TIME_CLASSES
+    )
+    fairness_specs: list[_ObjectiveSpec] = [
+        _ObjectiveSpec(
+            stage=OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP,
+            direction=ObjectiveDirection.MINIMIZE,
+            variables=(built.class_quality_ratio_max_gap_variable,)
+            if built.class_quality_ratio_max_gap_variable is not None
+            else (),
+            expression=(
+                built.class_quality_ratio_max_gap_variable
+                if built.class_quality_ratio_max_gap_variable is not None
+                else 0
+            ),
+            constant_value=class_quality_constant,
+            constant_proof=class_quality_proof,
+        ),
+        _ObjectiveSpec(
+            stage=OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_TOTAL_GAP,
+            direction=ObjectiveDirection.MINIMIZE,
+            variables=tuple(class_quality_gaps.values()),
+            expression=built.class_quality_ratio_total_objective,
+            constant_value=class_quality_constant,
+            constant_proof=class_quality_proof,
+        ),
+        _ObjectiveSpec(
+            stage=OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP,
+            direction=ObjectiveDirection.MINIMIZE,
+            variables=(built.ratio_fairness_max_gap_variable,)
+            if built.ratio_fairness_max_gap_variable is not None
+            else (),
+            expression=(
+                built.ratio_fairness_max_gap_variable
+                if built.ratio_fairness_max_gap_variable is not None
+                else 0
+            ),
+            constant_value=ratio_constant,
+            constant_proof=ratio_proof,
+        ),
+        _ObjectiveSpec(
+            stage=OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP,
+            direction=ObjectiveDirection.MINIMIZE,
+            variables=tuple(ratio_gaps.values()),
+            expression=built.ratio_fairness_total_objective,
+            constant_value=ratio_constant,
+            constant_proof=ratio_proof,
+        ),
+    ]
     for fairness_stage in (
-        OptimizationStage.A_GROUP_FAIRNESS,
-        OptimizationStage.B_GROUP_FAIRNESS,
+        OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS,
         OptimizationStage.PART_TIME_GROUP_FAIRNESS,
         OptimizationStage.COMMON_GROUP_FAIRNESS,
     ):
@@ -767,7 +1215,10 @@ def solve_lexicographic(
     if precheck.status is PrecheckStatus.PRECHECK_INFEASIBLE:
         return _empty_result(FeasibilityStatus.PRECHECK_INFEASIBLE, precheck)
 
-    built = build_optimization_model(data)
+    # Class-level ratio constraints are attached only after the first six
+    # formal layers are locked.  They are irrelevant before then and can make
+    # those earlier CP-SAT proofs substantially more expensive.
+    built = build_optimization_model(data, include_class_quality=False)
     stages: list[OptimizationStageResult] = []
     hard_run = _solve_once(built.feasibility.model, config)
     if hard_run.raw_status == cp_model.INFEASIBLE:
@@ -818,7 +1269,8 @@ def solve_lexicographic(
     )
     snapshot = _snapshot(data, built, hard_run.solver)
 
-    for objective in _objective_specs(data, built, precheck):
+    objective_specs = list(_objective_specs(data, built, precheck)[:5])
+    for objective in objective_specs:
         if objective.constant_value is not None:
             stages.append(
                 OptimizationStageResult(
@@ -832,6 +1284,11 @@ def solve_lexicographic(
                     constant_proof=objective.constant_proof,
                 )
             )
+            if objective.stage is OptimizationStage.FULL_TIME_SECONDARY_PATTERNS:
+                built = _attach_class_quality_model(data, built)
+                objective_specs.extend(
+                    _objective_specs(data, built, precheck)[5:]
+                )
             continue
 
         if objective.direction is ObjectiveDirection.MAXIMIZE:
@@ -858,6 +1315,11 @@ def solve_lexicographic(
                 )
             )
             snapshot = _snapshot(data, built, run.solver)
+            if objective.stage is OptimizationStage.FULL_TIME_SECONDARY_PATTERNS:
+                built = _attach_class_quality_model(data, built)
+                objective_specs.extend(
+                    _objective_specs(data, built, precheck)[5:]
+                )
             continue
 
         if run.raw_status == cp_model.FEASIBLE:

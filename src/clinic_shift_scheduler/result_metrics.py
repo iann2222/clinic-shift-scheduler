@@ -13,6 +13,7 @@ from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period
 from .feasibility import Assignment, DemandKey, PersonDayKey, PersonPeriodKey
 from .models import NormalizedScheduleInput
 from .optimization import FairnessMetric, OptimizationStage
+from .ratio_fairness import PatternQualityLevel, ratio_basis_points
 
 
 _PATTERN_BY_PERIODS = {
@@ -53,6 +54,17 @@ class RecomputedScheduleMetrics:
     person_period_counts: Mapping[PersonPeriodKey, int]
     daily_patterns: Mapping[PersonDayKey, DailyPattern]
     employee_metrics: Mapping[str, EmployeeResultMetrics]
+    pattern_ratio_basis_points: Mapping[
+        tuple[str, FairnessMetric], int | None
+    ]
+    class_attendance_days: Mapping[FullTimeClass, int]
+    class_quality_days: Mapping[
+        tuple[FullTimeClass, PatternQualityLevel], int
+    ]
+    class_quality_ratio_basis_points: Mapping[
+        tuple[FullTimeClass, PatternQualityLevel], int | None
+    ]
+    class_quality_ratio_gaps_basis_points: Mapping[PatternQualityLevel, int]
     fairness_gaps: Mapping[
         OptimizationStage, Mapping[tuple[str, FairnessMetric], int]
     ]
@@ -139,6 +151,7 @@ def recompute_schedule_metrics(
     def metric_value(employee_id: str, metric: FairnessMetric) -> int:
         values = employee_metrics[employee_id]
         return {
+            FairnessMetric.ATTENDANCE_DAYS: values.attendance_days,
             FairnessMetric.CONSECUTIVE_DOUBLES: values.consecutive_double_days,
             FairnessMetric.SINGLE_SHIFT_DAYS: values.single_shift_days,
             FairnessMetric.MORNING_EVENING_DAYS: values.morning_evening_days,
@@ -153,30 +166,104 @@ def recompute_schedule_metrics(
             FairnessMetric.HOLIDAY_SHIFTS: values.holiday_shifts,
         }[metric]
 
-    stage_members_and_metrics = {
-        OptimizationStage.A_GROUP_FAIRNESS: (
-            tuple(
-                employee
-                for employee in data.source.employees
-                if employee.full_time_class is FullTimeClass.A
-            ),
-            (
-                FairnessMetric.CONSECUTIVE_DOUBLES,
-                FairnessMetric.SINGLE_SHIFT_DAYS,
-                FairnessMetric.MORNING_EVENING_DAYS,
-            ),
+    full_time_classes = {
+        FullTimeClass.A: (
+            FairnessMetric.CONSECUTIVE_DOUBLES,
+            FairnessMetric.SINGLE_SHIFT_DAYS,
+            FairnessMetric.MORNING_EVENING_DAYS,
         ),
-        OptimizationStage.B_GROUP_FAIRNESS: (
+        FullTimeClass.B: (
+            FairnessMetric.CONSECUTIVE_DOUBLES,
+            FairnessMetric.SINGLE_SHIFT_DAYS,
+            FairnessMetric.TRIPLE_DAYS,
+        ),
+    }
+    class_quality_metrics = {
+        FullTimeClass.A: {
+            PatternQualityLevel.FIRST: FairnessMetric.CONSECUTIVE_DOUBLES,
+            PatternQualityLevel.SECOND: FairnessMetric.MORNING_EVENING_DAYS,
+            PatternQualityLevel.THIRD: FairnessMetric.SINGLE_SHIFT_DAYS,
+        },
+        FullTimeClass.B: {
+            PatternQualityLevel.FIRST: FairnessMetric.CONSECUTIVE_DOUBLES,
+            PatternQualityLevel.SECOND: FairnessMetric.TRIPLE_DAYS,
+            PatternQualityLevel.THIRD: FairnessMetric.SINGLE_SHIFT_DAYS,
+        },
+    }
+    class_attendance_days: dict[FullTimeClass, int] = {}
+    class_quality_days: dict[
+        tuple[FullTimeClass, PatternQualityLevel], int
+    ] = {}
+    class_quality_ratios: dict[
+        tuple[FullTimeClass, PatternQualityLevel], int | None
+    ] = {}
+    for full_time_class, quality_metrics in class_quality_metrics.items():
+        members = tuple(
+            employee.employee_id
+            for employee in data.source.employees
+            if employee.full_time_class is full_time_class
+        )
+        attendance = sum(
+            employee_metrics[employee_id].attendance_days
+            for employee_id in members
+        )
+        class_attendance_days[full_time_class] = attendance
+        for quality_level, metric in quality_metrics.items():
+            count = sum(metric_value(employee_id, metric) for employee_id in members)
+            class_quality_days[(full_time_class, quality_level)] = count
+            class_quality_ratios[(full_time_class, quality_level)] = (
+                ratio_basis_points(count, attendance)
+            )
+    class_quality_gaps: dict[PatternQualityLevel, int] = {}
+    comparable_classes = all(
+        class_attendance_days[full_time_class] > 0
+        for full_time_class in FullTimeClass
+    )
+    for quality_level in PatternQualityLevel:
+        if not comparable_classes:
+            class_quality_gaps[quality_level] = 0
+            continue
+        a_ratio = class_quality_ratios[(FullTimeClass.A, quality_level)]
+        b_ratio = class_quality_ratios[(FullTimeClass.B, quality_level)]
+        assert a_ratio is not None and b_ratio is not None
+        class_quality_gaps[quality_level] = abs(a_ratio - b_ratio)
+
+    pattern_ratios: dict[tuple[str, FairnessMetric], int | None] = {}
+    ratio_gaps: dict[tuple[str, FairnessMetric], int] = {}
+    for full_time_class, class_metrics in full_time_classes.items():
+        groups: dict[str, list[str]] = defaultdict(list)
+        for employee in data.source.employees:
+            if employee.full_time_class is not full_time_class:
+                continue
+            groups[employee.fairness_group].append(employee.employee_id)
+            attendance = employee_metrics[employee.employee_id].attendance_days
+            for metric in class_metrics:
+                pattern_ratios[(employee.employee_id, metric)] = (
+                    ratio_basis_points(
+                        metric_value(employee.employee_id, metric), attendance
+                    )
+                )
+        for group, members in sorted(groups.items()):
+            if len(members) < 2:
+                continue
+            for metric in class_metrics:
+                values = [
+                    pattern_ratios[(employee_id, metric)]
+                    for employee_id in members
+                ]
+                defined = [value for value in values if value is not None]
+                ratio_gaps[(group, metric)] = (
+                    _gap(defined) if len(defined) >= 2 else 0
+                )
+
+    stage_members_and_metrics = {
+        OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS: (
             tuple(
                 employee
                 for employee in data.source.employees
-                if employee.full_time_class is FullTimeClass.B
+                if employee.employment_type is EmploymentType.FULL_TIME
             ),
-            (
-                FairnessMetric.CONSECUTIVE_DOUBLES,
-                FairnessMetric.SINGLE_SHIFT_DAYS,
-                FairnessMetric.TRIPLE_DAYS,
-            ),
+            None,
         ),
         OptimizationStage.PART_TIME_GROUP_FAIRNESS: (
             tuple(
@@ -208,11 +295,22 @@ def recompute_schedule_metrics(
         for group, members in sorted(groups.items()):
             if len(members) < 2:
                 continue
-            for metric in stage_metrics:
+            group_metrics = (
+                full_time_classes[data.employees[members[0]].full_time_class]
+                if stage_metrics is None
+                else stage_metrics
+            )
+            for metric in group_metrics:
                 stage_gaps[(group, metric)] = _gap(
                     [metric_value(employee_id, metric) for employee_id in members]
                 )
         fairness_gaps[stage] = MappingProxyType(stage_gaps)
+    fairness_gaps[
+        OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP
+    ] = MappingProxyType(ratio_gaps)
+    fairness_gaps[
+        OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP
+    ] = MappingProxyType(ratio_gaps)
 
     target_deviation = sum(
         abs(
@@ -253,9 +351,26 @@ def recompute_schedule_metrics(
             if data.employees[employee_id].employment_type
             is EmploymentType.FULL_TIME
         ),
+        OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP: max(
+            class_quality_gaps.values(), default=0
+        ),
+        OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_TOTAL_GAP: sum(
+            class_quality_gaps.values()
+        ),
+        OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP: max(
+            ratio_gaps.values(), default=0
+        ),
+        OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP: sum(
+            ratio_gaps.values()
+        ),
         **{
             stage: sum(stage_gaps.values())
             for stage, stage_gaps in fairness_gaps.items()
+            if stage
+            not in (
+                OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP,
+                OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP,
+            )
         },
     }
     canonical_coverage = {
@@ -266,6 +381,13 @@ def recompute_schedule_metrics(
         person_period_counts=MappingProxyType(dict(person_period_counts)),
         daily_patterns=MappingProxyType(daily_patterns),
         employee_metrics=MappingProxyType(employee_metrics),
+        pattern_ratio_basis_points=MappingProxyType(pattern_ratios),
+        class_attendance_days=MappingProxyType(class_attendance_days),
+        class_quality_days=MappingProxyType(class_quality_days),
+        class_quality_ratio_basis_points=MappingProxyType(class_quality_ratios),
+        class_quality_ratio_gaps_basis_points=MappingProxyType(
+            class_quality_gaps
+        ),
         fairness_gaps=MappingProxyType(fairness_gaps),
         objective_values=MappingProxyType(objective_values),
         total_assignments=len(assignments),

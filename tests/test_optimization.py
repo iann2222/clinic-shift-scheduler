@@ -16,11 +16,16 @@ from clinic_shift_scheduler import (
     ObjectiveDirection,
     OptimizationStage,
     OptimizationStageStatus,
+    PatternQualityLevel,
+    ResultValidationStatus,
+    recompute_schedule_metrics,
     solve_lexicographic,
     validate_and_normalize,
+    validate_schedule_result,
 )
 
 from tests.fixtures import synthetic_schedule_input
+from clinic_shift_scheduler.ratio_fairness import ratio_basis_points
 
 
 def available(day: str, *periods: str) -> list[dict]:
@@ -48,13 +53,14 @@ def full_time(
     maximum: int | None = None,
     available_slots: list[dict] | None = None,
     fairness_group: str | None = None,
+    roles: list[str] | None = None,
 ) -> dict:
     employee = {
         "employee_id": employee_id,
         "name": employee_id,
         "employment_type": "full_time",
         "full_time_class": full_time_class,
-        "roles": ["assistant"],
+        "roles": roles or ["assistant"],
         "fairness_group": fairness_group or f"{full_time_class}_{employee_id}",
         "shift_mode": shift_mode,
     }
@@ -243,8 +249,11 @@ class LexicographicOptimizationTests(unittest.TestCase):
                 OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES,
                 OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS,
                 OptimizationStage.FULL_TIME_SECONDARY_PATTERNS,
-                OptimizationStage.A_GROUP_FAIRNESS,
-                OptimizationStage.B_GROUP_FAIRNESS,
+                OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP,
+                OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_TOTAL_GAP,
+                OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP,
+                OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP,
+                OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS,
                 OptimizationStage.PART_TIME_GROUP_FAIRNESS,
                 OptimizationStage.COMMON_GROUP_FAIRNESS,
             ),
@@ -602,6 +611,21 @@ class PatternQualityOptimizationTests(unittest.TestCase):
         result = solve_lexicographic(validate_and_normalize(payload))
 
         for stage_name in (
+            OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP,
+            OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_TOTAL_GAP,
+        ):
+            fairness = stage(result, stage_name)
+            self.assertEqual(
+                fairness.status,
+                OptimizationStageStatus.SKIPPED_CONSTANT,
+            )
+            self.assertEqual(fairness.objective_value, 0)
+            self.assertEqual(
+                fairness.constant_proof,
+                ConstantProof.NO_COMPARABLE_FULL_TIME_CLASSES,
+            )
+
+        for stage_name in (
             OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES,
             OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS,
             OptimizationStage.FULL_TIME_SECONDARY_PATTERNS,
@@ -619,6 +643,496 @@ class PatternQualityOptimizationTests(unittest.TestCase):
 
 
 class FairnessOptimizationTests(unittest.TestCase):
+    def test_class_quality_compares_different_legal_second_preferences(self) -> None:
+        day = "2024-10-01"
+        payload = synthetic_schedule_input(
+            start_date=day,
+            end_date=day,
+            roles=["a_role", "b_role"],
+            employees=[
+                full_time(
+                    "A",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=2,
+                    roles=["a_role"],
+                ),
+                full_time(
+                    "B",
+                    full_time_class="B",
+                    shift_mode="EXACT",
+                    required=3,
+                    roles=["b_role"],
+                ),
+            ],
+            positive_demands={
+                (day, "morning", "a_role"): 1,
+                (day, "evening", "a_role"): 1,
+                **{
+                    (day, period, "b_role"): 1
+                    for period in ("morning", "afternoon", "evening")
+                },
+            },
+        )
+        data = validate_and_normalize(payload)
+        result = solve_lexicographic(data)
+        metrics = recompute_schedule_metrics(data, result.assignments)
+
+        self.assertEqual(
+            result.daily_patterns[("A", date(2024, 10, 1))],
+            DailyPattern.MORNING_EVENING,
+        )
+        self.assertEqual(
+            result.daily_patterns[("B", date(2024, 10, 1))],
+            DailyPattern.TRIPLE,
+        )
+        for full_time_class in ("A", "B"):
+            enum_class = optimization.FullTimeClass(full_time_class)
+            self.assertEqual(
+                metrics.class_quality_ratio_basis_points[
+                    (enum_class, PatternQualityLevel.SECOND)
+                ],
+                10_000,
+            )
+        self.assertEqual(
+            metrics.class_quality_ratio_gaps_basis_points[
+                PatternQualityLevel.SECOND
+            ],
+            0,
+        )
+        self.assertEqual(
+            stage(
+                result,
+                OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP,
+            ).objective_value,
+            0,
+        )
+
+    def test_class_quality_precedes_within_class_fairness_and_keeps_prefix(self) -> None:
+        days = tuple(f"2024-10-{day:02d}" for day in range(1, 5))
+        payload = synthetic_schedule_input(
+            start_date=days[0],
+            end_date=days[-1],
+            roles=["assistant"],
+            employees=[
+                full_time(
+                    "A1",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=2,
+                    fairness_group="A_SHARED",
+                ),
+                full_time(
+                    "A2",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=0,
+                    fairness_group="A_SHARED",
+                ),
+                full_time(
+                    "B1",
+                    full_time_class="B",
+                    shift_mode="EXACT",
+                    required=2,
+                    fairness_group="B_SHARED",
+                ),
+                full_time(
+                    "B2",
+                    full_time_class="B",
+                    shift_mode="EXACT",
+                    required=1,
+                    fairness_group="B_SHARED",
+                ),
+            ],
+            positive_demands={
+                **{
+                    (day, "morning", "assistant"): 1 for day in days
+                },
+                (days[0], "afternoon", "assistant"): 1,
+            },
+        )
+        data = validate_and_normalize(payload)
+        result = solve_lexicographic(data)
+        metrics = recompute_schedule_metrics(data, result.assignments)
+        report = validate_schedule_result(data, result.assignments, result.stages)
+
+        self.assertEqual(
+            stage(
+                result,
+                OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES,
+            ).objective_value,
+            1,
+        )
+        self.assertEqual(
+            stage(
+                result,
+                OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS,
+            ).objective_value,
+            3,
+        )
+        self.assertEqual(
+            stage(
+                result,
+                OptimizationStage.FULL_TIME_SECONDARY_PATTERNS,
+            ).objective_value,
+            0,
+        )
+        self.assertEqual(
+            stage(
+                result,
+                OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP,
+            ).objective_value,
+            5000,
+        )
+        self.assertEqual(
+            stage(
+                result,
+                OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_TOTAL_GAP,
+            ).objective_value,
+            10_000,
+        )
+        # A class-fair solution forces B1/B2 to receive opposite pattern
+        # qualities.  Optimizing people first could make this 0 only by
+        # worsening the already locked class gap to 10,000 bp.
+        self.assertEqual(
+            stage(
+                result,
+                OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP,
+            ).objective_value,
+            10_000,
+        )
+        self.assertEqual(
+            stage(
+                result,
+                OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP,
+            ).objective_value,
+            20_000,
+        )
+        self.assertEqual(
+            metrics.objective_values[
+                OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP
+            ],
+            5000,
+        )
+        self.assertEqual(report.status, ResultValidationStatus.PASS)
+
+    def test_class_quality_rounding_and_validator_recomputation_match(self) -> None:
+        days = ("2024-10-01", "2024-10-02", "2024-10-03")
+        payload = synthetic_schedule_input(
+            start_date=days[0],
+            end_date=days[-1],
+            roles=["a_role", "b_role"],
+            employees=[
+                full_time(
+                    "A",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=4,
+                    roles=["a_role"],
+                ),
+                full_time(
+                    "B",
+                    full_time_class="B",
+                    shift_mode="EXACT",
+                    required=3,
+                    roles=["b_role"],
+                ),
+            ],
+            positive_demands={
+                (days[0], "morning", "a_role"): 1,
+                (days[0], "afternoon", "a_role"): 1,
+                (days[1], "morning", "a_role"): 1,
+                (days[2], "morning", "a_role"): 1,
+                (days[0], "morning", "b_role"): 1,
+                (days[0], "afternoon", "b_role"): 1,
+                (days[1], "morning", "b_role"): 1,
+            },
+        )
+        data = validate_and_normalize(payload)
+        result = solve_lexicographic(data)
+        report = validate_schedule_result(data, result.assignments, result.stages)
+        metrics = report.recomputed
+
+        self.assertEqual(
+            metrics.class_quality_ratio_basis_points[
+                (optimization.FullTimeClass.A, PatternQualityLevel.FIRST)
+            ],
+            3333,
+        )
+        self.assertEqual(
+            metrics.class_quality_ratio_basis_points[
+                (optimization.FullTimeClass.B, PatternQualityLevel.FIRST)
+            ],
+            5000,
+        )
+        self.assertEqual(
+            metrics.class_quality_ratio_gaps_basis_points[
+                PatternQualityLevel.FIRST
+            ],
+            1667,
+        )
+        self.assertEqual(
+            stage(
+                result,
+                OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP,
+            ).objective_value,
+            1667,
+        )
+        self.assertEqual(
+            stage(
+                result,
+                OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_TOTAL_GAP,
+            ).objective_value,
+            3334,
+        )
+        self.assertEqual(report.status, ResultValidationStatus.PASS)
+
+    def test_zero_attendance_class_is_na_and_does_not_force_work(self) -> None:
+        payload = one_day_input(
+            [
+                full_time(
+                    "A",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=1,
+                ),
+                full_time(
+                    "B",
+                    full_time_class="B",
+                    shift_mode="EXACT",
+                    required=0,
+                ),
+            ],
+            ("morning",),
+        )
+        data = validate_and_normalize(payload)
+        result = solve_lexicographic(data)
+        report = validate_schedule_result(data, result.assignments, result.stages)
+
+        self.assertEqual(result.employee_shift_counts["B"], 0)
+        self.assertIsNone(
+            report.recomputed.class_quality_ratio_basis_points[
+                (optimization.FullTimeClass.B, PatternQualityLevel.FIRST)
+            ]
+        )
+        self.assertTrue(
+            all(
+                gap == 0
+                for gap in report.recomputed.class_quality_ratio_gaps_basis_points.values()
+            )
+        )
+        self.assertEqual(
+            stage(
+                result,
+                OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP,
+            ).objective_value,
+            0,
+        )
+        self.assertEqual(report.status, ResultValidationStatus.PASS)
+
+    def test_ratio_rounding_uses_shared_half_up_basis_points_rule(self) -> None:
+        self.assertEqual(ratio_basis_points(5, 7), 7143)
+        self.assertEqual(ratio_basis_points(1, 6), 1667)
+        self.assertEqual(ratio_basis_points(2, 3), 6667)
+        self.assertEqual(ratio_basis_points(1, 32), 313)
+        self.assertEqual(ratio_basis_points(0, 3), 0)
+        self.assertIsNone(ratio_basis_points(0, 0))
+
+    def test_pattern_ratio_fairness_precedes_integer_gaps_for_a_and_b(self) -> None:
+        days = tuple(f"2024-10-{day:02d}" for day in range(1, 9))
+        positive_demands = {
+            (day, "morning", "assistant"): 1 for day in days
+        }
+        positive_demands.update(
+            {
+                (day, "afternoon", "assistant"): 1
+                for day in days[:2]
+            }
+        )
+        for full_time_class in ("A", "B"):
+            with self.subTest(full_time_class=full_time_class):
+                payload = synthetic_schedule_input(
+                    start_date=days[0],
+                    end_date=days[-1],
+                    roles=["assistant"],
+                    employees=[
+                        full_time(
+                            "HIGH",
+                            full_time_class=full_time_class,
+                            shift_mode="EXACT",
+                            required=7,
+                            fairness_group=f"{full_time_class}_SHARED",
+                        ),
+                        full_time(
+                            "LOW",
+                            full_time_class=full_time_class,
+                            shift_mode="EXACT",
+                            required=3,
+                            fairness_group=f"{full_time_class}_SHARED",
+                        ),
+                    ],
+                    positive_demands=positive_demands,
+                )
+                data = validate_and_normalize(payload)
+                result = solve_lexicographic(data)
+                metrics = recompute_schedule_metrics(data, result.assignments)
+                report = validate_schedule_result(
+                    data, result.assignments, result.stages
+                )
+
+                self.assertEqual(
+                    stage(
+                        result,
+                        OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES,
+                    ).objective_value,
+                    2,
+                )
+                self.assertEqual(
+                    stage(
+                        result,
+                        OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS,
+                    ).objective_value,
+                    6,
+                )
+                self.assertEqual(
+                    stage(
+                        result,
+                        OptimizationStage.FULL_TIME_SECONDARY_PATTERNS,
+                    ).objective_value,
+                    0,
+                )
+                self.assertEqual(
+                    stage(
+                        result,
+                        OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP,
+                    ).objective_value,
+                    3333,
+                )
+                self.assertEqual(
+                    stage(
+                        result,
+                        OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP,
+                    ).objective_value,
+                    6666,
+                )
+                # Integer-first optimization would choose gap sum 2 here;
+                # ratio-first deliberately retains the fairer proportions.
+                self.assertEqual(
+                    stage(
+                        result,
+                        OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS,
+                    ).objective_value,
+                    4,
+                )
+                self.assertEqual(
+                    metrics.objective_values[
+                        OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP
+                    ],
+                    3333,
+                )
+                self.assertEqual(report.status, ResultValidationStatus.PASS)
+                self.assertEqual(
+                    report.recomputed.objective_values,
+                    metrics.objective_values,
+                )
+                ratio_stage_index = next(
+                    index
+                    for index, item in enumerate(result.stages)
+                    if item.stage
+                    is OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP
+                )
+                tampered_stages = list(result.stages)
+                tampered_stages[ratio_stage_index] = replace(
+                    tampered_stages[ratio_stage_index],
+                    objective_value=3334,
+                )
+                tampered_report = validate_schedule_result(
+                    data, result.assignments, tuple(tampered_stages)
+                )
+                self.assertEqual(
+                    tampered_report.status,
+                    ResultValidationStatus.VALIDATION_FAILED,
+                )
+                self.assertTrue(
+                    any(
+                        issue.code == "objective_value_mismatch"
+                        for issue in tampered_report.issues
+                    )
+                )
+
+    def test_ratio_groups_are_modelled_independently(self) -> None:
+        payload = one_day_input(
+            [
+                full_time(
+                    employee_id,
+                    full_time_class="A",
+                    shift_mode="RANGE",
+                    minimum=0,
+                    maximum=1,
+                    fairness_group=group,
+                )
+                for employee_id, group in (
+                    ("A1", "G1"),
+                    ("A2", "G1"),
+                    ("A3", "G2"),
+                    ("A4", "G2"),
+                )
+            ],
+            (),
+        )
+        built = optimization.build_optimization_model(
+            validate_and_normalize(payload)
+        )
+
+        self.assertEqual(
+            {group for group, _metric in built.ratio_fairness_gap_variables},
+            {"G1", "G2"},
+        )
+        self.assertEqual(len(built.ratio_fairness_gap_variables), 6)
+
+    def test_zero_attendance_is_excluded_from_ratio_gap(self) -> None:
+        payload = one_day_input(
+            [
+                full_time(
+                    "ACTIVE",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=1,
+                    fairness_group="A_SHARED",
+                ),
+                full_time(
+                    "OFF",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=0,
+                    fairness_group="A_SHARED",
+                ),
+            ],
+            ("morning",),
+        )
+        data = validate_and_normalize(payload)
+        result = solve_lexicographic(data)
+        metrics = recompute_schedule_metrics(data, result.assignments)
+
+        self.assertEqual(
+            stage(
+                result,
+                OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP,
+            ).objective_value,
+            0,
+        )
+        self.assertEqual(
+            metrics.pattern_ratio_basis_points[
+                ("ACTIVE", optimization.FairnessMetric.SINGLE_SHIFT_DAYS)
+            ],
+            10_000,
+        )
+        self.assertIsNone(
+            metrics.pattern_ratio_basis_points[
+                ("OFF", optimization.FairnessMetric.SINGLE_SHIFT_DAYS)
+            ]
+        )
+
     def test_completed_prefix_is_optimal_without_claiming_full_v1_optimal(self) -> None:
         payload = one_day_input(
             [
@@ -664,8 +1178,9 @@ class FairnessOptimizationTests(unittest.TestCase):
         result = solve_lexicographic(validate_and_normalize(payload))
 
         for stage_name in (
-            OptimizationStage.A_GROUP_FAIRNESS,
-            OptimizationStage.B_GROUP_FAIRNESS,
+            OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP,
+            OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP,
+            OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS,
             OptimizationStage.PART_TIME_GROUP_FAIRNESS,
             OptimizationStage.COMMON_GROUP_FAIRNESS,
         ):
@@ -763,7 +1278,9 @@ class FairnessOptimizationTests(unittest.TestCase):
         )
 
         result = solve_lexicographic(validate_and_normalize(payload))
-        fairness = stage(result, OptimizationStage.A_GROUP_FAIRNESS)
+        fairness = stage(
+            result, OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS
+        )
         patterns = [
             result.daily_patterns[(item, date(2024, 10, 1))]
             for item in ("A1", "A2")
@@ -809,7 +1326,9 @@ class FairnessOptimizationTests(unittest.TestCase):
             result, OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES
         )
         singles = stage(result, OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS)
-        b_fairness = stage(result, OptimizationStage.B_GROUP_FAIRNESS)
+        b_fairness = stage(
+            result, OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS
+        )
         counts = {
             employee_id: Counter(
                 pattern
