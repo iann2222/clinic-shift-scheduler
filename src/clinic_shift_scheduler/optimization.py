@@ -1,11 +1,11 @@
-"""Strict lexicographic optimization through A+B daily-pattern quality.
+"""Strict v1 lexicographic objectives through group fairness.
 
-Fairness objectives and formal output validation remain outside this module's
-current scope.
+Formal independent output validation remains outside this module's scope.
 """
 
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import dataclass
 from enum import StrEnum
 from types import MappingProxyType
@@ -14,7 +14,7 @@ from typing import Mapping
 from ortools.sat.python import cp_model
 
 from .daily_patterns import PATTERN_PERIODS, DailyPattern
-from .enums import EmploymentType, FullTimeClass, ShiftMode
+from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period, ShiftMode
 from .feasibility import (
     Assignment,
     FeasibilityModel,
@@ -35,6 +35,23 @@ class OptimizationStage(StrEnum):
     FULL_TIME_CONSECUTIVE_DOUBLES = "full_time_consecutive_doubles"
     FULL_TIME_SINGLE_SHIFT_DAYS = "full_time_single_shift_days"
     FULL_TIME_SECONDARY_PATTERNS = "full_time_secondary_patterns"
+    A_GROUP_FAIRNESS = "a_group_fairness"
+    B_GROUP_FAIRNESS = "b_group_fairness"
+    PART_TIME_GROUP_FAIRNESS = "part_time_group_fairness"
+    COMMON_GROUP_FAIRNESS = "common_group_fairness"
+
+
+class FairnessMetric(StrEnum):
+    CONSECUTIVE_DOUBLES = "consecutive_doubles"
+    SINGLE_SHIFT_DAYS = "single_shift_days"
+    MORNING_EVENING_DAYS = "morning_evening_days"
+    TRIPLE_DAYS = "triple_days"
+    TOTAL_SHIFTS = "total_shifts"
+    MORNING_SHIFTS = "morning_shifts"
+    AFTERNOON_SHIFTS = "afternoon_shifts"
+    EVENING_SHIFTS = "evening_shifts"
+    SUNDAY_SHIFTS = "sunday_shifts"
+    HOLIDAY_SHIFTS = "holiday_shifts"
 
 
 class ObjectiveDirection(StrEnum):
@@ -61,6 +78,7 @@ class ConstantProof(StrEnum):
     )
     NO_FULL_TIME_EMPLOYEES = "NO_FULL_TIME_EMPLOYEES"
     NO_PATTERN_OPPORTUNITY = "NO_PATTERN_OPPORTUNITY"
+    NO_COMPARABLE_FAIRNESS_GROUPS = "NO_COMPARABLE_FAIRNESS_GROUPS"
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,6 +122,16 @@ class OptimizationModel:
     consecutive_double_objective: cp_model.LinearExpr | int
     single_shift_objective: cp_model.LinearExpr | int
     secondary_pattern_objective: cp_model.LinearExpr | int
+    employee_fairness_metrics: Mapping[
+        tuple[str, FairnessMetric], cp_model.IntVar
+    ]
+    fairness_gap_variables: Mapping[
+        OptimizationStage,
+        Mapping[tuple[str, FairnessMetric], cp_model.IntVar],
+    ]
+    fairness_objectives: Mapping[
+        OptimizationStage, cp_model.LinearExpr | int
+    ]
 
 
 # Backwards-compatible public name retained for existing phase-four callers.
@@ -120,6 +148,7 @@ class LexicographicResult:
     part_time_total: int | None
     stages: tuple[OptimizationStageResult, ...]
     precheck: PrecheckResult
+    implemented_objective_prefix_optimal: bool
 
     @property
     def is_feasible(self) -> bool:
@@ -203,7 +232,7 @@ def build_optimization_model(data: NormalizedScheduleInput) -> OptimizationModel
         for employee in data.source.employees
         if employee.employment_type is EmploymentType.PART_TIME
     )
-    available_periods: dict[PersonDayKey, set] = {}
+    available_periods: dict[PersonDayKey, set[Period]] = {}
     for employee_id, day, period, _role in data.allowed_assignments:
         available_periods.setdefault((employee_id, day), set()).add(period)
 
@@ -243,6 +272,189 @@ def build_optimization_model(data: NormalizedScheduleInput) -> OptimizationModel
                 key = (employee.employee_id, day, secondary_pattern)
                 secondary_variables[key] = feasibility.daily_patterns[key]
 
+    metric_upper_bound = 3 * len(data.dates)
+    employee_metrics: dict[tuple[str, FairnessMetric], cp_model.IntVar] = {}
+
+    def add_count_metric(
+        employee_id: str,
+        metric: FairnessMetric,
+        terms: list[cp_model.IntVar],
+    ) -> cp_model.IntVar:
+        variable = model.new_int_var(
+            0,
+            metric_upper_bound,
+            _var_name(f"fairness_{metric.value}", employee_id),
+        )
+        model.add(variable == sum(terms))
+        employee_metrics[(employee_id, metric)] = variable
+        return variable
+
+    consecutive_patterns_set = frozenset(consecutive_patterns)
+    single_patterns_set = frozenset(single_patterns)
+    for employee in data.source.employees:
+        employee_id = employee.employee_id
+        if employee.employment_type is EmploymentType.FULL_TIME:
+            add_count_metric(
+                employee_id,
+                FairnessMetric.CONSECUTIVE_DOUBLES,
+                [
+                    feasibility.daily_patterns[(employee_id, day, pattern)]
+                    for day in data.dates
+                    for pattern in consecutive_patterns_set
+                ],
+            )
+            add_count_metric(
+                employee_id,
+                FairnessMetric.SINGLE_SHIFT_DAYS,
+                [
+                    feasibility.daily_patterns[(employee_id, day, pattern)]
+                    for day in data.dates
+                    for pattern in single_patterns_set
+                ],
+            )
+            class_metric = (
+                FairnessMetric.MORNING_EVENING_DAYS
+                if employee.full_time_class is FullTimeClass.A
+                else FairnessMetric.TRIPLE_DAYS
+            )
+            class_pattern = (
+                DailyPattern.MORNING_EVENING
+                if employee.full_time_class is FullTimeClass.A
+                else DailyPattern.TRIPLE
+            )
+            add_count_metric(
+                employee_id,
+                class_metric,
+                [
+                    feasibility.daily_patterns[(employee_id, day, class_pattern)]
+                    for day in data.dates
+                ],
+            )
+        else:
+            employee_metrics[(employee_id, FairnessMetric.TOTAL_SHIFTS)] = (
+                feasibility.employee_shift_counts[employee_id]
+            )
+
+        for period, metric in (
+            (Period.MORNING, FairnessMetric.MORNING_SHIFTS),
+            (Period.AFTERNOON, FairnessMetric.AFTERNOON_SHIFTS),
+            (Period.EVENING, FairnessMetric.EVENING_SHIFTS),
+        ):
+            add_count_metric(
+                employee_id,
+                metric,
+                [
+                    feasibility.slot_work[(employee_id, day, period)]
+                    for day in data.dates
+                ],
+            )
+        add_count_metric(
+            employee_id,
+            FairnessMetric.SUNDAY_SHIFTS,
+            [
+                feasibility.slot_work[(employee_id, day, period)]
+                for day in data.dates
+                if day.weekday() == 6
+                for period in PERIODS_V1
+            ],
+        )
+        add_count_metric(
+            employee_id,
+            FairnessMetric.HOLIDAY_SHIFTS,
+            [
+                feasibility.slot_work[(employee_id, day, period)]
+                for day in data.dates
+                if day in data.source.period.holidays
+                for period in PERIODS_V1
+            ],
+        )
+
+    stage_members_and_metrics = {
+        OptimizationStage.A_GROUP_FAIRNESS: (
+            tuple(
+                employee
+                for employee in data.source.employees
+                if employee.full_time_class is FullTimeClass.A
+            ),
+            (
+                FairnessMetric.CONSECUTIVE_DOUBLES,
+                FairnessMetric.SINGLE_SHIFT_DAYS,
+                FairnessMetric.MORNING_EVENING_DAYS,
+            ),
+        ),
+        OptimizationStage.B_GROUP_FAIRNESS: (
+            tuple(
+                employee
+                for employee in data.source.employees
+                if employee.full_time_class is FullTimeClass.B
+            ),
+            (
+                FairnessMetric.CONSECUTIVE_DOUBLES,
+                FairnessMetric.SINGLE_SHIFT_DAYS,
+                FairnessMetric.TRIPLE_DAYS,
+            ),
+        ),
+        OptimizationStage.PART_TIME_GROUP_FAIRNESS: (
+            tuple(
+                employee
+                for employee in data.source.employees
+                if employee.employment_type is EmploymentType.PART_TIME
+            ),
+            (FairnessMetric.TOTAL_SHIFTS,),
+        ),
+        OptimizationStage.COMMON_GROUP_FAIRNESS: (
+            tuple(data.source.employees),
+            (
+                FairnessMetric.MORNING_SHIFTS,
+                FairnessMetric.AFTERNOON_SHIFTS,
+                FairnessMetric.EVENING_SHIFTS,
+                FairnessMetric.SUNDAY_SHIFTS,
+                FairnessMetric.HOLIDAY_SHIFTS,
+            ),
+        ),
+    }
+    fairness_gaps: dict[
+        OptimizationStage,
+        Mapping[tuple[str, FairnessMetric], cp_model.IntVar],
+    ] = {}
+    fairness_objectives: dict[
+        OptimizationStage, cp_model.LinearExpr | int
+    ] = {}
+    for stage, (employees, metrics) in stage_members_and_metrics.items():
+        groups: dict[str, list[Employee]] = defaultdict(list)
+        for employee in employees:
+            groups[employee.fairness_group].append(employee)
+        stage_gaps: dict[tuple[str, FairnessMetric], cp_model.IntVar] = {}
+        for group, members in sorted(groups.items()):
+            if len(members) < 2:
+                continue
+            for metric in metrics:
+                member_values = [
+                    employee_metrics[(employee.employee_id, metric)]
+                    for employee in members
+                ]
+                maximum = model.new_int_var(
+                    0,
+                    metric_upper_bound,
+                    f"fairness_max[{stage.value},{group},{metric.value}]",
+                )
+                minimum = model.new_int_var(
+                    0,
+                    metric_upper_bound,
+                    f"fairness_min[{stage.value},{group},{metric.value}]",
+                )
+                gap = model.new_int_var(
+                    0,
+                    metric_upper_bound,
+                    f"fairness_gap[{stage.value},{group},{metric.value}]",
+                )
+                model.add_max_equality(maximum, member_values)
+                model.add_min_equality(minimum, member_values)
+                model.add(gap == maximum - minimum)
+                stage_gaps[(group, metric)] = gap
+        fairness_gaps[stage] = MappingProxyType(stage_gaps)
+        fairness_objectives[stage] = sum(stage_gaps.values())
+
     return OptimizationModel(
         feasibility=feasibility,
         target_differences=MappingProxyType(target_differences),
@@ -255,6 +467,9 @@ def build_optimization_model(data: NormalizedScheduleInput) -> OptimizationModel
         consecutive_double_objective=sum(consecutive_variables.values()),
         single_shift_objective=sum(single_variables.values()),
         secondary_pattern_objective=sum(secondary_variables.values()),
+        employee_fairness_metrics=MappingProxyType(employee_metrics),
+        fairness_gap_variables=MappingProxyType(fairness_gaps),
+        fairness_objectives=MappingProxyType(fairness_objectives),
     )
 
 
@@ -382,6 +597,28 @@ def _objective_specs(
     secondary_constant, secondary_proof = pattern_constant(
         built.secondary_pattern_variables
     )
+    fairness_specs: list[_ObjectiveSpec] = []
+    for fairness_stage in (
+        OptimizationStage.A_GROUP_FAIRNESS,
+        OptimizationStage.B_GROUP_FAIRNESS,
+        OptimizationStage.PART_TIME_GROUP_FAIRNESS,
+        OptimizationStage.COMMON_GROUP_FAIRNESS,
+    ):
+        gaps = built.fairness_gap_variables[fairness_stage]
+        constant_value = None if gaps else 0
+        constant_proof = (
+            None if gaps else ConstantProof.NO_COMPARABLE_FAIRNESS_GROUPS
+        )
+        fairness_specs.append(
+            _ObjectiveSpec(
+                stage=fairness_stage,
+                direction=ObjectiveDirection.MINIMIZE,
+                variables=tuple(gaps.values()),
+                expression=built.fairness_objectives[fairness_stage],
+                constant_value=constant_value,
+                constant_proof=constant_proof,
+            )
+        )
     return (
         _ObjectiveSpec(
             stage=OptimizationStage.FULL_TIME_TARGET_DEVIATION,
@@ -423,6 +660,7 @@ def _objective_specs(
             constant_value=secondary_constant,
             constant_proof=secondary_proof,
         ),
+        *fairness_specs,
     )
 
 
@@ -493,6 +731,7 @@ def _empty_result(
         part_time_total=None,
         stages=stages,
         precheck=precheck,
+        implemented_objective_prefix_optimal=False,
     )
 
 
@@ -501,6 +740,8 @@ def _result_from_snapshot(
     snapshot: _SolutionSnapshot,
     stages: list[OptimizationStageResult],
     precheck: PrecheckResult,
+    *,
+    implemented_objective_prefix_optimal: bool = False,
 ) -> LexicographicResult:
     return LexicographicResult(
         status=status,
@@ -511,6 +752,7 @@ def _result_from_snapshot(
         part_time_total=snapshot.part_time_total,
         stages=tuple(stages),
         precheck=precheck,
+        implemented_objective_prefix_optimal=implemented_objective_prefix_optimal,
     )
 
 
@@ -665,8 +907,9 @@ def solve_lexicographic(
         )
 
     return _result_from_snapshot(
-        FeasibilityStatus.OPTIMAL,
+        FeasibilityStatus.FEASIBLE,
         snapshot,
         stages,
         precheck,
+        implemented_objective_prefix_optimal=True,
     )

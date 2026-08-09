@@ -21,6 +21,7 @@ from .feasibility import (
 from .models import NormalizedScheduleInput, ScheduleInput
 from .optimization import (
     ConstantProof,
+    FairnessMetric,
     LexicographicResult,
     LexicographicSolverConfig,
     ObjectiveDirection,
@@ -48,6 +49,7 @@ __all__ = [
     "FeasibilityResult",
     "FeasibilitySolverConfig",
     "FeasibilityStatus",
+    "FairnessMetric",
     "InputValidationError",
     "LexicographicResult",
     "LexicographicSolverConfig",
