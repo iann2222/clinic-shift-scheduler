@@ -102,14 +102,29 @@ def _fill_color(cell: Cell) -> colors.Color | None:
     return colors.HexColor(f"#{rgb[-6:]}")
 
 
-def _paragraph(text: str, *, header: bool = False) -> Paragraph:
+def _font_color(cell: Cell) -> colors.Color | None:
+    font_color = cell.font.color
+    if font_color is None or font_color.type != "rgb":
+        return None
+    rgb = font_color.rgb
+    if not isinstance(rgb, str) or len(rgb) not in (6, 8):
+        return None
+    return colors.HexColor(f"#{rgb[-6:]}")
+
+
+def _paragraph(
+    text: str,
+    *,
+    header: bool = False,
+    text_color: colors.Color = colors.black,
+) -> Paragraph:
     style = ParagraphStyle(
         name="schedule-header" if header else "schedule-cell",
         fontName=_CJK_FONT,
         fontSize=7 if header else 6.2,
         leading=8 if header else 7.1,
         alignment=TA_CENTER,
-        textColor=colors.black,
+        textColor=text_color,
         wordWrap="CJK",
     )
     escaped = (
@@ -146,7 +161,8 @@ def _schedule_table(sheet: Worksheet) -> Table:
             rendered_row.append(
                 _paragraph(
                     _cell_text(cell),
-                    header=row_index < 2 or column_index == 0,
+                    header=row_index < 2 or column_index < 2,
+                    text_color=_font_color(cell) or colors.black,
                 )
             )
             background = _fill_color(cell)
@@ -161,12 +177,28 @@ def _schedule_table(sheet: Worksheet) -> Table:
                 )
         values.append(rendered_row)
 
+    for merged_range in sheet.merged_cells.ranges:
+        table_style.append(
+            (
+                "SPAN",
+                (merged_range.min_col - 1, merged_range.min_row - 1),
+                (merged_range.max_col - 1, merged_range.max_row - 1),
+            )
+        )
+
     usable_width = landscape(A4)[0] - 12 * mm
-    label_width = 24 * mm
-    date_width = (usable_width - label_width) / max(1, sheet.max_column - 1)
+    period_width = 9 * mm
+    role_width = 15 * mm
+    date_width = (
+        usable_width - period_width - role_width
+    ) / max(1, sheet.max_column - 2)
     table = Table(
         values,
-        colWidths=[label_width, *([date_width] * (sheet.max_column - 1))],
+        colWidths=[
+            period_width,
+            role_width,
+            *([date_width] * (sheet.max_column - 2)),
+        ],
         repeatRows=2,
         hAlign="CENTER",
     )
@@ -195,12 +227,19 @@ def _individual_summary_table(sheet: Worksheet) -> Table:
             max_col=sheet.max_column,
         )
     ):
-        values.append(
-            [
-                _paragraph(_cell_text(cell), header=row_index == 0)
-                for cell in row
-            ]
-        )
+        rendered_row: list[Paragraph] = []
+        for column_index, cell in enumerate(row):
+            text_color = colors.black
+            if row_index > 0 and column_index == 0:
+                text_color = _font_color(cell) or colors.black
+            rendered_row.append(
+                _paragraph(
+                    _cell_text(cell),
+                    header=row_index == 0,
+                    text_color=text_color,
+                )
+            )
+        values.append(rendered_row)
 
     widths_mm = (16, 18, 12, 12, 36, 30, 36, 30)
     table = Table(
@@ -226,7 +265,7 @@ def _render_pdf(source: Path, target: Path) -> None:
             rightMargin=6 * mm,
             topMargin=5 * mm,
             bottomMargin=5 * mm,
-            title=f"{title}｜月班表",
+            title=f"{title}（本月班表）",
             author="clinic-shift-scheduler",
             subject="正式月班表列印版",
         )
@@ -240,7 +279,7 @@ def _render_pdf(source: Path, target: Path) -> None:
         )
         document.build(
             [
-                Paragraph(f"{title}｜月班表", title_style),
+                Paragraph(f"{title}（本月班表）", title_style),
                 Spacer(1, 2 * mm),
                 _schedule_table(schedule),
                 Spacer(1, 3 * mm),

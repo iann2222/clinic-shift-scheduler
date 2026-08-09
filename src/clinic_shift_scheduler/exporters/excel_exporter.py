@@ -47,9 +47,9 @@ _GRID = Side(style="thin", color="B7C9D6")
 _BORDER = Border(left=_GRID, right=_GRID, top=_GRID, bottom=_GRID)
 
 _PERIOD_LABELS = {
-    Period.MORNING: "早上",
-    Period.AFTERNOON: "下午",
-    Period.EVENING: "晚上",
+    Period.MORNING: "早",
+    Period.AFTERNOON: "午",
+    Period.EVENING: "晚",
 }
 _PERIOD_FILLS = {
     Period.MORNING: _MORNING,
@@ -62,6 +62,20 @@ _ROLE_LABELS = {
     "assistant": "跟診",
 }
 _WEEKDAY_LABELS = ("一", "二", "三", "四", "五", "六", "日")
+_EMPLOYEE_FONT_COLORS = (
+    "1F4E79",
+    "C00000",
+    "548235",
+    "7030A0",
+    "9C5700",
+    "008C95",
+    "A64D79",
+    "44546A",
+    "BF3F00",
+    "006100",
+    "5B2C6F",
+    "004C6D",
+)
 
 
 def _header(cell: Cell, *, fill: str = _DARK_BLUE) -> None:
@@ -102,9 +116,19 @@ def _translated_role(role: str) -> str:
     return _ROLE_LABELS.get(role, role)
 
 
-def _schedule_row_label(period: Period, role: str, position: int, total: int) -> str:
-    suffix = f" {position}" if total > 1 else ""
-    return f"{_PERIOD_LABELS[period]}{_translated_role(role)}{suffix}"
+def _employee_color_map(output: FormalScheduleOutput) -> dict[str, str]:
+    employee_ids = sorted(item.employee_id for item in output.individual_statistics)
+    return {
+        employee_id: _EMPLOYEE_FONT_COLORS[index % len(_EMPLOYEE_FONT_COLORS)]
+        for index, employee_id in enumerate(employee_ids)
+    }
+
+
+def _plain_schedule_header(cell: Cell) -> None:
+    cell.fill = PatternFill(fill_type=None)
+    cell.font = Font(bold=True, color="000000")
+    cell.alignment = Alignment(horizontal="center", vertical="center")
+    cell.border = _BORDER
 
 
 def _build_schedule_sheet(
@@ -117,7 +141,7 @@ def _build_schedule_sheet(
     assert sheet is not None
     sheet.title = "月班表"
     sheet.sheet_view.showGridLines = False
-    sheet.freeze_panes = "B3"
+    sheet.freeze_panes = "C3"
     sheet.sheet_properties.pageSetUpPr.fitToPage = True
     sheet.page_setup.orientation = "landscape"
     sheet.page_setup.fitToWidth = 1
@@ -125,15 +149,22 @@ def _build_schedule_sheet(
     sheet.print_title_rows = "1:2"
     sheet.print_options.horizontalCentered = True
 
-    sheet.cell(1, 1, "日期")
-    sheet.cell(2, 1, "星期")
-    _header(sheet.cell(1, 1))
-    _header(sheet.cell(2, 1))
-    sheet.column_dimensions["A"].width = 16
+    for row_number, label in ((1, "日期"), (2, "星期")):
+        for column in (1, 2):
+            _plain_schedule_header(sheet.cell(row_number, column))
+        sheet.cell(row_number, 1, label)
+        sheet.merge_cells(
+            start_row=row_number,
+            start_column=1,
+            end_row=row_number,
+            end_column=2,
+        )
+    sheet.column_dimensions["A"].width = 6
+    sheet.column_dimensions["B"].width = 10
     sheet.row_dimensions[1].height = 24
     sheet.row_dimensions[2].height = 22
 
-    for column, day in enumerate(schedule.dates, start=2):
+    for column, day in enumerate(schedule.dates, start=3):
         date_cell = sheet.cell(1, column, day)
         date_cell.number_format = "m/d"
         weekday_cell = sheet.cell(2, column, _WEEKDAY_LABELS[day.weekday()])
@@ -142,39 +173,70 @@ def _build_schedule_sheet(
         _header(weekday_cell, fill=header_fill)
         sheet.column_dimensions[get_column_letter(column)].width = 11
 
-    totals = {
-        (row.period, row.role): sum(
-            item.period == row.period and item.role == row.role
-            for item in schedule.rows
-        )
+    row_lookup = {
+        (row.period, _translated_role(row.role), row.position): row
         for row in schedule.rows
     }
-    for row_number, schedule_row in enumerate(schedule.rows, start=3):
-        label = _schedule_row_label(
-            schedule_row.period,
-            schedule_row.role,
-            schedule_row.position,
-            totals[(schedule_row.period, schedule_row.role)],
+    employee_colors = _employee_color_map(output)
+    role_rows = (
+        ("櫃台", 1, "櫃台"),
+        ("跟診", 1, "一診"),
+        ("跟診", 2, "二診"),
+    )
+    for period_index, period in enumerate(Period):
+        first_row = 3 + period_index * len(role_rows)
+        last_row = first_row + len(role_rows) - 1
+        fill = PatternFill("solid", fgColor=_PERIOD_FILLS[period])
+        for row_number in range(first_row, last_row + 1):
+            for column in (1, 2):
+                label_cell = sheet.cell(row_number, column)
+                label_cell.fill = fill
+                label_cell.font = Font(bold=True)
+                label_cell.alignment = Alignment(
+                    horizontal="center", vertical="center"
+                )
+                label_cell.border = _BORDER
+            sheet.row_dimensions[row_number].height = 27
+        sheet.cell(first_row, 1, _PERIOD_LABELS[period])
+        sheet.merge_cells(
+            start_row=first_row,
+            start_column=1,
+            end_row=last_row,
+            end_column=1,
         )
-        label_cell = sheet.cell(row_number, 1, label)
-        label_cell.fill = PatternFill(
-            "solid", fgColor=_PERIOD_FILLS[schedule_row.period]
-        )
-        label_cell.font = Font(bold=True)
-        label_cell.alignment = Alignment(horizontal="center", vertical="center")
-        label_cell.border = _BORDER
-        sheet.row_dimensions[row_number].height = 27
-        for column, source_cell in enumerate(schedule_row.cells, start=2):
-            cell = sheet.cell(row_number, column, source_cell.display)
-            cell.alignment = Alignment(
-                horizontal="center", vertical="center", wrap_text=True
-            )
-            cell.border = _BORDER
-            if source_cell.kind is ScheduleCellKind.CLOSED:
-                cell.fill = PatternFill("solid", fgColor=_CLOSED)
-                cell.font = Font(color="666666", italic=True)
-            elif source_cell.kind is ScheduleCellKind.ZERO_DEMAND:
-                cell.font = Font(color="A6A6A6")
+
+        reference_row = next(row for row in schedule.rows if row.period is period)
+        for offset, (role_label, position, display_label) in enumerate(role_rows):
+            row_number = first_row + offset
+            sheet.cell(row_number, 2, display_label)
+            schedule_row = row_lookup.get((period, role_label, position))
+            for date_index, _day in enumerate(schedule.dates):
+                if schedule_row is None:
+                    reference = reference_row.cells[date_index]
+                    source_cell = None
+                    if reference.kind is ScheduleCellKind.CLOSED:
+                        display = "休診"
+                        kind = ScheduleCellKind.CLOSED
+                    else:
+                        display = "—"
+                        kind = ScheduleCellKind.ZERO_DEMAND
+                else:
+                    source_cell = schedule_row.cells[date_index]
+                    display = source_cell.display
+                    kind = source_cell.kind
+
+                cell = sheet.cell(row_number, date_index + 3, display)
+                cell.alignment = Alignment(
+                    horizontal="center", vertical="center", wrap_text=True
+                )
+                cell.border = _BORDER
+                if kind is ScheduleCellKind.CLOSED:
+                    cell.fill = PatternFill("solid", fgColor=_CLOSED)
+                    cell.font = Font(color="666666", italic=True)
+                elif kind is ScheduleCellKind.ZERO_DEMAND:
+                    cell.font = Font(color="A6A6A6")
+                elif source_cell is not None and source_cell.employee_id is not None:
+                    cell.font = Font(color=employee_colors[source_cell.employee_id])
 
 
 def _employment_label(value: EmploymentType) -> str:
@@ -208,6 +270,7 @@ def _build_individual_summary_sheet(
     output: FormalScheduleOutput,
 ) -> None:
     sheet = workbook.create_sheet("個人班型摘要")
+    employee_colors = _employee_color_map(output)
     headers = (
         "姓名",
         "類別",
@@ -243,6 +306,9 @@ def _build_individual_summary_sheet(
                 ),
             )
         )
+        sheet.cell(sheet.max_row, 1).font = Font(
+            color=employee_colors[stats.employee_id]
+        )
     _style_table(
         sheet,
         header_row=1,
@@ -268,6 +334,7 @@ def _build_individual_detail_sheet(
     output: FormalScheduleOutput,
 ) -> None:
     sheet = workbook.create_sheet("個人詳細統計")
+    employee_colors = _employee_color_map(output)
     overall = output.overall_statistics
     assert overall is not None
     roles = tuple(overall.role_counts)
@@ -333,6 +400,9 @@ def _build_individual_detail_sheet(
                 stats.available_periods,
                 *(_ratio_cell_value(stats.ratios.get(name)) for name in ratio_names),
             )
+        )
+        sheet.cell(sheet.max_row, 2).font = Font(
+            color=employee_colors[stats.employee_id]
         )
     _style_table(
         sheet,

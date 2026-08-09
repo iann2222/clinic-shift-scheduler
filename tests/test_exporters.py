@@ -171,12 +171,38 @@ class ExcelExporterTests(unittest.TestCase):
             schedule = self.output.monthly_schedule
             self.assertEqual(sheet["A1"].value, "日期")
             self.assertEqual(sheet["A2"].value, "星期")
-            self.assertEqual(sheet["B1"].value, schedule.dates[0])
-            self.assertEqual(sheet["B2"].value, "二")
-            self.assertEqual(sheet["A3"].value, "早上櫃台")
-            self.assertEqual(sheet["B3"].value, schedule.rows[0].cells[0].display)
-            self.assertEqual(sheet.freeze_panes, "B3")
-            self.assertEqual(sheet["B1"].number_format, "m/d")
+            self.assertEqual(sheet["C1"].value, schedule.dates[0])
+            self.assertEqual(sheet["C2"].value, "二")
+            self.assertEqual(sheet["A3"].value, "早")
+            self.assertEqual(sheet["B3"].value, "櫃台")
+            self.assertEqual(sheet["B4"].value, "一診")
+            self.assertEqual(sheet["B5"].value, "二診")
+            self.assertEqual(sheet["A6"].value, "午")
+            self.assertEqual(sheet["A9"].value, "晚")
+            self.assertEqual(sheet["C3"].value, schedule.rows[0].cells[0].display)
+            self.assertEqual(sheet["C5"].value, "—")
+            self.assertEqual(sheet.freeze_panes, "C3")
+            self.assertEqual(sheet["C1"].number_format, "m/d")
+            self.assertIsNone(sheet["A1"].fill.fill_type)
+            self.assertIsNone(sheet["A2"].fill.fill_type)
+            merged = {str(item) for item in sheet.merged_cells.ranges}
+            self.assertTrue({"A1:B1", "A2:B2", "A3:A5", "A6:A8", "A9:A11"}.issubset(merged))
+
+            employee_colors: dict[str, str] = {}
+            for row in range(3, 12):
+                cell = sheet.cell(row, 3)
+                if cell.value not in (None, "—", "休診"):
+                    color = cell.font.color
+                    self.assertIsNotNone(color)
+                    assert color is not None
+                    rgb = color.rgb[-6:]
+                    if cell.value in employee_colors:
+                        self.assertEqual(employee_colors[cell.value], rgb)
+                    employee_colors[cell.value] = rgb
+            self.assertEqual(
+                len(set(employee_colors.values())),
+                len(employee_colors),
+            )
         finally:
             workbook.close()
 
@@ -206,6 +232,14 @@ class ExcelExporterTests(unittest.TestCase):
                 f"{first.consecutive_double_days} / {first.attendance_days}"
                 f"（{first.ratios['consecutive_double_days'].value:.1%}）",
             )
+            summary_name_colors = [
+                summary.cell(row, 1).font.color.rgb[-6:]
+                for row in range(2, summary.max_row + 1)
+            ]
+            self.assertEqual(
+                len(set(summary_name_colors)),
+                len(summary_name_colors),
+            )
 
             individual = workbook["個人詳細統計"]
             headers = {
@@ -217,6 +251,11 @@ class ExcelExporterTests(unittest.TestCase):
             self.assertEqual(individual.cell(2, headers["姓名"]).value, first.name)
             self.assertEqual(individual.cell(2, headers["總班次"]).value, first.total_shifts)
             self.assertGreaterEqual(individual.max_column, 30)
+            for row in range(2, individual.max_row + 1):
+                self.assertEqual(
+                    individual.cell(row, headers["姓名"]).font.color.rgb[-6:],
+                    summary.cell(row, 1).font.color.rgb[-6:],
+                )
 
             groups = workbook["類別與公平性統計"]
             self.assertEqual(groups["A1"].value, "A／B 類別偏好理想值與公平退讓")
@@ -313,11 +352,11 @@ class ExcelExporterTests(unittest.TestCase):
         workbook = build_workbook(data, output)
         try:
             sheet = workbook["月班表"]
-            self.assertEqual(sheet["C3"].value, "休診")
-            self.assertEqual(sheet["C3"].fill.fgColor.rgb[-6:], "D9D9D9")
+            self.assertEqual(sheet["D3"].value, "休診")
+            self.assertEqual(sheet["D3"].fill.fgColor.rgb[-6:], "D9D9D9")
             self.assertNotEqual(
-                sheet["B3"].fill.fgColor.rgb,
                 sheet["C3"].fill.fgColor.rgb,
+                sheet["D3"].fill.fgColor.rgb,
             )
         finally:
             workbook.close()
@@ -333,7 +372,7 @@ class ExcelExporterTests(unittest.TestCase):
             try:
                 self.assertEqual(tuple(reopened.sheetnames), WORKSHEET_NAMES)
                 self.assertEqual(reopened["月班表"]["A1"].value, "日期")
-                self.assertEqual(reopened["月班表"].freeze_panes, "B3")
+                self.assertEqual(reopened["月班表"].freeze_panes, "C3")
             finally:
                 reopened.close()
             self.assertEqual(target.name, "排班結果_2024-10.result-v1.xlsx")
@@ -393,6 +432,8 @@ class PdfExporterTests(unittest.TestCase):
             self.assertEqual(len(reader.pages), 1)
             self.assertIn("月班表", text)
             self.assertIn("日期", text)
+            self.assertIn("一診", text)
+            self.assertIn("二診", text)
             self.assertIn("連續雙班日／出勤日", text)
             self.assertIn("單節日／出勤日", text)
             self.assertIn(self.output.individual_statistics[0].name, text)
