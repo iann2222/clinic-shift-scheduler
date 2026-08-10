@@ -80,7 +80,7 @@ def _run_with_elapsed_heartbeat(
     operation: Callable[[], T],
     progress: ProgressCallback | None,
     *,
-    interval_seconds: float = 10.0,
+    interval_seconds: float = 5.0,
 ) -> tuple[T, float]:
     """Run a blocking operation while periodically reporting elapsed time."""
 
@@ -329,11 +329,10 @@ def run_schedule_file(
         step_started = perf_counter()
 
         def report_alternative(count: int) -> None:
-            if count == 1 or count % 10 == 0:
-                _notify(
-                    candidate_progress,
-                    f"已找到 {count} 份同品質候選班表",
-                )
+            _notify(
+                candidate_progress,
+                f"已找到 {count} 份同品質候選班表",
+            )
 
         equivalent_solution_diagnostic = diagnose_equivalent_solutions(
             solver_result,

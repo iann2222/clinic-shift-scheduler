@@ -35,8 +35,8 @@ class ScheduleRunnerTests(unittest.TestCase):
         stream = InteractiveBuffer()
         printer = cli_module._ConsoleProgressPrinter("[排班]", stream)
 
+        printer("嚴格分階段最佳化進行中：已耗時 5 秒")
         printer("嚴格分階段最佳化進行中：已耗時 10 秒")
-        printer("嚴格分階段最佳化進行中：已耗時 20 秒")
         heartbeat_output = stream.getvalue()
         self.assertNotIn("\n", heartbeat_output)
         self.assertEqual(heartbeat_output.count("\r"), 2)
@@ -50,8 +50,32 @@ class ScheduleRunnerTests(unittest.TestCase):
         stream = StringIO()
         printer = cli_module._ConsoleProgressPrinter("[排班]", stream)
 
+        printer("嚴格分階段最佳化進行中：已耗時 5 秒")
         printer("嚴格分階段最佳化進行中：已耗時 10 秒")
-        printer("嚴格分階段最佳化進行中：已耗時 20 秒")
+
+        self.assertEqual(stream.getvalue().count("\n"), 2)
+        self.assertNotIn("\r", stream.getvalue())
+
+    def test_interactive_console_overwrites_candidate_count(self) -> None:
+        class InteractiveBuffer(StringIO):
+            def isatty(self) -> bool:
+                return True
+
+        stream = InteractiveBuffer()
+        printer = cli_module._ConsoleProgressPrinter("[候選診斷]", stream)
+
+        printer("已找到 1 份同品質候選班表")
+        printer("已找到 2 份同品質候選班表")
+
+        self.assertNotIn("\n", stream.getvalue())
+        self.assertEqual(stream.getvalue().count("\r"), 2)
+
+    def test_noninteractive_console_keeps_candidate_count_lines(self) -> None:
+        stream = StringIO()
+        printer = cli_module._ConsoleProgressPrinter("[候選診斷]", stream)
+
+        printer("已找到 1 份同品質候選班表")
+        printer("已找到 2 份同品質候選班表")
 
         self.assertEqual(stream.getvalue().count("\n"), 2)
         self.assertNotIn("\r", stream.getvalue())

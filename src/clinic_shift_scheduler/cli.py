@@ -20,6 +20,7 @@ from .runner import ScheduleRunError, run_schedule_file
 
 
 _OPTIMIZATION_HEARTBEAT_PREFIX = "嚴格分階段最佳化進行中："
+_CANDIDATE_COUNT_PROGRESS_PREFIX = "已找到 "
 
 
 def _terminal_width(text: str) -> int:
@@ -46,7 +47,9 @@ class _ConsoleProgressPrinter:
 
     def __call__(self, message: str) -> None:
         rendered = f"{self._label} {message}"
-        is_heartbeat = message.startswith(_OPTIMIZATION_HEARTBEAT_PREFIX)
+        is_heartbeat = message.startswith(
+            (_OPTIMIZATION_HEARTBEAT_PREFIX, _CANDIDATE_COUNT_PROGRESS_PREFIX)
+        )
         with self._lock:
             if self._interactive and is_heartbeat:
                 width = _terminal_width(rendered)
@@ -142,6 +145,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     command_started = perf_counter()
     schedule_progress = _ConsoleProgressPrinter("[排班]")
+    diagnostic_progress = _ConsoleProgressPrinter("[候選診斷]")
     try:
         diagnostic_config = (
             None
@@ -158,13 +162,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             overwrite=args.overwrite,
             equivalent_solution_diagnostic_config=diagnostic_config,
             progress=schedule_progress,
-            diagnostic_progress=lambda message: print(
-                f"[候選診斷] {message}",
-                flush=True,
-            ),
+            diagnostic_progress=diagnostic_progress,
         )
     except (InputValidationError, ScheduleRunError, OSError, ValueError) as error:
         schedule_progress.finish()
+        diagnostic_progress.finish()
         print(f"[排班] 執行失敗：{error}", file=sys.stderr)
         print(
             f"[排班] 失敗前總執行時間：{_seconds(perf_counter() - command_started)}",
@@ -172,6 +174,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         return 1
 
+    schedule_progress.finish()
+    diagnostic_progress.finish()
     if result.equivalent_solution_diagnostic is not None:
         print(
             "[候選診斷] 診斷時間："
