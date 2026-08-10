@@ -22,7 +22,7 @@ from .files import (
 
 
 RESULT_CONTRACT_NAME = "clinic-shift-scheduler-formal-result"
-RESULT_CONTRACT_VERSION = "1.7"
+RESULT_CONTRACT_VERSION = "1.8"
 
 
 def _validation_document(output: FormalScheduleOutput) -> dict[str, Any]:

@@ -9,7 +9,7 @@ from typing import Mapping
 from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period
 
 
-B_MAX_SINGLE_SHIFT_DAYS_PER_MONTH = 1
+B_MAX_SINGLE_SHIFT_DAYS_PER_MONTH = 3
 
 
 class DailyPattern(StrEnum):

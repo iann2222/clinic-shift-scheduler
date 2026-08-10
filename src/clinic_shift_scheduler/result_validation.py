@@ -73,6 +73,8 @@ FORMAL_OBJECTIVE_STAGES: tuple[OptimizationStage, ...] = (
     OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS,
     OptimizationStage.PART_TIME_GROUP_FAIRNESS,
     OptimizationStage.COMMON_GROUP_FAIRNESS,
+    OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP,
+    OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP,
 )
 FORMAL_STAGE_SEQUENCE: tuple[OptimizationStage, ...] = (
     OptimizationStage.HARD_FEASIBILITY,

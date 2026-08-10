@@ -101,6 +101,12 @@ class OptimizationStage(StrEnum):
     FULL_TIME_PATTERN_INTEGER_FAIRNESS = "full_time_pattern_integer_fairness"
     PART_TIME_GROUP_FAIRNESS = "part_time_group_fairness"
     COMMON_GROUP_FAIRNESS = "common_group_fairness"
+    FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP = (
+        "full_time_sunday_fairness_max_gap"
+    )
+    FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP = (
+        "full_time_sunday_fairness_total_gap"
+    )
 
 
 class FairnessMetric(StrEnum):
@@ -114,6 +120,7 @@ class FairnessMetric(StrEnum):
     AFTERNOON_SHIFTS = "afternoon_shifts"
     EVENING_SHIFTS = "evening_shifts"
     SUNDAY_SHIFTS = "sunday_shifts"
+    SUNDAY_ATTENDANCE_DAYS = "sunday_attendance_days"
     HOLIDAY_SHIFTS = "holiday_shifts"
 
 
@@ -739,6 +746,19 @@ def build_optimization_model(
         )
         add_count_metric(
             employee_id,
+            FairnessMetric.SUNDAY_ATTENDANCE_DAYS,
+            [
+                feasibility.daily_patterns[(employee_id, day, pattern)]
+                for day in data.dates
+                if day.weekday() == 6
+                for pattern in DailyPattern
+                if pattern is not DailyPattern.OFF
+                and (employee_id, day, pattern)
+                in feasibility.daily_patterns
+            ],
+        )
+        add_count_metric(
+            employee_id,
             FairnessMetric.HOLIDAY_SHIFTS,
             [
                 feasibility.slot_work[(employee_id, day, period)]
@@ -1190,6 +1210,61 @@ def build_optimization_model(
                 stage_gaps[(group, metric)] = gap
         fairness_gaps[stage] = MappingProxyType(stage_gaps)
         fairness_objectives[stage] = sum(stage_gaps.values())
+
+    full_time_members = tuple(
+        employee
+        for employee in data.source.employees
+        if employee.employment_type is EmploymentType.FULL_TIME
+    )
+    sunday_gaps: dict[tuple[str, FairnessMetric], cp_model.IntVar] = {}
+    sunday_max_gap: cp_model.IntVar | None = None
+    if len(full_time_members) >= 2:
+        for metric in (
+            FairnessMetric.SUNDAY_SHIFTS,
+            FairnessMetric.SUNDAY_ATTENDANCE_DAYS,
+        ):
+            member_values = [
+                employee_metrics[(employee.employee_id, metric)]
+                for employee in full_time_members
+            ]
+            maximum = model.new_int_var(
+                0,
+                metric_upper_bound,
+                f"fairness_max[all_full_time,{metric.value}]",
+            )
+            minimum = model.new_int_var(
+                0,
+                metric_upper_bound,
+                f"fairness_min[all_full_time,{metric.value}]",
+            )
+            gap = model.new_int_var(
+                0,
+                metric_upper_bound,
+                f"fairness_gap[all_full_time,{metric.value}]",
+            )
+            model.add_max_equality(maximum, member_values)
+            model.add_min_equality(minimum, member_values)
+            model.add(gap == maximum - minimum)
+            sunday_gaps[("ALL_FULL_TIME", metric)] = gap
+        sunday_max_gap = model.new_int_var(
+            0,
+            metric_upper_bound,
+            "full_time_sunday_fairness_max_gap",
+        )
+        model.add_max_equality(sunday_max_gap, list(sunday_gaps.values()))
+    immutable_sunday_gaps = MappingProxyType(sunday_gaps)
+    fairness_gaps[
+        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP
+    ] = immutable_sunday_gaps
+    fairness_gaps[
+        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP
+    ] = immutable_sunday_gaps
+    fairness_objectives[
+        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP
+    ] = sunday_max_gap if sunday_max_gap is not None else 0
+    fairness_objectives[
+        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP
+    ] = sum(sunday_gaps.values())
 
     return OptimizationModel(
         feasibility=feasibility,
@@ -1766,6 +1841,25 @@ def _formal_objective_specs(
                     None
                     if gaps
                     else ConstantProof.NO_COMPARABLE_FAIRNESS_GROUPS
+                ),
+            )
+        )
+    for stage in (
+        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP,
+        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP,
+    ):
+        gaps = built.fairness_gap_variables[stage]
+        specs.append(
+            _ObjectiveSpec(
+                stage=stage,
+                direction=ObjectiveDirection.MINIMIZE,
+                variables=tuple(gaps.values()),
+                expression=built.fairness_objectives[stage],
+                constant_value=None if gaps else 0,
+                constant_proof=(
+                    None
+                    if gaps
+                    else ConstantProof.NO_COMPARABLE_FULL_TIME_EMPLOYEES
                 ),
             )
         )

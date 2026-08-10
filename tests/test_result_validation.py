@@ -209,7 +209,12 @@ class IndependentResultValidationTests(unittest.TestCase):
         )
 
     def test_b_monthly_single_shift_limit_is_independently_validated(self) -> None:
-        days = ("2024-10-01", "2024-10-02")
+        days = (
+            "2024-10-01",
+            "2024-10-02",
+            "2024-10-03",
+            "2024-10-04",
+        )
         payload = synthetic_schedule_input(
             start_date=days[0],
             end_date=days[-1],
@@ -223,7 +228,7 @@ class IndependentResultValidationTests(unittest.TestCase):
                     "roles": ["assistant"],
                     "fairness_group": "B_ONLY",
                     "shift_mode": "EXACT",
-                    "required_shifts": 2,
+                    "required_shifts": 4,
                 }
             ],
             positive_demands={

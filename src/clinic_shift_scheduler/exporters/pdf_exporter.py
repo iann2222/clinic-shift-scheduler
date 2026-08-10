@@ -27,6 +27,7 @@ from .files import FormalExportError, prepare_target
 _SCHEDULE_SHEET = "月班表"
 _INDIVIDUAL_SUMMARY_SHEET = "個人班型摘要"
 _SOLVER_SHEET = "求解與驗證資訊"
+_PDF_SUMMARY_HEADER_OVERRIDES = {"週日出勤天數": "週日天數"}
 _CJK_FONT = "ClinicScheduleCJK"
 _CJK_FONT_BOLD = "ClinicScheduleCJKBold"
 _CJK_FONT_ENVIRONMENT_VARIABLE = "CLINIC_SCHEDULER_PDF_FONT"
@@ -246,16 +247,19 @@ def _individual_summary_table(sheet: Worksheet) -> Table:
             text_color = colors.black
             if row_index > 0 and column_index == 0:
                 text_color = _font_color(cell) or colors.black
+            text = _cell_text(cell)
+            if row_index == 0:
+                text = _PDF_SUMMARY_HEADER_OVERRIDES.get(text, text)
             rendered_row.append(
                 _paragraph(
-                    _cell_text(cell),
+                    text,
                     header=row_index == 0,
                     text_color=text_color,
                 )
             )
         values.append(rendered_row)
 
-    widths_mm = (16, 18, 12, 12, 36, 30, 36, 30, 18, 22)
+    widths_mm = (11, 18, 12, 12, 36, 30, 36, 30, 18, 16)
     table = Table(
         values,
         colWidths=[width * mm for width in widths_mm],

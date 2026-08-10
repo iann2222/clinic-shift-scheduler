@@ -27,11 +27,12 @@
 
 `solve_lexicographic` 將 A 類「連續雙班、早晚雙班、單節日」與 B 類
 「避免單節日、連續雙班、三節班 fallback」視為不同偏好順位；B 類另有每人每個
-排班月份最多 1 個單節出勤日的硬限制，不建立最大化三節班目標。每一順位先獨立證明
+排班月份最多 3 個單節出勤日的硬限制，不建立最大化三節班目標。每一順位先獨立證明
 A、B 類各自的理想值，再依類別機會日計算整數 basis-point regret，依序最小化
 兩類最大 regret 與 regret 總和，並明確鎖定兩類各自的實際品質總值。類別總體品質鎖定後，個人公平性只在相同類別及
 `fairness_group` 內計算，但將全部班型 gap 放進同一 minimax 套件：先壓低最差
-gap，再處理第一順位 gap 總和及全部 gap 總和，避免逐項過早鎖死或為公平增加較差班型總量。各階段的
+gap，再處理第一順位 gap 總和及全部 gap 總和，避免逐項過早鎖死或為公平增加較差班型總量。
+既有目標全部鎖定後，最後再跨 A／B 類與 `fairness_group` 最小化全體正職的週日節數及週日出勤天數差距，僅作同品質候選解的最終 tie-breaker。各階段的
 `OPTIMAL`／`SKIPPED_CONSTANT` 及
 `implemented_objective_prefix_optimal` 表示所有正式目標均已證明最佳，
 但求解結果本身仍只回傳 `FEASIBLE`。將結果交給

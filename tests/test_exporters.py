@@ -61,7 +61,7 @@ class JsonExporterTests(unittest.TestCase):
             document["contract"],
             {"name": RESULT_CONTRACT_NAME, "version": RESULT_CONTRACT_VERSION},
         )
-        self.assertEqual(RESULT_CONTRACT_VERSION, "1.7")
+        self.assertEqual(RESULT_CONTRACT_VERSION, "1.8")
         self.assertEqual(document["input_schema_version"], "v1")
         self.assertEqual(document["generated_at"], "2024-10-02T03:04:05Z")
         self.assertEqual(document["month"], "2024-10")
@@ -73,7 +73,7 @@ class JsonExporterTests(unittest.TestCase):
             document["objective_vector"],
             document["statistics"]["overall"]["objective_vector"],
         )
-        self.assertEqual(len(document["stage_records"]), 13)
+        self.assertEqual(len(document["stage_records"]), 15)
         self.assertEqual(len(document["preference_benchmarks"]), 4)
         self.assertTrue(
             all(
@@ -488,7 +488,8 @@ class PdfExporterTests(unittest.TestCase):
             self.assertIn("連續雙班日／出勤日", text)
             self.assertIn("單節日／出勤日", text)
             self.assertIn("週日節數", text)
-            self.assertIn("週日出勤天數", text)
+            self.assertIn("週日天數", text)
+            self.assertNotIn("週日出勤天數", text)
             self.assertIn(self.output.individual_statistics[0].name, text)
             self.assertNotIn("個人班型摘要", text)
             self.assertNotIn("Objective vector", text)

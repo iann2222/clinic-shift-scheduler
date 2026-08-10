@@ -205,6 +205,9 @@ def recompute_schedule_metrics(
             ],
             FairnessMetric.EVENING_SHIFTS: values.period_counts[Period.EVENING],
             FairnessMetric.SUNDAY_SHIFTS: values.sunday_shifts,
+            FairnessMetric.SUNDAY_ATTENDANCE_DAYS: (
+                values.sunday_attendance_days
+            ),
             FairnessMetric.HOLIDAY_SHIFTS: values.holiday_shifts,
         }[metric]
 
@@ -473,6 +476,28 @@ def recompute_schedule_metrics(
                     [metric_value(employee_id, metric) for employee_id in members]
                 )
         fairness_gaps[stage] = MappingProxyType(stage_gaps)
+
+    full_time_ids = [
+        employee.employee_id
+        for employee in data.source.employees
+        if employee.employment_type is EmploymentType.FULL_TIME
+    ]
+    sunday_gaps: dict[tuple[str, FairnessMetric], int] = {}
+    if len(full_time_ids) >= 2:
+        for metric in (
+            FairnessMetric.SUNDAY_SHIFTS,
+            FairnessMetric.SUNDAY_ATTENDANCE_DAYS,
+        ):
+            sunday_gaps[("ALL_FULL_TIME", metric)] = _gap(
+                [metric_value(employee_id, metric) for employee_id in full_time_ids]
+            )
+    immutable_sunday_gaps = MappingProxyType(sunday_gaps)
+    fairness_gaps[
+        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP
+    ] = immutable_sunday_gaps
+    fairness_gaps[
+        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP
+    ] = immutable_sunday_gaps
     fairness_gaps[
         OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP
     ] = MappingProxyType(ratio_gaps)
@@ -619,6 +644,12 @@ def recompute_schedule_metrics(
         OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP: sum(
             ratio_gaps.values()
         ),
+        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP: max(
+            sunday_gaps.values(), default=0
+        ),
+        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP: sum(
+            sunday_gaps.values()
+        ),
         **{
             stage: sum(stage_gaps.values())
             for stage, stage_gaps in fairness_gaps.items()
@@ -633,6 +664,8 @@ def recompute_schedule_metrics(
                 OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_TOTAL_GAP,
                 OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP,
                 OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_TOTAL_GAP,
+                OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP,
+                OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP,
             )
         },
     }

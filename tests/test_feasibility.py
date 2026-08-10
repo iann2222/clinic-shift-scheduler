@@ -73,8 +73,13 @@ class FeasibilityTests(unittest.TestCase):
                 if result.is_feasible:
                     self.assertEqual(result.daily_patterns[("E001", date(2024, 10, 1))], pattern)
 
-    def test_class_b_has_at_most_one_single_shift_day_per_schedule(self) -> None:
-        days = ("2024-10-01", "2024-10-02")
+    def test_class_b_has_at_most_three_single_shift_days_per_month(self) -> None:
+        days = (
+            "2024-10-01",
+            "2024-10-02",
+            "2024-10-03",
+            "2024-10-04",
+        )
         employee = {
             "employee_id": "B",
             "name": "B",
@@ -83,9 +88,9 @@ class FeasibilityTests(unittest.TestCase):
             "roles": ["assistant"],
             "fairness_group": "B_ONLY",
             "shift_mode": "EXACT",
-            "required_shifts": 2,
+            "required_shifts": 4,
         }
-        two_singles = synthetic_schedule_input(
+        four_singles = synthetic_schedule_input(
             start_date=days[0],
             end_date=days[-1],
             roles=["assistant"],
@@ -96,25 +101,23 @@ class FeasibilityTests(unittest.TestCase):
         )
         self.assertEqual(
             solve_feasibility(
-                validate_and_normalize(two_singles), NO_PRECHECK
+                validate_and_normalize(four_singles), NO_PRECHECK
             ).status,
             FeasibilityStatus.INFEASIBLE,
         )
 
-        one_single = synthetic_schedule_input(
+        three_singles = synthetic_schedule_input(
             start_date=days[0],
-            end_date=days[-1],
+            end_date=days[2],
             roles=["assistant"],
             employees=[{**employee, "required_shifts": 3}],
             positive_demands={
-                (days[0], "morning", "assistant"): 1,
-                (days[0], "afternoon", "assistant"): 1,
-                (days[1], "morning", "assistant"): 1,
+                (day, "morning", "assistant"): 1 for day in days[:3]
             },
         )
         self.assertEqual(
             solve_feasibility(
-                validate_and_normalize(one_single), NO_PRECHECK
+                validate_and_normalize(three_singles), NO_PRECHECK
             ).status,
             FeasibilityStatus.FEASIBLE,
         )

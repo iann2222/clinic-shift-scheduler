@@ -397,6 +397,49 @@ class LexicographicOptimizationTests(unittest.TestCase):
 
 
 class PatternQualityOptimizationTests(unittest.TestCase):
+    def test_b_monthly_single_shift_cap_allows_three_and_rejects_four(self) -> None:
+        def payload_for(day_count: int) -> dict:
+            days = tuple(
+                f"2024-10-{day:02d}" for day in range(1, day_count + 1)
+            )
+            return synthetic_schedule_input(
+                start_date=days[0],
+                end_date=days[-1],
+                roles=["assistant"],
+                employees=[
+                    full_time(
+                        "B",
+                        full_time_class="B",
+                        shift_mode="EXACT",
+                        required=day_count,
+                    )
+                ],
+                positive_demands={
+                    (day, "morning", "assistant"): 1 for day in days
+                },
+            )
+
+        allowed = solve_lexicographic(
+            validate_and_normalize(payload_for(3))
+        )
+        rejected = solve_lexicographic(
+            validate_and_normalize(payload_for(4))
+        )
+
+        self.assertEqual(allowed.status, FeasibilityStatus.FEASIBLE)
+        self.assertEqual(
+            sum(
+                pattern in (
+                    DailyPattern.MORNING_ONLY,
+                    DailyPattern.AFTERNOON_ONLY,
+                    DailyPattern.EVENING_ONLY,
+                )
+                for pattern in allowed.daily_patterns.values()
+            ),
+            3,
+        )
+        self.assertEqual(rejected.status, FeasibilityStatus.INFEASIBLE)
+
     def test_b_triple_is_not_counted_as_consecutive_double(self) -> None:
         payload = one_day_input(
             [
@@ -1725,6 +1768,20 @@ class FairnessOptimizationTests(unittest.TestCase):
                 fairness.constant_proof,
                 ConstantProof.NO_COMPARABLE_FAIRNESS_GROUPS,
             )
+        for stage_name in (
+            OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP,
+            OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP,
+        ):
+            fairness = stage(result, stage_name)
+            self.assertEqual(
+                fairness.status,
+                OptimizationStageStatus.SKIPPED_CONSTANT,
+            )
+            self.assertEqual(fairness.objective_value, 0)
+            self.assertEqual(
+                fairness.constant_proof,
+                ConstantProof.NO_COMPARABLE_FULL_TIME_EMPLOYEES,
+            )
 
     def test_part_time_gaps_are_isolated_and_summed_across_groups(self) -> None:
         day = "2024-10-01"
@@ -1886,7 +1943,7 @@ class FairnessOptimizationTests(unittest.TestCase):
             )
             self.assertEqual(counts[employee_id][DailyPattern.TRIPLE], 0)
 
-    def test_common_fairness_uses_period_sunday_and_holiday_integer_gaps(self) -> None:
+    def test_common_fairness_includes_period_sunday_and_holiday_gaps(self) -> None:
         day = "2024-10-06"  # Sunday.
         payload = synthetic_schedule_input(
             start_date=day,
@@ -1915,7 +1972,16 @@ class FairnessOptimizationTests(unittest.TestCase):
         )
         payload["period"]["holidays"] = [day]
 
-        result = solve_lexicographic(validate_and_normalize(payload))
+        data = validate_and_normalize(payload)
+        built = optimization.build_optimization_model(data)
+        common_gaps = built.fairness_gap_variables[
+            OptimizationStage.COMMON_GROUP_FAIRNESS
+        ]
+        self.assertIn(
+            ("A_SHARED", FairnessMetric.SUNDAY_SHIFTS),
+            common_gaps,
+        )
+        result = solve_lexicographic(data)
         common = stage(result, OptimizationStage.COMMON_GROUP_FAIRNESS)
         by_employee = {
             employee_id: Counter(
@@ -1935,6 +2001,147 @@ class FairnessOptimizationTests(unittest.TestCase):
         self.assertEqual(period_gap_sum + sunday_gap + holiday_gap, 2)
         self.assertEqual(common.objective_value, 2)
         self.assertTrue(common.locked)
+
+    def test_final_sunday_fairness_compares_all_full_time_employees(self) -> None:
+        sunday = "2024-10-06"
+        monday = "2024-10-07"
+        payload = synthetic_schedule_input(
+            start_date=sunday,
+            end_date=monday,
+            roles=["assistant"],
+            employees=[
+                full_time(
+                    "A1",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=1,
+                    fairness_group="A_G1",
+                ),
+                full_time(
+                    "A2",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=1,
+                    fairness_group="A_G2",
+                ),
+                full_time(
+                    "B1",
+                    full_time_class="B",
+                    shift_mode="EXACT",
+                    required=1,
+                    fairness_group="B_G1",
+                ),
+                full_time(
+                    "B2",
+                    full_time_class="B",
+                    shift_mode="EXACT",
+                    required=1,
+                    fairness_group="B_G2",
+                ),
+            ],
+            positive_demands={
+                (sunday, "morning", "assistant"): 1,
+                (sunday, "afternoon", "assistant"): 1,
+                (monday, "morning", "assistant"): 1,
+                (monday, "afternoon", "assistant"): 1,
+            },
+        )
+
+        data = validate_and_normalize(payload)
+        result = solve_lexicographic(data)
+        metrics = recompute_schedule_metrics(
+            data,
+            result.assignments,
+            result.preference_benchmarks,
+        )
+        maximum = stage(
+            result,
+            OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP,
+        )
+        total = stage(
+            result,
+            OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP,
+        )
+
+        self.assertEqual(maximum.objective_value, 1)
+        self.assertEqual(total.objective_value, 2)
+        self.assertTrue(maximum.locked)
+        self.assertTrue(total.locked)
+        self.assertEqual(
+            metrics.objective_values[
+                OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP
+            ],
+            1,
+        )
+        self.assertEqual(
+            metrics.objective_values[
+                OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP
+            ],
+            2,
+        )
+        self.assertEqual(
+            tuple(item.stage for item in result.stages)[-2:],
+            (
+                OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP,
+                OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP,
+            ),
+        )
+
+    def test_sunday_attendance_days_count_each_date_once(self) -> None:
+        sunday = "2024-10-06"
+        monday = "2024-10-07"
+        payload = synthetic_schedule_input(
+            start_date=sunday,
+            end_date=monday,
+            roles=["assistant"],
+            employees=[
+                full_time(
+                    "A1",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=2,
+                ),
+                full_time(
+                    "A2",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=2,
+                ),
+            ],
+            positive_demands={
+                (sunday, "morning", "assistant"): 1,
+                (sunday, "afternoon", "assistant"): 1,
+                (monday, "morning", "assistant"): 1,
+                (monday, "afternoon", "assistant"): 1,
+            },
+        )
+        data = validate_and_normalize(payload)
+        assignments = (
+            Assignment("A1", date(2024, 10, 6), Period.MORNING, "assistant"),
+            Assignment("A1", date(2024, 10, 6), Period.AFTERNOON, "assistant"),
+            Assignment("A2", date(2024, 10, 7), Period.MORNING, "assistant"),
+            Assignment("A2", date(2024, 10, 7), Period.AFTERNOON, "assistant"),
+        )
+
+        metrics = recompute_schedule_metrics(data, assignments)
+
+        self.assertEqual(metrics.employee_metrics["A1"].sunday_shifts, 2)
+        self.assertEqual(
+            metrics.employee_metrics["A1"].sunday_attendance_days,
+            1,
+        )
+        self.assertEqual(
+            metrics.objective_values[
+                OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP
+            ],
+            2,
+        )
+        self.assertEqual(
+            metrics.objective_values[
+                OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP
+            ],
+            3,
+        )
 
 
 if __name__ == "__main__":

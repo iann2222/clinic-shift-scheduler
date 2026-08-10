@@ -394,6 +394,7 @@ def _metric_value(values: EmployeeResultMetrics, metric: FairnessMetric) -> int:
         FairnessMetric.AFTERNOON_SHIFTS: values.period_counts[Period.AFTERNOON],
         FairnessMetric.EVENING_SHIFTS: values.period_counts[Period.EVENING],
         FairnessMetric.SUNDAY_SHIFTS: values.sunday_shifts,
+        FairnessMetric.SUNDAY_ATTENDANCE_DAYS: values.sunday_attendance_days,
         FairnessMetric.HOLIDAY_SHIFTS: values.holiday_shifts,
     }[metric]
 
