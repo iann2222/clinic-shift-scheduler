@@ -10,6 +10,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 from pypdf import PdfReader
 
+import clinic_shift_scheduler.exporters.excel_exporter as excel_exporter
 from clinic_shift_scheduler import (
     ExportFileExistsError,
     FeasibilityStatus,
@@ -182,6 +183,8 @@ class ExcelExporterTests(unittest.TestCase):
             self.assertEqual(sheet["C3"].value, schedule.rows[0].cells[0].display)
             self.assertEqual(sheet["C5"].value, "—")
             self.assertEqual(sheet.freeze_panes, "C3")
+            self.assertEqual(sheet.column_dimensions["A"].width, 3)
+            self.assertEqual(sheet.column_dimensions["B"].width, 5)
             self.assertEqual(sheet["C1"].number_format, "m/d")
             self.assertIsNone(sheet["A1"].fill.fill_type)
             self.assertIsNone(sheet["A2"].fill.fill_type)
@@ -231,6 +234,30 @@ class ExcelExporterTests(unittest.TestCase):
                 ).value,
                 f"{first.consecutive_double_days} / {first.attendance_days}"
                 f"（{first.ratios['consecutive_double_days'].value:.1%}）",
+            )
+            self.assertEqual(
+                summary.cell(
+                    2,
+                    summary_headers["週日節數"],
+                ).value,
+                first.sunday_shifts,
+            )
+            self.assertEqual(
+                summary.cell(
+                    2,
+                    summary_headers["週日出勤天數"],
+                ).value,
+                first.sunday_attendance_days,
+            )
+            expected_sunday_dates = {
+                assignment.date
+                for assignment in self.output.assignments
+                if assignment.employee_id == first.employee_id
+                and assignment.date.weekday() == 6
+            }
+            self.assertEqual(
+                first.sunday_attendance_days,
+                len(expected_sunday_dates),
             )
             summary_name_colors = [
                 summary.cell(row, 1).font.color.rgb[-6:]
@@ -340,8 +367,32 @@ class ExcelExporterTests(unittest.TestCase):
                     sheet.cell(row, headers["單節日／出勤日"]).value,
                     "0 / 0（N/A）",
                 )
+                self.assertEqual(sheet.cell(row, headers["週日節數"]).value, 0)
+                self.assertEqual(
+                    sheet.cell(row, headers["週日出勤天數"]).value,
+                    0,
+                )
         finally:
             workbook.close()
+
+    def test_named_employee_colors_use_the_approved_hsl_palette(self) -> None:
+        renamed = replace(
+            self.output,
+            individual_statistics=tuple(
+                replace(stats, name=name)
+                for stats, name in zip(
+                    self.output.individual_statistics,
+                    ("君鈺", "翊臻", "巧玲"),
+                    strict=True,
+                )
+            ),
+        )
+
+        colors = excel_exporter._employee_color_map(renamed)
+
+        self.assertEqual(colors["FT001"], "2860AD")
+        self.assertEqual(colors["FT002"], "AD2833")
+        self.assertEqual(colors["PT001"], "28AD60")
 
     def test_closed_date_cells_are_visually_distinct(self) -> None:
         payload = minimal_valid_input()
@@ -353,7 +404,7 @@ class ExcelExporterTests(unittest.TestCase):
         try:
             sheet = workbook["月班表"]
             self.assertEqual(sheet["D3"].value, "休診")
-            self.assertEqual(sheet["D3"].fill.fgColor.rgb[-6:], "D9D9D9")
+            self.assertEqual(sheet["D3"].fill.fgColor.rgb[-6:], "C9C9C9")
             self.assertNotEqual(
                 sheet["C3"].fill.fgColor.rgb,
                 sheet["D3"].fill.fgColor.rgb,
@@ -436,6 +487,8 @@ class PdfExporterTests(unittest.TestCase):
             self.assertIn("二診", text)
             self.assertIn("連續雙班日／出勤日", text)
             self.assertIn("單節日／出勤日", text)
+            self.assertIn("週日節數", text)
+            self.assertIn("週日出勤天數", text)
             self.assertIn(self.output.individual_statistics[0].name, text)
             self.assertNotIn("個人班型摘要", text)
             self.assertNotIn("Objective vector", text)

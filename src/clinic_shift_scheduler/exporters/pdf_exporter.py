@@ -28,12 +28,20 @@ _SCHEDULE_SHEET = "月班表"
 _INDIVIDUAL_SUMMARY_SHEET = "個人班型摘要"
 _SOLVER_SHEET = "求解與驗證資訊"
 _CJK_FONT = "ClinicScheduleCJK"
+_CJK_FONT_BOLD = "ClinicScheduleCJKBold"
 _CJK_FONT_ENVIRONMENT_VARIABLE = "CLINIC_SCHEDULER_PDF_FONT"
 _CJK_FONT_CANDIDATES = (
     Path("C:/Windows/Fonts/NotoSansTC-VF.ttf"),
     Path("C:/Windows/Fonts/msjh.ttc"),
     Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
     Path("/usr/share/fonts/truetype/noto/NotoSansTC-Regular.ttf"),
+    Path("/System/Library/Fonts/PingFang.ttc"),
+)
+_CJK_BOLD_FONT_CANDIDATES = (
+    Path("C:/Windows/Fonts/msjhbd.ttc"),
+    Path("C:/Windows/Fonts/NotoSansTC-VF.ttf"),
+    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
+    Path("/usr/share/fonts/truetype/noto/NotoSansTC-Bold.ttf"),
     Path("/System/Library/Fonts/PingFang.ttc"),
 )
 
@@ -53,6 +61,12 @@ def _register_cjk_font() -> None:
         )
     if _CJK_FONT not in pdfmetrics.getRegisteredFontNames():
         pdfmetrics.registerFont(TTFont(_CJK_FONT, str(source)))
+    bold_source = next(
+        (path for path in _CJK_BOLD_FONT_CANDIDATES if path.is_file()),
+        source,
+    )
+    if _CJK_FONT_BOLD not in pdfmetrics.getRegisteredFontNames():
+        pdfmetrics.registerFont(TTFont(_CJK_FONT_BOLD, str(bold_source)))
 
 
 def _key_value(sheet: Worksheet, label: str) -> Any | None:
@@ -120,7 +134,7 @@ def _paragraph(
 ) -> Paragraph:
     style = ParagraphStyle(
         name="schedule-header" if header else "schedule-cell",
-        fontName=_CJK_FONT,
+        fontName=_CJK_FONT_BOLD,
         fontSize=7 if header else 6.2,
         leading=8 if header else 7.1,
         alignment=TA_CENTER,
@@ -139,10 +153,10 @@ def _paragraph(
 def _schedule_table(sheet: Worksheet) -> Table:
     values: list[list[Paragraph]] = []
     table_style: list[tuple[Any, ...]] = [
-        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#B7C9D6")),
+        ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#7890A0")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("FONTNAME", (0, 0), (-1, -1), _CJK_FONT),
+        ("FONTNAME", (0, 0), (-1, -1), _CJK_FONT_BOLD),
         ("LEFTPADDING", (0, 0), (-1, -1), 1.2),
         ("RIGHTPADDING", (0, 0), (-1, -1), 1.2),
         ("TOPPADDING", (0, 0), (-1, -1), 2.2),
@@ -187,8 +201,8 @@ def _schedule_table(sheet: Worksheet) -> Table:
         )
 
     usable_width = landscape(A4)[0] - 12 * mm
-    period_width = 9 * mm
-    role_width = 15 * mm
+    period_width = 4.5 * mm
+    role_width = 7.5 * mm
     date_width = (
         usable_width - period_width - role_width
     ) / max(1, sheet.max_column - 2)
@@ -209,11 +223,11 @@ def _schedule_table(sheet: Worksheet) -> Table:
 def _individual_summary_table(sheet: Worksheet) -> Table:
     values: list[list[Paragraph]] = []
     table_style: list[tuple[Any, ...]] = [
-        ("GRID", (0, 0), (-1, -1), 0.35, colors.HexColor("#B7C9D6")),
+        ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#7890A0")),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
-        ("FONTNAME", (0, 0), (-1, -1), _CJK_FONT),
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#D9EAF7")),
+        ("FONTNAME", (0, 0), (-1, -1), _CJK_FONT_BOLD),
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#C5DFF0")),
         ("LEFTPADDING", (0, 0), (-1, -1), 1.5),
         ("RIGHTPADDING", (0, 0), (-1, -1), 1.5),
         ("TOPPADDING", (0, 0), (-1, -1), 1.8),
@@ -241,7 +255,7 @@ def _individual_summary_table(sheet: Worksheet) -> Table:
             )
         values.append(rendered_row)
 
-    widths_mm = (16, 18, 12, 12, 36, 30, 36, 30)
+    widths_mm = (16, 18, 12, 12, 36, 30, 36, 30, 18, 22)
     table = Table(
         values,
         colWidths=[width * mm for width in widths_mm],
@@ -271,7 +285,7 @@ def _render_pdf(source: Path, target: Path) -> None:
         )
         title_style = ParagraphStyle(
             name="schedule-title",
-            fontName=_CJK_FONT,
+            fontName=_CJK_FONT_BOLD,
             fontSize=11,
             leading=13,
             alignment=TA_CENTER,

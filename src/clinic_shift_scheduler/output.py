@@ -130,11 +130,11 @@ class IndividualStatistics:
     morning_evening_days: int
     triple_days: int
     sunday_shifts: int
+    sunday_attendance_days: int
     holiday_shifts: int
     leave_periods: int
     available_periods: int
     ratios: Mapping[str, RatioValue]
-
 
 @dataclass(frozen=True, slots=True)
 class FairnessGroupStatistics:
@@ -370,6 +370,7 @@ def _build_individual_statistics(
                 morning_evening_days=values.morning_evening_days,
                 triple_days=values.triple_days,
                 sunday_shifts=values.sunday_shifts,
+                sunday_attendance_days=values.sunday_attendance_days,
                 holiday_shifts=values.holiday_shifts,
                 leave_periods=_leave_period_count(data, employee.employee_id),
                 available_periods=available_periods,

@@ -59,6 +59,7 @@ class EmployeeResultMetrics:
     morning_evening_days: int
     triple_days: int
     sunday_shifts: int
+    sunday_attendance_days: int
     holiday_shifts: int
 
 
@@ -175,6 +176,13 @@ def recompute_schedule_metrics(
             triple_days=pattern_counts[DailyPattern.TRIPLE],
             sunday_shifts=sum(
                 item.date.weekday() == 6 for item in employee_assignments
+            ),
+            sunday_attendance_days=len(
+                {
+                    item.date
+                    for item in employee_assignments
+                    if item.date.weekday() == 6
+                }
             ),
             holiday_shifts=sum(
                 item.date in data.source.period.holidays

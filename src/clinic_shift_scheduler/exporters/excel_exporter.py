@@ -36,14 +36,14 @@ WORKSHEET_NAMES = (
 )
 
 _DARK_BLUE = "1F4E78"
-_HEADER_BLUE = "D9EAF7"
-_MORNING = "FFF2CC"
-_AFTERNOON = "DDEBF7"
-_EVENING = "E4DFEC"
-_CLOSED = "D9D9D9"
-_WEEKEND = "FCE4D6"
+_HEADER_BLUE = "C5DFF0"
+_MORNING = "FCE8A3"
+_AFTERNOON = "C9DFF0"
+_EVENING = "D7CEE6"
+_CLOSED = "C9C9C9"
+_WEEKEND = "F4CEB8"
 _WHITE = "FFFFFF"
-_GRID = Side(style="thin", color="B7C9D6")
+_GRID = Side(style="thin", color="7890A0")
 _BORDER = Border(left=_GRID, right=_GRID, top=_GRID, bottom=_GRID)
 
 _PERIOD_LABELS = {
@@ -63,19 +63,25 @@ _ROLE_LABELS = {
 }
 _WEEKDAY_LABELS = ("一", "二", "三", "四", "五", "六", "日")
 _EMPLOYEE_FONT_COLORS = (
-    "1F4E79",
-    "C00000",
-    "548235",
-    "7030A0",
-    "9C5700",
-    "008C95",
-    "A64D79",
-    "44546A",
-    "BF3F00",
-    "006100",
-    "5B2C6F",
-    "004C6D",
+    "2860AD",
+    "AD2833",
+    "28AD60",
+    "8128AD",
+    "AD8128",
+    "28A2AD",
+    "8CAE29",
+    "3FAE29",
+    "3F29AE",
+    "AE2986",
 )
+_EMPLOYEE_NAME_FONT_COLORS = {
+    "君鈺": "2860AD",
+    "翊臻": "AD2833",
+    "巧玲": "28AD60",
+    "怡秀": "8128AD",
+    "楚沁": "AD8128",
+    "裕玲": "28A2AD",
+}
 
 
 def _header(cell: Cell, *, fill: str = _DARK_BLUE) -> None:
@@ -117,11 +123,27 @@ def _translated_role(role: str) -> str:
 
 
 def _employee_color_map(output: FormalScheduleOutput) -> dict[str, str]:
-    employee_ids = sorted(item.employee_id for item in output.individual_statistics)
-    return {
-        employee_id: _EMPLOYEE_FONT_COLORS[index % len(_EMPLOYEE_FONT_COLORS)]
-        for index, employee_id in enumerate(employee_ids)
+    statistics = sorted(
+        output.individual_statistics,
+        key=lambda item: item.employee_id,
+    )
+    result = {
+        item.employee_id: _EMPLOYEE_NAME_FONT_COLORS[item.name]
+        for item in statistics
+        if item.name in _EMPLOYEE_NAME_FONT_COLORS
     }
+    used = set(result.values())
+    available = [
+        color for color in _EMPLOYEE_FONT_COLORS if color not in used
+    ]
+    for item in statistics:
+        if item.employee_id in result:
+            continue
+        index = len(result) % len(_EMPLOYEE_FONT_COLORS)
+        result[item.employee_id] = (
+            available.pop(0) if available else _EMPLOYEE_FONT_COLORS[index]
+        )
+    return result
 
 
 def _plain_schedule_header(cell: Cell) -> None:
@@ -159,8 +181,8 @@ def _build_schedule_sheet(
             end_row=row_number,
             end_column=2,
         )
-    sheet.column_dimensions["A"].width = 6
-    sheet.column_dimensions["B"].width = 10
+    sheet.column_dimensions["A"].width = 3
+    sheet.column_dimensions["B"].width = 5
     sheet.row_dimensions[1].height = 24
     sheet.row_dimensions[2].height = 22
 
@@ -232,11 +254,14 @@ def _build_schedule_sheet(
                 cell.border = _BORDER
                 if kind is ScheduleCellKind.CLOSED:
                     cell.fill = PatternFill("solid", fgColor=_CLOSED)
-                    cell.font = Font(color="666666", italic=True)
+                    cell.font = Font(color="4A4A4A", italic=True, bold=True)
                 elif kind is ScheduleCellKind.ZERO_DEMAND:
-                    cell.font = Font(color="A6A6A6")
+                    cell.font = Font(color="7A7A7A", bold=True)
                 elif source_cell is not None and source_cell.employee_id is not None:
-                    cell.font = Font(color=employee_colors[source_cell.employee_id])
+                    cell.font = Font(
+                        color=employee_colors[source_cell.employee_id],
+                        bold=True,
+                    )
 
 
 def _employment_label(value: EmploymentType) -> str:
@@ -280,6 +305,8 @@ def _build_individual_summary_sheet(
         "單節日／出勤日",
         "早＋晚拆班日／出勤日",
         "三節班日／出勤日",
+        "週日節數",
+        "週日出勤天數",
     )
     sheet.append(headers)
     for stats in output.individual_statistics:
@@ -304,10 +331,13 @@ def _build_individual_summary_sheet(
                 _pattern_summary(
                     stats.ratios["triple_days"],
                 ),
+                stats.sunday_shifts,
+                stats.sunday_attendance_days,
             )
         )
         sheet.cell(sheet.max_row, 1).font = Font(
-            color=employee_colors[stats.employee_id]
+            color=employee_colors[stats.employee_id],
+            bold=True,
         )
     _style_table(
         sheet,
@@ -316,7 +346,7 @@ def _build_individual_summary_sheet(
         last_row=sheet.max_row,
         last_column=sheet.max_column,
     )
-    widths = (16, 14, 11, 11, 24, 22, 26, 22)
+    widths = (16, 14, 11, 11, 24, 22, 26, 22, 12, 15)
     for column, width in enumerate(widths, start=1):
         sheet.column_dimensions[get_column_letter(column)].width = width
     for row in range(2, sheet.max_row + 1):
