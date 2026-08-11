@@ -85,6 +85,31 @@ class ScheduleRunnerTests(unittest.TestCase):
         self.assertEqual(stream.getvalue().count("\n"), 2)
         self.assertNotIn("\r", stream.getvalue())
 
+    def test_cli_defaults_follow_typed_application_defaults(self) -> None:
+        defaults = SchedulerAppConfig(input_file="schedule.json")
+        args = cli_module._parser().parse_args(["schedule.json"])
+
+        self.assertEqual(
+            args.equivalent_limit,
+            defaults.candidate_diagnostic.search_limit,
+        )
+        self.assertEqual(
+            args.equivalent_time_ratio,
+            defaults.candidate_diagnostic.time.scheduling_time_ratio,
+        )
+        self.assertEqual(
+            args.candidate_export_count,
+            defaults.candidate_diagnostic.export_count,
+        )
+        self.assertEqual(
+            args.candidate_export_formats,
+            defaults.candidate_diagnostic.export_formats,
+        )
+        self.assertEqual(
+            args.progress_interval,
+            defaults.progress_update_seconds,
+        )
+
     def test_elapsed_heartbeat_reports_progress_and_completion(self) -> None:
         messages: list[str] = []
 

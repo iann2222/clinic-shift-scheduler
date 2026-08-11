@@ -10,6 +10,13 @@ from clinic_shift_scheduler import (
     load_scheduler_config,
     parse_scheduler_config,
 )
+from clinic_shift_scheduler.app_config import (
+    default_scheduler_config,
+    scheduler_config_to_user_settings,
+)
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _config(user_settings: dict) -> dict:
@@ -25,6 +32,28 @@ def _config(user_settings: dict) -> dict:
 
 
 class SchedulerAppConfigTests(unittest.TestCase):
+    def test_repository_default_settings_come_from_typed_defaults(self) -> None:
+        payload = json.loads(
+            (REPOSITORY_ROOT / "config.json").read_text(encoding="utf-8")
+        )
+        expected = scheduler_config_to_user_settings(
+            default_scheduler_config("排班輸入_2026-08.json")
+        )
+
+        self.assertEqual(payload["預設設定"], expected)
+        self.assertEqual(
+            payload["使用者設定"]["候選診斷"][
+                "額外輸出候選班表份數上限"
+            ],
+            3,
+        )
+
+    def test_typed_settings_round_trip_through_user_json(self) -> None:
+        original = default_scheduler_config("排班輸入_2026-09.json")
+        payload = _config(scheduler_config_to_user_settings(original))
+
+        self.assertEqual(parse_scheduler_config(payload), original)
+
     def test_loads_complete_user_config(self) -> None:
         payload = _config({
             "設定版本": APP_CONFIG_VERSION,

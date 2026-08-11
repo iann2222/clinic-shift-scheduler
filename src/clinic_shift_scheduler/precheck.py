@@ -14,8 +14,9 @@ from types import MappingProxyType
 from typing import Mapping
 
 from .daily_patterns import PATTERN_PERIODS, allowed_daily_patterns
-from .enums import PERIODS_V1, Period, ShiftMode
+from .enums import PERIODS_V1, Period
 from .models import Employee, NormalizedScheduleInput
+from .shift_bounds import hard_maximum_within_capacity, hard_minimum_shifts
 
 
 class PrecheckStatus(StrEnum):
@@ -61,22 +62,6 @@ class PrecheckResult:
     @property
     def is_infeasible(self) -> bool:
         return self.status is PrecheckStatus.PRECHECK_INFEASIBLE
-
-
-def _hard_minimum(employee: Employee) -> int:
-    if employee.shift_mode is ShiftMode.EXACT:
-        assert employee.required_shifts is not None
-        return employee.required_shifts
-    return employee.min_shifts or 0
-
-
-def _apply_hard_maximum(employee: Employee, physical_capacity: int) -> int:
-    if employee.shift_mode is ShiftMode.EXACT:
-        assert employee.required_shifts is not None
-        return min(physical_capacity, employee.required_shifts)
-    if employee.max_shifts is not None:
-        return min(physical_capacity, employee.max_shifts)
-    return physical_capacity
 
 
 def _maximum_daily_count(employee: Employee, available: frozenset[Period]) -> int:
@@ -155,9 +140,9 @@ def run_prechecks(data: NormalizedScheduleInput) -> PrecheckResult:
             )
             for day in data.open_dates
         )
-        capacity = _apply_hard_maximum(employee, physical_capacity)
+        capacity = hard_maximum_within_capacity(employee, physical_capacity)
         employee_capacities[employee.employee_id] = capacity
-        hard_minimum = _hard_minimum(employee)
+        hard_minimum = hard_minimum_shifts(employee)
         if hard_minimum > capacity:
             diagnostics.append(
                 PrecheckDiagnostic(
@@ -192,7 +177,7 @@ def run_prechecks(data: NormalizedScheduleInput) -> PrecheckResult:
         )
 
     total_hard_minimum = sum(
-        _hard_minimum(employee) for employee in data.source.employees
+        hard_minimum_shifts(employee) for employee in data.source.employees
     )
     if total_hard_minimum > total_demand:
         diagnostics.append(
@@ -228,7 +213,9 @@ def run_prechecks(data: NormalizedScheduleInput) -> PrecheckResult:
                 )
                 for day in data.open_dates
             )
-            capacity += _apply_hard_maximum(employee, physical_role_capacity)
+            capacity += hard_maximum_within_capacity(
+                employee, physical_role_capacity
+            )
         role_capacities[role] = capacity
         role_demand = sum(
             count

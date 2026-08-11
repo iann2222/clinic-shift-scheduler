@@ -40,6 +40,7 @@ from .ratio_fairness import (
     BASIS_POINTS_SCALE,
     ratio_basis_points,
 )
+from .shift_bounds import hard_minimum_shifts
 
 
 class OptimizationStage(StrEnum):
@@ -1028,19 +1029,11 @@ def _attach_preference_regret_model(
     )
 
 
-
-def _hard_minimum(employee: Employee) -> int:
-    if employee.shift_mode is ShiftMode.EXACT:
-        assert employee.required_shifts is not None
-        return employee.required_shifts
-    return employee.min_shifts or 0
-
-
 def _hard_fixed_count(
     employee: Employee,
     precheck: PrecheckResult,
 ) -> int | None:
-    minimum = _hard_minimum(employee)
+    minimum = hard_minimum_shifts(employee)
     maximum = precheck.employee_capacities[employee.employee_id]
     return minimum if minimum == maximum else None
 

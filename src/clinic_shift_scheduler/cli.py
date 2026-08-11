@@ -10,6 +10,13 @@ from pathlib import Path
 from time import perf_counter
 from typing import Sequence, TextIO
 
+from .app_config import (
+    DEFAULT_CANDIDATE_EXPORT_COUNT,
+    DEFAULT_CANDIDATE_EXPORT_FORMATS,
+    DEFAULT_CANDIDATE_SEARCH_LIMIT,
+    DEFAULT_DIAGNOSTIC_TIME_RATIO,
+    DEFAULT_PROGRESS_UPDATE_SECONDS,
+)
 from .errors import InputValidationError
 from .optimization import (
     EquivalentSolutionDiagnosticConfig,
@@ -98,8 +105,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--equivalent-limit",
         type=int,
-        default=100,
-        help="最多搜尋幾份正式班表以外的同品質候選（預設：100）",
+        default=DEFAULT_CANDIDATE_SEARCH_LIMIT,
+        help=(
+            "最多搜尋幾份正式班表以外的同品質候選"
+            f"（預設：{DEFAULT_CANDIDATE_SEARCH_LIMIT}）"
+        ),
     )
     parser.add_argument(
         "--equivalent-time-limit",
@@ -107,14 +117,18 @@ def _parser() -> argparse.ArgumentParser:
         default=None,
         help=(
             "候選班表診斷總秒數上限"
-            "（預設：本次 CP-SAT 最佳化時間的 1/5）"
+            "（預設：本次 CP-SAT 最佳化時間的 "
+            f"{DEFAULT_DIAGNOSTIC_TIME_RATIO:g} 倍）"
         ),
     )
     parser.add_argument(
         "--equivalent-time-ratio",
         type=float,
-        default=0.2,
-        help="未指定固定秒數時，候選診斷時間相對於最佳化時間的比例（預設：0.2）",
+        default=DEFAULT_DIAGNOSTIC_TIME_RATIO,
+        help=(
+            "未指定固定秒數時，候選診斷時間相對於最佳化時間的比例"
+            f"（預設：{DEFAULT_DIAGNOSTIC_TIME_RATIO}）"
+        ),
     )
     parser.add_argument(
         "--skip-equivalent-diagnostic",
@@ -124,21 +138,31 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--candidate-export-count",
         type=int,
-        default=0,
-        help="額外保存幾份找到的同品質候選班表（預設：0）",
+        default=DEFAULT_CANDIDATE_EXPORT_COUNT,
+        help=(
+            "額外保存幾份找到的同品質候選班表"
+            f"（預設：{DEFAULT_CANDIDATE_EXPORT_COUNT}）"
+        ),
     )
     parser.add_argument(
         "--candidate-export-formats",
         nargs="+",
         choices=("json", "excel", "pdf"),
-        default=("json",),
-        help="候選班表輸出格式（可複選；預設：json）",
+        default=DEFAULT_CANDIDATE_EXPORT_FORMATS,
+        help=(
+            "候選班表輸出格式（可複選；預設："
+            + ", ".join(DEFAULT_CANDIDATE_EXPORT_FORMATS)
+            + "）"
+        ),
     )
     parser.add_argument(
         "--progress-interval",
         type=float,
-        default=5.0,
-        help="最佳化進度更新秒數（預設：5）",
+        default=DEFAULT_PROGRESS_UPDATE_SECONDS,
+        help=(
+            "最佳化進度更新秒數"
+            f"（預設：{DEFAULT_PROGRESS_UPDATE_SECONDS:g}）"
+        ),
     )
     return parser
 

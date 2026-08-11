@@ -108,17 +108,6 @@ PDF exporter 目前依賴固定 sheet 名稱、固定儲存格座標與求解資
 - 為 workbook contract 加入版本或 metadata。
 - PDF 讀取結構化定位資訊，避免散落固定座標。
 
-### 統一 config 的預設值來源
-
-目前預設值同時存在於 dataclass、argparse 與 `config.json` 的「預設設定」區塊；「預設設定」只供查閱、不參與執行，部分值與程式預設並不相同。
-
-預計處理：
-
-- 指定唯一的 executable defaults 來源。
-- 由該來源產生範例或還原預設設定。
-- 明確區分「實際生效設定」與「範例／還原用設定」。
-- 前端的「還原預設」不得自行複製另一套常數。
-
 ### 拆分大型最佳化測試模組
 
 `tests/test_optimization.py` 集中涵蓋多個不同責任，後續新增案例時不易定位與維護。
@@ -146,7 +135,6 @@ PDF exporter 目前依賴固定 sheet 名稱、固定儲存格座標與求解資
 
 - JSON、Excel、PDF 與中間輸入的 temporary file＋replace 流程。
 - app config、weekly authoring 與 canonical validation 的基本型別解析工具。
-- precheck 與 optimization 的硬性班次上下界 helper。
 
 應只抽出具有相同語意的部分，避免建立過度抽象的通用工具。
 
