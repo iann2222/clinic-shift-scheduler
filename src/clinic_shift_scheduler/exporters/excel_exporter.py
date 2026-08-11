@@ -74,14 +74,6 @@ _EMPLOYEE_FONT_COLORS = (
     "3F29AE",
     "AE2986",
 )
-_EMPLOYEE_NAME_FONT_COLORS = {
-    "君鈺": "2860AD",
-    "翊臻": "AD2833",
-    "巧玲": "28AD60",
-    "怡秀": "8128AD",
-    "楚沁": "AD8128",
-    "裕玲": "28A2AD",
-}
 
 
 def _header(cell: Cell, *, fill: str = _DARK_BLUE) -> None:
@@ -127,23 +119,12 @@ def _employee_color_map(output: FormalScheduleOutput) -> dict[str, str]:
         output.individual_statistics,
         key=lambda item: item.employee_id,
     )
-    result = {
-        item.employee_id: _EMPLOYEE_NAME_FONT_COLORS[item.name]
-        for item in statistics
-        if item.name in _EMPLOYEE_NAME_FONT_COLORS
+    return {
+        item.employee_id: _EMPLOYEE_FONT_COLORS[
+            index % len(_EMPLOYEE_FONT_COLORS)
+        ]
+        for index, item in enumerate(statistics)
     }
-    used = set(result.values())
-    available = [
-        color for color in _EMPLOYEE_FONT_COLORS if color not in used
-    ]
-    for item in statistics:
-        if item.employee_id in result:
-            continue
-        index = len(result) % len(_EMPLOYEE_FONT_COLORS)
-        result[item.employee_id] = (
-            available.pop(0) if available else _EMPLOYEE_FONT_COLORS[index]
-        )
-    return result
 
 
 def _plain_schedule_header(cell: Cell) -> None:

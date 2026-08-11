@@ -375,14 +375,14 @@ class ExcelExporterTests(unittest.TestCase):
         finally:
             workbook.close()
 
-    def test_named_employee_colors_use_the_approved_hsl_palette(self) -> None:
+    def test_employee_colors_follow_stable_id_order_not_names(self) -> None:
         renamed = replace(
             self.output,
             individual_statistics=tuple(
                 replace(stats, name=name)
                 for stats, name in zip(
                     self.output.individual_statistics,
-                    ("君鈺", "翊臻", "巧玲"),
+                    ("任意姓名三", "任意姓名一", "任意姓名二"),
                     strict=True,
                 )
             ),
