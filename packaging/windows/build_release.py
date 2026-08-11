@@ -255,6 +255,7 @@ def _smoke_test(config: dict[str, Any], release_directory: Path) -> None:
     smoke_environment["PATH"] = os.pathsep.join(
         (str(windows_directory / "System32"), str(windows_directory))
     )
+    smoke_environment["CLINIC_SCHEDULER_NO_PAUSE"] = "1"
     try:
         completed = subprocess.run(
             [str(executable)],

@@ -7,6 +7,7 @@ import sys
 from clinic_shift_scheduler.app_config import load_scheduler_config
 from clinic_shift_scheduler.application_paths import application_root
 from clinic_shift_scheduler.cli import main as run_cli
+from clinic_shift_scheduler.console_lifecycle import pause_after_run_if_needed
 
 
 PROJECT_ROOT = application_root(__file__)
@@ -73,4 +74,8 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        exit_code = main()
+    finally:
+        pause_after_run_if_needed()
+    raise SystemExit(exit_code)

@@ -7,6 +7,8 @@
 4. 等待主控台顯示正式狀態與輸出路徑。
 5. 到 output 資料夾取得 JSON、Excel 與 PDF。
 
+直接雙擊執行時，排班完成或發生錯誤後視窗會保留，閱讀訊息後按 Enter 才會關閉。從 PowerShell 或其他既有終端執行時不會額外等待。
+
 注意事項：
 - 整個資料夾必須一起保留，請勿刪除或移動 _internal。
 - input、output 與 config.json 可能含有個人資料，請妥善保管。

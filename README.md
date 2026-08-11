@@ -97,6 +97,8 @@ python src/run_scheduler.py
 此入口會明確使用覆寫模式更新同月份結果，並依序完成讀檔、weekly-v1 逐日展開、
 validation、normalization、precheck、完整
 lexicographic optimization、獨立結果驗證，以及 JSON、Excel、PDF 輸出。
+封裝版若由使用者直接雙擊執行，完成或失敗後會等待按 Enter 才關閉視窗；從既有
+PowerShell／VS Code 終端執行則維持原本結束行為，不會阻塞自動化流程。
 三份正式檔案完成後，程式才開始搜尋與正式班表具有完全相同鎖定品質、但核心
 assignment 不同的候選班表；因此不想等待診斷時，可在看到「正式 JSON／Excel／PDF
 已完成」後按 `Ctrl+C`，已產出的正式班表不受影響。候選數不包含正式輸出的那一份。
