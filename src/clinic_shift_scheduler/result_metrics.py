@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import date
-from itertools import combinations
 from types import MappingProxyType
 from typing import Mapping
 
@@ -28,7 +27,7 @@ from .optimization import (
     OptimizationStage,
     PreferenceBenchmarkResult,
 )
-from .ratio_fairness import PatternQualityLevel, ratio_basis_points
+from .ratio_fairness import ratio_basis_points
 
 
 _PATTERN_BY_PERIODS = {
@@ -73,16 +72,6 @@ class RecomputedScheduleMetrics:
     pattern_ratio_basis_points: Mapping[
         tuple[str, FairnessMetric], int | None
     ]
-    class_attendance_days: Mapping[FullTimeClass, int]
-    class_quality_days: Mapping[
-        tuple[FullTimeClass, PatternQualityLevel], int
-    ]
-    class_quality_ratio_basis_points: Mapping[
-        tuple[FullTimeClass, PatternQualityLevel], int | None
-    ]
-    class_quality_ratio_gaps_basis_points: Mapping[PatternQualityLevel, int]
-    full_time_consecutive_ratio_max_gap_basis_points: int
-    full_time_consecutive_ratio_total_gap_basis_points: int
     class_preference_actual_values: Mapping[
         tuple[FullTimeClass, PreferenceRank], int
     ]
@@ -224,56 +213,6 @@ def recompute_schedule_metrics(
             FairnessMetric.TRIPLE_DAYS,
         ),
     }
-    class_quality_metrics = {
-        FullTimeClass.A: {
-            PatternQualityLevel.FIRST: FairnessMetric.CONSECUTIVE_DOUBLES,
-            PatternQualityLevel.SECOND: FairnessMetric.MORNING_EVENING_DAYS,
-            PatternQualityLevel.THIRD: FairnessMetric.SINGLE_SHIFT_DAYS,
-        },
-        FullTimeClass.B: {
-            PatternQualityLevel.FIRST: FairnessMetric.CONSECUTIVE_DOUBLES,
-            PatternQualityLevel.SECOND: FairnessMetric.TRIPLE_DAYS,
-            PatternQualityLevel.THIRD: FairnessMetric.SINGLE_SHIFT_DAYS,
-        },
-    }
-    class_attendance_days: dict[FullTimeClass, int] = {}
-    class_quality_days: dict[
-        tuple[FullTimeClass, PatternQualityLevel], int
-    ] = {}
-    class_quality_ratios: dict[
-        tuple[FullTimeClass, PatternQualityLevel], int | None
-    ] = {}
-    for full_time_class, quality_metrics in class_quality_metrics.items():
-        members = tuple(
-            employee.employee_id
-            for employee in data.source.employees
-            if employee.full_time_class is full_time_class
-        )
-        attendance = sum(
-            employee_metrics[employee_id].attendance_days
-            for employee_id in members
-        )
-        class_attendance_days[full_time_class] = attendance
-        for quality_level, metric in quality_metrics.items():
-            count = sum(metric_value(employee_id, metric) for employee_id in members)
-            class_quality_days[(full_time_class, quality_level)] = count
-            class_quality_ratios[(full_time_class, quality_level)] = (
-                ratio_basis_points(count, attendance)
-            )
-    class_quality_gaps: dict[PatternQualityLevel, int] = {}
-    comparable_classes = all(
-        class_attendance_days[full_time_class] > 0
-        for full_time_class in FullTimeClass
-    )
-    for quality_level in PatternQualityLevel:
-        if not comparable_classes:
-            class_quality_gaps[quality_level] = 0
-            continue
-        a_ratio = class_quality_ratios[(FullTimeClass.A, quality_level)]
-        b_ratio = class_quality_ratios[(FullTimeClass.B, quality_level)]
-        assert a_ratio is not None and b_ratio is not None
-        class_quality_gaps[quality_level] = abs(a_ratio - b_ratio)
-
     pattern_ratios: dict[tuple[str, FairnessMetric], int | None] = {}
     ratio_gaps: dict[tuple[str, FairnessMetric], int] = {}
     preference_ratio_gaps: dict[
@@ -331,26 +270,6 @@ def recompute_schedule_metrics(
                 preference_ratio_gaps[
                     preference_ratio_stage[(full_time_class, metric)]
                 ][(group, metric)] = ratio_gaps[(group, metric)]
-
-    full_time_consecutive_ratios = [
-        pattern_ratios[
-            (employee.employee_id, FairnessMetric.CONSECUTIVE_DOUBLES)
-        ]
-        for employee in data.source.employees
-        if employee.employment_type is EmploymentType.FULL_TIME
-    ]
-    defined_consecutive_ratios = [
-        value for value in full_time_consecutive_ratios if value is not None
-    ]
-    global_consecutive_max_gap = (
-        _gap(defined_consecutive_ratios)
-        if len(defined_consecutive_ratios) >= 2
-        else 0
-    )
-    global_consecutive_total_gap = sum(
-        abs(left - right)
-        for left, right in combinations(defined_consecutive_ratios, 2)
-    )
 
     preference_metric_values = {
         ClassPreferenceMetric.CONSECUTIVE_DOUBLES: lambda values: (
@@ -554,41 +473,6 @@ def recompute_schedule_metrics(
     objective_values = {
         OptimizationStage.FULL_TIME_TARGET_DEVIATION: target_deviation,
         OptimizationStage.PART_TIME_USAGE: part_time_usage,
-        OptimizationStage.FULL_TIME_CONSECUTIVE_DOUBLES: sum(
-            values.consecutive_double_days
-            for employee_id, values in employee_metrics.items()
-            if data.employees[employee_id].employment_type
-            is EmploymentType.FULL_TIME
-        ),
-        OptimizationStage.FULL_TIME_CONSECUTIVE_RATIO_MAX_GAP: (
-            global_consecutive_max_gap
-        ),
-        OptimizationStage.FULL_TIME_CONSECUTIVE_RATIO_TOTAL_GAP: (
-            global_consecutive_total_gap
-        ),
-        OptimizationStage.FULL_TIME_SINGLE_SHIFT_DAYS: sum(
-            values.single_shift_days
-            for employee_id, values in employee_metrics.items()
-            if data.employees[employee_id].employment_type
-            is EmploymentType.FULL_TIME
-        ),
-        OptimizationStage.FULL_TIME_SECONDARY_PATTERNS: sum(
-            (
-                values.morning_evening_days
-                if data.employees[employee_id].full_time_class
-                is FullTimeClass.A
-                else values.triple_days
-            )
-            for employee_id, values in employee_metrics.items()
-            if data.employees[employee_id].employment_type
-            is EmploymentType.FULL_TIME
-        ),
-        OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_MAX_GAP: max(
-            class_quality_gaps.values(), default=0
-        ),
-        OptimizationStage.FULL_TIME_CLASS_QUALITY_RATIO_TOTAL_GAP: sum(
-            class_quality_gaps.values()
-        ),
         OptimizationStage.FULL_TIME_PREFERENCE_RANK1_MAX_REGRET: max(
             rank_regret_values[PreferenceRank.FIRST], default=0
         ),
@@ -686,18 +570,6 @@ def recompute_schedule_metrics(
         daily_patterns=MappingProxyType(daily_patterns),
         employee_metrics=MappingProxyType(employee_metrics),
         pattern_ratio_basis_points=MappingProxyType(pattern_ratios),
-        class_attendance_days=MappingProxyType(class_attendance_days),
-        class_quality_days=MappingProxyType(class_quality_days),
-        class_quality_ratio_basis_points=MappingProxyType(class_quality_ratios),
-        class_quality_ratio_gaps_basis_points=MappingProxyType(
-            class_quality_gaps
-        ),
-        full_time_consecutive_ratio_max_gap_basis_points=(
-            global_consecutive_max_gap
-        ),
-        full_time_consecutive_ratio_total_gap_basis_points=(
-            global_consecutive_total_gap
-        ),
         class_preference_actual_values=MappingProxyType(
             class_preference_actuals
         ),

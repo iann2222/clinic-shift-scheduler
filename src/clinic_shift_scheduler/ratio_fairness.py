@@ -2,18 +2,7 @@
 
 from __future__ import annotations
 
-from enum import StrEnum
-
-
 BASIS_POINTS_SCALE = 10_000
-
-
-class PatternQualityLevel(StrEnum):
-    """Class-relative full-time pattern preference levels."""
-
-    FIRST = "first_preference"
-    SECOND = "second_preference"
-    THIRD = "third_preference"
 
 
 def ratio_basis_points(numerator: int, denominator: int) -> int | None:

@@ -61,24 +61,12 @@
 
 ## 高優先技術債
 
-### 移除舊版最佳化路徑與無效模型變數
-
-`optimization.py` 同時保留正式 conditional benchmark／regret 流程與先前的 legacy objective，並暴露 `build_phase_four_model()` 相容名稱。部分已非正式目標的 global consecutive、class quality 與舊 stage 結構仍存在於模型或 result metrics。
-
-預計處理：
-
-- 確認沒有仍需支援的外部舊 API。
-- 移除 `_solve_lexicographic_legacy()`、舊 objective specs 與相容 alias。
-- 移除正式求解不再使用的 CP-SAT 變數、metrics 欄位與 stage 值。
-- 將正式 stage 與內部 fairness metric bucket 使用不同型別。
-- 比較清理前後模型規模、求解結果與測試結果。
-
 ### 拆分過大的核心函式與模組
 
 目前主要複雜點包括：
 
-- `build_optimization_model()` 約 766 行。
-- `recompute_schedule_metrics()` 約 610 行。
+- `build_optimization_model()` 約 598 行。
+- `recompute_schedule_metrics()` 約 493 行。
 - `validate_schedule_result()` 約 436 行。
 - `solve_lexicographic()` 約 256 行。
 - `run_schedule_file()` 約 250 行。
@@ -131,13 +119,12 @@ PDF exporter 目前依賴固定 sheet 名稱、固定儲存格座標與求解資
 - 明確區分「實際生效設定」與「範例／還原用設定」。
 - 前端的「還原預設」不得自行複製另一套常數。
 
-### 整理測試結構與未執行的 legacy tests
+### 拆分大型最佳化測試模組
 
-`tests/test_optimization.py` 已超過 2,000 行，且有多個 `_legacy_` 方法不符合 pytest 收集命名，因此看似測試但實際不會執行。
+`tests/test_optimization.py` 集中涵蓋多個不同責任，後續新增案例時不易定位與維護。
 
 預計處理：
 
-- 刪除已失效的 legacy tests，或將仍有價值的案例改寫成目前正式政策測試。
 - 依 TARGET、類別偏好、比例公平、整數公平、共同公平與候選解拆分測試模組。
 - 加入測試收集數或明確的 policy coverage，避免測試被改名後靜默失效。
 
@@ -167,7 +154,7 @@ PDF exporter 目前依賴固定 sheet 名稱、固定儲存格座標與求解資
 
 ### 清理過時命名與註解
 
-目前仍有 `build_phase_four_model`、`implemented_objective_prefix_optimal`、phase-one／phase-three docstring，以及「候選診斷／候選處理」混用等歷史名稱。
+目前仍有 `implemented_objective_prefix_optimal`、phase-one／phase-three docstring，以及「候選診斷／候選處理」混用等歷史名稱。
 
 預計處理：
 
