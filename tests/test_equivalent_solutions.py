@@ -44,12 +44,16 @@ class EquivalentSolutionDiagnosticTests(unittest.TestCase):
 
     def test_exact_count_excludes_the_formal_assignment(self) -> None:
         result = self._two_assignment_result()
+        captured = []
 
         diagnostic = diagnose_equivalent_solutions(
             result,
             EquivalentSolutionDiagnosticConfig(
                 max_alternatives=100,
                 max_time_seconds=30,
+            ),
+            candidate_found=lambda index, assignments: captured.append(
+                (index, assignments)
             ),
         )
 
@@ -59,6 +63,10 @@ class EquivalentSolutionDiagnosticTests(unittest.TestCase):
         )
         self.assertEqual(diagnostic.alternative_count, 1)
         self.assertTrue(diagnostic.is_exact)
+        self.assertEqual(len(captured), 1)
+        self.assertEqual(captured[0][0], 1)
+        self.assertNotEqual(captured[0][1], result.assignments)
+        self.assertEqual(len(captured[0][1]), len(result.assignments))
 
         repeated = diagnose_equivalent_solutions(
             result,

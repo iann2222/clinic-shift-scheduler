@@ -186,6 +186,7 @@ class EquivalentSolutionDiagnosticConfig:
 
     max_alternatives: int = 100
     max_time_seconds: float | None = None
+    scheduling_time_ratio: float = 0.2
     num_search_workers: int = 1
     random_seed: int = 0
 
@@ -194,6 +195,12 @@ class EquivalentSolutionDiagnosticConfig:
             raise ValueError("max_alternatives must be greater than 0")
         if self.max_time_seconds is not None and self.max_time_seconds <= 0:
             raise ValueError("max_time_seconds must be greater than 0")
+        if (
+            isinstance(self.scheduling_time_ratio, bool)
+            or not isinstance(self.scheduling_time_ratio, (int, float))
+            or self.scheduling_time_ratio <= 0
+        ):
+            raise ValueError("scheduling_time_ratio must be greater than 0")
         if self.num_search_workers <= 0:
             raise ValueError("num_search_workers must be greater than 0")
 
@@ -2505,6 +2512,9 @@ def diagnose_equivalent_solutions(
     config: EquivalentSolutionDiagnosticConfig | None = None,
     *,
     progress: Callable[[int], None] | None = None,
+    candidate_found: (
+        Callable[[int, tuple[Assignment, ...]], None] | None
+    ) = None,
 ) -> EquivalentSolutionDiagnosticResult:
     """Count distinct equal-quality assignments up to a bound and time limit.
 
@@ -2545,7 +2555,10 @@ def diagnose_equivalent_solutions(
         ) + sum(
             item.wall_time_seconds for item in result.preference_benchmarks
         )
-        time_limit_seconds = max(measured_solver_seconds / 5, 0.001)
+        time_limit_seconds = max(
+            measured_solver_seconds * config.scheduling_time_ratio,
+            0.001,
+        )
 
     started = perf_counter()
     alternative_count = 0
@@ -2606,6 +2619,16 @@ def diagnose_equivalent_solutions(
                 )
                 _add_assignment_exclusion(model, variables, signature)
                 alternative_count += 1
+                if candidate_found is not None:
+                    assignments = tuple(
+                        Assignment(employee_id, day, period, role)
+                        for (
+                            (employee_id, day, period, role),
+                            _variable,
+                        ), selected in zip(x_items, signature, strict=True)
+                        if selected
+                    )
+                    candidate_found(alternative_count, assignments)
                 if progress is not None:
                     progress(alternative_count)
                 continue

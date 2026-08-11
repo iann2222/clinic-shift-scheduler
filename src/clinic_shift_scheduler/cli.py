@@ -17,6 +17,7 @@ from .optimization import (
     EquivalentSolutionDiagnosticStatus,
 )
 from .runner import ScheduleRunError, run_schedule_file
+from .runner import CandidateExportConfig
 
 
 _OPTIMIZATION_HEARTBEAT_PREFIX = "嚴格分階段最佳化進行中："
@@ -110,9 +111,34 @@ def _parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--equivalent-time-ratio",
+        type=float,
+        default=0.2,
+        help="未指定固定秒數時，候選診斷時間相對於最佳化時間的比例（預設：0.2）",
+    )
+    parser.add_argument(
         "--skip-equivalent-diagnostic",
         action="store_true",
         help="正式輸出完成後不搜尋同品質候選班表",
+    )
+    parser.add_argument(
+        "--candidate-export-count",
+        type=int,
+        default=0,
+        help="額外保存幾份找到的同品質候選班表（預設：0）",
+    )
+    parser.add_argument(
+        "--candidate-export-formats",
+        nargs="+",
+        choices=("json", "excel", "pdf"),
+        default=("json",),
+        help="候選班表輸出格式（可複選；預設：json）",
+    )
+    parser.add_argument(
+        "--progress-interval",
+        type=float,
+        default=5.0,
+        help="最佳化進度更新秒數（預設：5）",
     )
     return parser
 
@@ -142,7 +168,12 @@ def _equivalent_diagnostic_message(
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    args = _parser().parse_args(argv)
+    parser = _parser()
+    args = parser.parse_args(argv)
+    if args.skip_equivalent_diagnostic and args.candidate_export_count:
+        parser.error("候選診斷停用時，候選輸出份數必須為 0")
+    if args.candidate_export_count > args.equivalent_limit:
+        parser.error("候選輸出份數不可超過候選搜尋上限")
     command_started = perf_counter()
     schedule_progress = _ConsoleProgressPrinter("[排班]")
     diagnostic_progress = _ConsoleProgressPrinter("[候選診斷]")
@@ -153,6 +184,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             else EquivalentSolutionDiagnosticConfig(
                 max_alternatives=args.equivalent_limit,
                 max_time_seconds=args.equivalent_time_limit,
+                scheduling_time_ratio=args.equivalent_time_ratio,
             )
         )
         result = run_schedule_file(
@@ -161,6 +193,11 @@ def main(argv: Sequence[str] | None = None) -> int:
             intermediate_directory=args.intermediate_dir,
             overwrite=args.overwrite,
             equivalent_solution_diagnostic_config=diagnostic_config,
+            candidate_export_config=CandidateExportConfig(
+                max_candidates=args.candidate_export_count,
+                formats=tuple(args.candidate_export_formats),
+            ),
+            progress_interval_seconds=args.progress_interval,
             progress=schedule_progress,
             diagnostic_progress=diagnostic_progress,
         )
@@ -186,6 +223,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             + _equivalent_diagnostic_message(
                 result.equivalent_solution_diagnostic
             )
+        )
+    if result.candidate_exports:
+        print(
+            "[候選診斷] 已輸出 "
+            f"{len(result.candidate_exports)} 份候選班表至："
+            f"{result.candidate_output_directory}"
+        )
+        print(
+            "[候選診斷] 候選輸出時間："
+            f"{_seconds(result.candidate_export_seconds)}"
         )
     print(f"[執行] 含候選診斷總時間：{_seconds(result.total_execution_seconds)}")
     return 0

@@ -69,9 +69,10 @@ conda activate clinic_shift_scheduler
 
 ### 完整執行一次排班
 
-日常使用的主要檔案是 `src/run_scheduler.py`。先修改檔案最上方的
-`INPUT_FILENAME`，例如 `排班輸入_2026-08.json`；程式會固定到 repository
-root 的 `input/` 尋找該檔案。在 repository root 執行：
+日常使用只需準備兩份 JSON：`input/` 內的每月排班輸入，以及 repository root
+的 `config.json` 執行設定。`config.json` 的「輸入檔名」只填檔名，例如
+`排班輸入_2026-08.json`；主要入口 `src/run_scheduler.py` 會固定到 `input/`
+尋找該檔案。在 repository root 執行：
 
 ```powershell
 python src/run_scheduler.py
@@ -87,8 +88,66 @@ assignment 不同的候選班表；因此不想等待診斷時，可在看到「
 最佳化時間五分之一的診斷時限時，只列印「至少找到 N 份」並明確註明尚未證明
 是否還有更多。正式輸出完成時會先列印排班時間與全部檔案路徑，後續訊息改用
 `[候選診斷]` 標籤，不會讓使用者誤以為正式排班仍未完成。
+`config.json` 可設定候選搜尋份數、診斷秒數、額外保存幾份候選及保存格式。
+被保存的候選會逐份通過獨立 validator，寫入 `output/候選班表/`；每次成功產生
+新的正式班表後會清空重建該資料夾。候選診斷的搜尋先完成，再進行 JSON、Excel、
+PDF 寫檔，因此媒介轉換不占用診斷搜尋時限。
 展開後的逐日 `demands` 只寫入 `runtime/expanded-input/`，供除錯與稽核；該資料夾
 每次執行都會清空重建，不是使用者要維護的輸入。
+
+`config.json` 範例：
+
+```json
+{
+  "__使用者設定分隔線__": "==================== 使用者設定 ====================",
+  "使用者設定": {
+    "設定版本": "1",
+    "輸入檔名": "排班輸入_2026-08.json",
+    "覆寫既有結果": true,
+    "進度更新秒數": 5,
+    "候選診斷": {
+      "啟用": true,
+      "搜尋上限": 100,
+      "診斷時間上限": {
+        "模式": "比例",
+        "排班時間比例": 0.2
+      },
+      "額外輸出候選班表份數上限": 3,
+      "輸出格式": ["JSON", "Excel", "PDF"]
+    }
+  },
+  "__預設設定分隔線__": "==================== 預設設定（僅供查閱） ====================",
+  "預設設定": {
+    "設定版本": "1",
+    "輸入檔名": "排班輸入_2026-08.json",
+    "覆寫既有結果": true,
+    "進度更新秒數": 5,
+    "候選診斷": {
+      "啟用": true,
+      "搜尋上限": 100,
+      "診斷時間上限": {"模式": "比例", "排班時間比例": 0.2},
+      "額外輸出候選班表份數上限": 3,
+      "輸出格式": ["JSON", "Excel", "PDF"]
+    }
+  }
+}
+```
+
+「診斷時間上限」有兩種互斥模式：「比例」以正式 CP-SAT 最佳化實測時間乘上
+「排班時間比例」，例如 `0.2` 即五分之一；「定值」則改填 `"秒數": 60`。
+「額外輸出候選班表份數上限」為 `0` 代表只診斷數量、不保存候選，且不可大於「搜尋上限」。
+支援的格式為 `JSON`、`Excel`、`PDF`。程式只讀「使用者設定」；「預設設定」只供
+修改後查回原始值。所有說明與視覺分隔欄位一律命名為 `__...__`，載入時自動忽略；
+請修改「使用者設定」，不要只修改「預設設定」。
+
+固定 60 秒的寫法如下：
+
+```json
+"診斷時間上限": {
+  "模式": "定值",
+  "秒數": 60
+}
+```
 
 若需要從命令列臨時指定其他輸入，而不修改主檔，也可使用套件入口：
 
@@ -111,10 +170,12 @@ canonical v1 輸入。執行完成時，終端會列印輸入、驗證、prechec
 同一行，完成時清除進度行並列印該段總時間，用來確認長時間 CP-SAT 求解仍在運作。
 輸出重新導向到檔案或 CI log 時則保留逐行紀錄。由於各階段搜尋難度並不平均，
 系統不顯示可能誤導的百分比進度。候選診斷找到每一份候選時，也會在互動式終端覆寫同一行顯示累積份數；非互動式 log 則保留逐行紀錄。
-候選診斷可用 `--equivalent-limit` 與 `--equivalent-time-limit` 調整上限；明確提供
-秒數時會取代「CP-SAT 最佳化時間五分之一」的動態預設。若完全不需診斷，可加上
-`--skip-equivalent-diagnostic`。此診斷在正式輸出之後執行，不屬於正式 result
-contract，也不改變 `OPTIMAL + validation PASS`。
+候選診斷可用 `--equivalent-limit`、`--equivalent-time-limit` 或
+`--equivalent-time-ratio` 調整上限；明確提供固定秒數時優先使用固定值。若完全不需診斷，可加上
+`--skip-equivalent-diagnostic`。臨時從 CLI 保存候選時可用
+`--candidate-export-count N --candidate-export-formats json excel pdf`；日常執行則直接
+修改 `config.json`。此診斷在正式輸出之後執行，不屬於正式 result contract，
+也不改變 `OPTIMAL + validation PASS`。
 
 ```python
 from clinic_shift_scheduler import validate_and_normalize_weekly

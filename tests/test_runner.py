@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from pathlib import Path
 from time import sleep
@@ -12,10 +12,14 @@ from unittest.mock import patch
 from openpyxl import load_workbook
 
 from clinic_shift_scheduler import (
+    CandidateDiagnosticSettings,
+    CandidateExportConfig,
+    DiagnosticTimeSettings,
     EquivalentSolutionDiagnosticConfig,
     EquivalentSolutionDiagnosticStatus,
     FeasibilityStatus,
     RESULT_CONTRACT_VERSION,
+    SchedulerAppConfig,
     run_schedule_file,
 )
 import clinic_shift_scheduler.cli as cli_module
@@ -23,7 +27,7 @@ from clinic_shift_scheduler.cli import main
 import clinic_shift_scheduler.runner as runner_module
 import run_scheduler
 
-from tests.fixtures import minimal_valid_input
+from tests.fixtures import minimal_valid_input, synthetic_schedule_input
 
 
 class ScheduleRunnerTests(unittest.TestCase):
@@ -107,12 +111,35 @@ class ScheduleRunnerTests(unittest.TestCase):
             EquivalentSolutionDiagnosticConfig(max_time_seconds=7.5),
             125.0,
         )
+        proportional = runner_module._resolve_diagnostic_config(
+            EquivalentSolutionDiagnosticConfig(scheduling_time_ratio=0.4),
+            125.0,
+        )
 
         self.assertEqual(automatic.max_time_seconds, 25.0)
         self.assertEqual(explicit.max_time_seconds, 7.5)
+        self.assertEqual(proportional.max_time_seconds, 50.0)
 
     def test_primary_script_uses_configured_file_from_root_input(self) -> None:
-        with patch.object(run_scheduler, "run_cli", return_value=0) as run_cli:
+        config = SchedulerAppConfig(
+            input_file="排班輸入_2026-08.json",
+            progress_update_seconds=7,
+            candidate_diagnostic=CandidateDiagnosticSettings(
+                search_limit=20,
+                time=DiagnosticTimeSettings(
+                    mode="定值",
+                    fixed_seconds=12.5,
+                    scheduling_time_ratio=None,
+                ),
+                export_count=2,
+                export_formats=("json", "excel"),
+            ),
+        )
+        with patch.object(
+            run_scheduler,
+            "load_scheduler_config",
+            return_value=config,
+        ), patch.object(run_scheduler, "run_cli", return_value=0) as run_cli:
             exit_code = run_scheduler.main()
 
         self.assertEqual(exit_code, 0)
@@ -121,7 +148,7 @@ class ScheduleRunnerTests(unittest.TestCase):
             Path(arguments[0]),
             run_scheduler.PROJECT_ROOT
             / "input"
-            / run_scheduler.INPUT_FILENAME,
+            / config.input_file,
         )
         self.assertEqual(
             Path(arguments[2]),
@@ -133,6 +160,29 @@ class ScheduleRunnerTests(unittest.TestCase):
             run_scheduler.PROJECT_ROOT / "runtime" / "expanded-input",
         )
         self.assertIn("--overwrite", arguments)
+        self.assertEqual(arguments[arguments.index("--progress-interval") + 1], "7")
+        self.assertEqual(arguments[arguments.index("--equivalent-limit") + 1], "20")
+        self.assertEqual(
+            arguments[arguments.index("--equivalent-time-limit") + 1],
+            "12.5",
+        )
+        self.assertEqual(
+            arguments[arguments.index("--candidate-export-count") + 1],
+            "2",
+        )
+
+    def test_primary_script_reports_invalid_config_without_traceback(self) -> None:
+        stderr = StringIO()
+        with patch.object(
+            run_scheduler,
+            "load_scheduler_config",
+            side_effect=ValueError("bad config"),
+        ), redirect_stderr(stderr):
+            exit_code = run_scheduler.main()
+
+        self.assertEqual(exit_code, 1)
+        self.assertIn("[設定] 無法讀取", stderr.getvalue())
+        self.assertIn("bad config", stderr.getvalue())
 
     def test_complete_run_exports_files_and_records_execution_time(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -225,6 +275,7 @@ class ScheduleRunnerTests(unittest.TestCase):
                 result.equivalent_solution_diagnostic_seconds,
                 0,
             )
+            self.assertEqual(result.candidate_exports, ())
             self.assertTrue(any("最佳化" in message for message in messages))
             self.assertTrue(any("最佳化完成" in message for message in messages))
             self.assertTrue(
@@ -276,6 +327,74 @@ class ScheduleRunnerTests(unittest.TestCase):
                 )
             finally:
                 workbook.close()
+
+    def test_exports_validated_candidate_json_and_clears_old_files(self) -> None:
+        employees = [
+            {
+                "employee_id": employee_id,
+                "name": employee_id,
+                "employment_type": "full_time",
+                "full_time_class": "A",
+                "roles": ["assistant"],
+                "fairness_group": "A_TEST",
+                "shift_mode": "EXACT",
+                "required_shifts": 1,
+            }
+            for employee_id in ("A1", "A2")
+        ]
+        payload = synthetic_schedule_input(
+            start_date="2024-10-01",
+            end_date="2024-10-01",
+            roles=["assistant"],
+            employees=employees,
+            positive_demands={
+                ("2024-10-01", "morning", "assistant"): 1,
+                ("2024-10-01", "afternoon", "assistant"): 1,
+            },
+        )
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            input_path = root / "input.json"
+            input_path.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            candidate_directory = root / "output" / "候選班表"
+            candidate_directory.mkdir(parents=True)
+            stale = candidate_directory / "old.json"
+            stale.write_text("{}", encoding="utf-8")
+
+            result = run_schedule_file(
+                input_path,
+                output_directory=root / "output",
+                intermediate_directory=root / "runtime" / "expanded-input",
+                equivalent_solution_diagnostic_config=(
+                    EquivalentSolutionDiagnosticConfig(
+                        max_alternatives=1,
+                        max_time_seconds=30,
+                    )
+                ),
+                candidate_export_config=CandidateExportConfig(
+                    max_candidates=1,
+                    formats=("json", "excel", "pdf"),
+                ),
+            )
+
+            self.assertFalse(stale.exists())
+            self.assertEqual(len(result.candidate_exports), 1)
+            candidate = result.candidate_exports[0]
+            self.assertIsNotNone(candidate.json_path)
+            assert candidate.json_path is not None
+            self.assertTrue(candidate.json_path.is_file())
+            self.assertIsNotNone(candidate.excel_path)
+            self.assertIsNotNone(candidate.pdf_path)
+            assert candidate.excel_path is not None
+            assert candidate.pdf_path is not None
+            self.assertTrue(candidate.excel_path.is_file())
+            self.assertTrue(candidate.pdf_path.is_file())
+            document = json.loads(candidate.json_path.read_text(encoding="utf-8"))
+            self.assertEqual(document["status"], "OPTIMAL")
+            self.assertEqual(document["validation"]["status"], "PASS")
 
             stdout = StringIO()
 

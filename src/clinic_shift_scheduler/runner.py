@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import tempfile
 import threading
 from collections.abc import Callable, Mapping
@@ -12,6 +13,7 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, TypeVar
 
+from .app_config import SUPPORTED_CANDIDATE_EXPORT_FORMATS
 from .authoring import WEEKLY_AUTHORING_VERSION, expand_weekly_template
 from .exporters import (
     DEFAULT_OUTPUT_DIRECTORY,
@@ -19,13 +21,15 @@ from .exporters import (
     export_result_json,
     export_schedule_pdf_from_excel,
 )
-from .feasibility import FeasibilityStatus
+from .feasibility import Assignment, FeasibilityStatus
+from .models import NormalizedScheduleInput
 from .output import ExecutionTiming, FormalScheduleOutput, finalize_schedule_output
 from .precheck import PrecheckResult, run_prechecks
 from .validation import validate_and_normalize
 from .optimization import (
     EquivalentSolutionDiagnosticConfig,
     EquivalentSolutionDiagnosticResult,
+    LexicographicResult,
     diagnose_equivalent_solutions,
     solve_lexicographic,
 )
@@ -33,11 +37,47 @@ from .optimization import (
 
 ProgressCallback = Callable[[str], None]
 DEFAULT_INTERMEDIATE_DIRECTORY = Path("runtime/expanded-input")
+CANDIDATE_OUTPUT_DIRECTORY_NAME = "候選班表"
 T = TypeVar("T")
 
 
 class ScheduleRunError(RuntimeError):
     """Raised when a complete run cannot produce a formal schedule."""
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateExportConfig:
+    """How many diagnosed candidates to persist and in which media."""
+
+    max_candidates: int = 0
+    formats: tuple[str, ...] = ("json",)
+
+    def __post_init__(self) -> None:
+        if (
+            isinstance(self.max_candidates, bool)
+            or not isinstance(self.max_candidates, int)
+            or self.max_candidates < 0
+        ):
+            raise ValueError("candidate export count must be a non-negative integer")
+        if len(set(self.formats)) != len(self.formats):
+            raise ValueError("candidate export formats cannot contain duplicates")
+        unsupported = sorted(
+            set(self.formats) - SUPPORTED_CANDIDATE_EXPORT_FORMATS
+        )
+        if unsupported:
+            raise ValueError(
+                "unsupported candidate export formats: " + ", ".join(unsupported)
+            )
+        if self.max_candidates and not self.formats:
+            raise ValueError("candidate export formats cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateScheduleExport:
+    index: int
+    json_path: Path | None
+    excel_path: Path | None
+    pdf_path: Path | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,6 +96,9 @@ class ScheduleRunResult:
     formal_output_seconds: float
     equivalent_solution_diagnostic: EquivalentSolutionDiagnosticResult | None
     equivalent_solution_diagnostic_seconds: float
+    candidate_output_directory: Path
+    candidate_exports: tuple[CandidateScheduleExport, ...]
+    candidate_export_seconds: float
     total_execution_seconds: float
 
 
@@ -72,7 +115,10 @@ def _resolve_diagnostic_config(
         return config
     return replace(
         config,
-        max_time_seconds=max(optimization_seconds / 5, 0.001),
+        max_time_seconds=max(
+            optimization_seconds * config.scheduling_time_ratio,
+            0.001,
+        ),
     )
 
 
@@ -172,6 +218,91 @@ def _write_intermediate_input(
     return target
 
 
+def _reset_candidate_output_directory(output_directory: str | Path) -> Path:
+    """Recreate the dedicated generated-candidate directory."""
+
+    output_root = Path(output_directory).resolve()
+    target = (output_root / CANDIDATE_OUTPUT_DIRECTORY_NAME).resolve()
+    if target.parent != output_root or target.name != CANDIDATE_OUTPUT_DIRECTORY_NAME:
+        raise ScheduleRunError("invalid candidate output directory")
+    if target.exists():
+        shutil.rmtree(target)
+    target.mkdir(parents=True, exist_ok=True)
+    return target
+
+
+def _export_candidate_schedules(
+    data: NormalizedScheduleInput,
+    solver_result: LexicographicResult,
+    assignments_by_index: tuple[tuple[int, tuple[Assignment, ...]], ...],
+    output_directory: Path,
+    formats: tuple[str, ...],
+    execution_timing: ExecutionTiming,
+) -> tuple[CandidateScheduleExport, ...]:
+    exports: list[CandidateScheduleExport] = []
+    month = data.source.period.start_date.strftime("%Y-%m")
+    for index, assignments in assignments_by_index:
+        candidate_result = replace(solver_result, assignments=assignments)
+        candidate_output = finalize_schedule_output(data, candidate_result)
+        candidate_output = replace(
+            candidate_output,
+            execution_timing=execution_timing,
+        )
+        report = candidate_output.validation_report
+        if (
+            candidate_output.status is not FeasibilityStatus.OPTIMAL
+            or report is None
+            or not report.is_valid
+        ):
+            validation = "NONE" if report is None else report.status.value
+            raise ScheduleRunError(
+                "candidate output failed independent validation: "
+                f"index={index}, status={candidate_output.status.value}, "
+                f"validation={validation}"
+            )
+
+        stem = f"候選班表_{index:03d}_{month}.result-v1"
+        json_path = None
+        excel_path = None
+        pdf_path = None
+        if "json" in formats:
+            json_path = export_result_json(
+                data,
+                candidate_output,
+                output_directory=output_directory,
+                overwrite=True,
+                filename_stem=stem,
+            )
+        generated_excel: Path | None = None
+        if "excel" in formats or "pdf" in formats:
+            generated_excel = export_result_excel(
+                data,
+                candidate_output,
+                output_directory=output_directory,
+                overwrite=True,
+                filename_stem=stem,
+            )
+            if "excel" in formats:
+                excel_path = generated_excel
+        if "pdf" in formats:
+            assert generated_excel is not None
+            pdf_path = export_schedule_pdf_from_excel(
+                generated_excel,
+                overwrite=True,
+            )
+        if generated_excel is not None and "excel" not in formats:
+            generated_excel.unlink()
+        exports.append(
+            CandidateScheduleExport(
+                index=index,
+                json_path=json_path,
+                excel_path=excel_path,
+                pdf_path=pdf_path,
+            )
+        )
+    return tuple(exports)
+
+
 def run_schedule_file(
     input_path: str | Path,
     *,
@@ -181,10 +312,27 @@ def run_schedule_file(
     equivalent_solution_diagnostic_config: (
         EquivalentSolutionDiagnosticConfig | None
     ) = None,
+    candidate_export_config: CandidateExportConfig | None = None,
+    progress_interval_seconds: float = 5.0,
     progress: ProgressCallback | None = None,
     diagnostic_progress: ProgressCallback | None = None,
 ) -> ScheduleRunResult:
     """Run input loading through validated JSON, Excel, and PDF exports."""
+
+    resolved_candidate_export = candidate_export_config or CandidateExportConfig()
+    if (
+        equivalent_solution_diagnostic_config is None
+        and resolved_candidate_export.max_candidates
+    ):
+        raise ValueError("candidate export requires equivalent-solution diagnosis")
+    if (
+        equivalent_solution_diagnostic_config is not None
+        and resolved_candidate_export.max_candidates
+        > equivalent_solution_diagnostic_config.max_alternatives
+    ):
+        raise ValueError("candidate export count cannot exceed diagnostic search limit")
+    if progress_interval_seconds <= 0:
+        raise ValueError("progress_interval_seconds must be greater than 0")
 
     started = perf_counter()
     source = Path(input_path)
@@ -222,6 +370,7 @@ def run_schedule_file(
     solver_result, optimization_seconds = _run_with_elapsed_heartbeat(
         lambda: solve_lexicographic(data),
         progress,
+        interval_seconds=progress_interval_seconds,
     )
 
     _notify(progress, "執行獨立結果驗證並建立正式結果")
@@ -314,6 +463,11 @@ def run_schedule_file(
 
     equivalent_solution_diagnostic = None
     equivalent_solution_diagnostic_seconds = 0.0
+    candidate_export_seconds = 0.0
+    candidate_exports: tuple[CandidateScheduleExport, ...] = ()
+    candidate_output_directory = _reset_candidate_output_directory(
+        output_directory
+    )
     if equivalent_solution_diagnostic_config is not None:
         resolved_diagnostic_config = _resolve_diagnostic_config(
             equivalent_solution_diagnostic_config,
@@ -327,6 +481,7 @@ def run_schedule_file(
             "按 Ctrl+C 可只中止此診斷",
         )
         step_started = perf_counter()
+        captured_candidates: list[tuple[int, tuple[Assignment, ...]]] = []
 
         def report_alternative(count: int) -> None:
             _notify(
@@ -334,12 +489,40 @@ def run_schedule_file(
                 f"已找到 {count} 份同品質候選班表",
             )
 
+        def capture_candidate(
+            index: int,
+            assignments: tuple[Assignment, ...],
+        ) -> None:
+            if len(captured_candidates) < resolved_candidate_export.max_candidates:
+                captured_candidates.append((index, assignments))
+
         equivalent_solution_diagnostic = diagnose_equivalent_solutions(
             solver_result,
             resolved_diagnostic_config,
             progress=report_alternative,
+            candidate_found=capture_candidate,
         )
         equivalent_solution_diagnostic_seconds = perf_counter() - step_started
+
+        if captured_candidates:
+            _notify(
+                candidate_progress,
+                f"輸出 {len(captured_candidates)} 份同品質候選班表",
+            )
+            step_started = perf_counter()
+            candidate_exports = _export_candidate_schedules(
+                data,
+                solver_result,
+                tuple(captured_candidates),
+                candidate_output_directory,
+                resolved_candidate_export.formats,
+                execution_timing,
+            )
+            candidate_export_seconds = perf_counter() - step_started
+            _notify(
+                candidate_progress,
+                f"候選班表輸出完成：{candidate_output_directory}",
+            )
 
     return ScheduleRunResult(
         output=output,
@@ -356,5 +539,8 @@ def run_schedule_file(
         equivalent_solution_diagnostic_seconds=(
             equivalent_solution_diagnostic_seconds
         ),
+        candidate_output_directory=candidate_output_directory,
+        candidate_exports=candidate_exports,
+        candidate_export_seconds=candidate_export_seconds,
         total_execution_seconds=perf_counter() - started,
     )

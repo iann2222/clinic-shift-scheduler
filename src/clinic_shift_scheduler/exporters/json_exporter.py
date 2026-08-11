@@ -108,11 +108,16 @@ def export_result_json(
     output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY,
     overwrite: bool = False,
     generated_at: datetime | None = None,
+    filename_stem: str | None = None,
 ) -> Path:
     """Atomically persist the formal result contract as UTF-8 JSON."""
 
     document = build_result_document(data, output, generated_at=generated_at)
-    target = build_output_paths(data, output_directory).json
+    target = build_output_paths(
+        data,
+        output_directory,
+        stem=filename_stem,
+    ).json
     prepare_target(target, overwrite=overwrite)
     temporary: Path | None = None
     try:

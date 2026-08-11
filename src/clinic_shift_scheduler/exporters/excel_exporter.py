@@ -872,11 +872,16 @@ def export_result_excel(
     *,
     output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY,
     overwrite: bool = False,
+    filename_stem: str | None = None,
 ) -> Path:
     """Atomically persist and reopen-validate the formal Excel workbook."""
 
     workbook = build_workbook(data, output)
-    target = build_output_paths(data, output_directory).excel
+    target = build_output_paths(
+        data,
+        output_directory,
+        stem=filename_stem,
+    ).excel
     prepare_target(target, overwrite=overwrite)
     temporary: Path | None = None
     try:

@@ -5,6 +5,14 @@ from .authoring import (
     expand_weekly_template,
     validate_and_normalize_weekly,
 )
+from .app_config import (
+    APP_CONFIG_VERSION,
+    CandidateDiagnosticSettings,
+    DiagnosticTimeSettings,
+    SchedulerAppConfig,
+    load_scheduler_config,
+    parse_scheduler_config,
+)
 from .class_preferences import (
     CLASS_PREFERENCES,
     ClassPreferenceDefinition,
@@ -94,11 +102,21 @@ from .result_validation import (
     ValidationReport,
     validate_schedule_result,
 )
-from .runner import ScheduleRunError, ScheduleRunResult, run_schedule_file
+from .runner import (
+    CandidateExportConfig,
+    CandidateScheduleExport,
+    ScheduleRunError,
+    ScheduleRunResult,
+    run_schedule_file,
+)
 from .validation import validate_and_normalize
 
 __all__ = [
+    "APP_CONFIG_VERSION",
     "Assignment",
+    "CandidateDiagnosticSettings",
+    "CandidateExportConfig",
+    "CandidateScheduleExport",
     "ClassPatternLockResult",
     "ConstantProof",
     "CategoryStatistics",
@@ -107,6 +125,7 @@ __all__ = [
     "ClassPreferenceStatistics",
     "CLASS_PREFERENCES",
     "DailyPattern",
+    "DiagnosticTimeSettings",
     "DEFAULT_OUTPUT_DIRECTORY",
     "ExportFileExistsError",
     "ExecutionTiming",
@@ -149,6 +168,7 @@ __all__ = [
     "ScheduleCell",
     "ScheduleCellKind",
     "ScheduleInput",
+    "SchedulerAppConfig",
     "ScheduleRunError",
     "ScheduleRunResult",
     "FormalScheduleOutput",
@@ -174,6 +194,8 @@ __all__ = [
     "recompute_schedule_metrics",
     "run_prechecks",
     "run_schedule_file",
+    "load_scheduler_config",
+    "parse_scheduler_config",
     "solve_feasibility",
     "solve_lexicographic",
     "validate_and_normalize",

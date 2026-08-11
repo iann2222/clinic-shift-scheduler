@@ -40,15 +40,17 @@ def schedule_month(data: NormalizedScheduleInput) -> str:
 def build_output_paths(
     data: NormalizedScheduleInput,
     output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY,
+    *,
+    stem: str | None = None,
 ) -> OutputPaths:
     directory = Path(output_directory)
-    stem = f"排班結果_{schedule_month(data)}.result-v1"
+    resolved_stem = stem or f"排班結果_{schedule_month(data)}.result-v1"
     return OutputPaths(
         directory=directory,
-        stem=stem,
-        json=directory / f"{stem}.json",
-        excel=directory / f"{stem}.xlsx",
-        pdf=directory / f"{stem}.pdf",
+        stem=resolved_stem,
+        json=directory / f"{resolved_stem}.json",
+        excel=directory / f"{resolved_stem}.xlsx",
+        pdf=directory / f"{resolved_stem}.pdf",
     )
 
 
