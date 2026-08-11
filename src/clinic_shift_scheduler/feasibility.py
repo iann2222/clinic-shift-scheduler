@@ -1,6 +1,6 @@
-"""CP-SAT hard-feasibility model with phase-three conservative prechecks.
+"""CP-SAT hard-feasibility model with conservative prechecks.
 
-This module intentionally has no objective. It consumes the phase-one
+This module intentionally has no objective. It consumes the validated
 ``NormalizedScheduleInput`` and enforces the v1 hard constraints.
 """
 

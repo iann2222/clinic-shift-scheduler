@@ -56,6 +56,6 @@ def allowed_daily_patterns(
         patterns.remove(DailyPattern.TRIPLE)
     elif full_time_class is FullTimeClass.B:
         patterns.remove(DailyPattern.MORNING_EVENING)
-    else:  # Protected by phase-one validation.
+    else:  # Protected by canonical input validation.
         raise ValueError("full-time employee must have class A or B")
     return frozenset(patterns)

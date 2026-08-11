@@ -16,8 +16,8 @@ from .optimization import (
     EquivalentSolutionDiagnosticResult,
     EquivalentSolutionDiagnosticStatus,
 )
-from .runner import ScheduleRunError, run_schedule_file
-from .runner import CandidateExportConfig
+from .runner import CandidateExportConfig, ScheduleRunError, run_schedule_file
+from .time_formatting import format_seconds, format_seconds_with_minutes
 
 
 _OPTIMIZATION_HEARTBEAT_PREFIX = "嚴格分階段最佳化進行中："
@@ -143,17 +143,6 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _seconds(value: float) -> str:
-    number = f"{value:.1f}".rstrip("0").rstrip(".")
-    return f"{number} 秒"
-
-
-def _seconds_with_minutes(value: float) -> str:
-    rounded_total_seconds = int(value + 0.5)
-    minutes, remaining_seconds = divmod(rounded_total_seconds, 60)
-    return f"{_seconds(value)}（約 {minutes} 分 {remaining_seconds} 秒）"
-
-
 def _equivalent_diagnostic_message(
     diagnostic: EquivalentSolutionDiagnosticResult,
 ) -> str:
@@ -213,7 +202,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         diagnostic_progress.finish()
         print(f"[排班] 執行失敗：{error}", file=sys.stderr)
         print(
-            f"[排班] 失敗前總執行時間：{_seconds(perf_counter() - command_started)}",
+            "[排班] 失敗前總執行時間："
+            f"{format_seconds(perf_counter() - command_started)}",
             file=sys.stderr,
         )
         return 1
@@ -223,7 +213,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if result.equivalent_solution_diagnostic is not None:
         print(
             "[候選處理] 診斷時間："
-            f"{_seconds(result.equivalent_solution_diagnostic_seconds)}"
+            f"{format_seconds(result.equivalent_solution_diagnostic_seconds)}"
         )
         print(
             "[候選處理] 結果："
@@ -239,10 +229,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
         print(
             "[候選處理] 候選輸出時間："
-            f"{_seconds(result.candidate_export_seconds)}"
+            f"{format_seconds(result.candidate_export_seconds)}"
         )
     print(
         "[執行] 總耗時（含完整排班與候選處理）："
-        f"{_seconds_with_minutes(result.total_execution_seconds)}"
+        f"{format_seconds_with_minutes(result.total_execution_seconds)}"
     )
     return 0

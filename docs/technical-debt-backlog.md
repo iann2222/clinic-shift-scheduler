@@ -128,16 +128,15 @@ PDF exporter 目前依賴固定 sheet 名稱、固定儲存格座標與求解資
 - 依 TARGET、類別偏好、比例公平、整數公平、共同公平與候選解拆分測試模組。
 - 加入測試收集數或明確的 policy coverage，避免測試被改名後靜默失效。
 
-### 移除未使用 dependency 並改善發布可重現性
+### 改善發布依賴的可重現性
 
-目前 `pandas` 已列在 `pyproject.toml` 與發布 manifest，但程式碼沒有使用；部分發布 dependencies 只限制版本範圍，重建同一版本時可能取得不同套件版本。
+部分發布 dependencies 只限制版本範圍，重建同一版本時可能取得不同套件版本。目前封裝版本與專案版本已有一致性測試及建置前檢查，但仍分別儲存在兩份設定中。
 
 預計處理：
 
-- 移除確認未使用的 `pandas`。
 - 確認 PyInstaller 產物與 smoke test 不受影響。
 - 評估為正式發布保存 tested lock／constraints 或完整 dependency manifest。
-- 統一 `pyproject.toml` 與 packaging config 的版本來源或加入一致性檢查。
+- 評估讓 `pyproject.toml` 與 packaging config 改由單一來源產生版本值。
 
 ## 低優先技術債
 
@@ -145,7 +144,6 @@ PDF exporter 目前依賴固定 sheet 名稱、固定儲存格座標與求解資
 
 目前可見的重複包括：
 
-- CLI 與 runner 的秒數／分鐘格式化。
 - JSON、Excel、PDF 與中間輸入的 temporary file＋replace 流程。
 - app config、weekly authoring 與 canonical validation 的基本型別解析工具。
 - precheck 與 optimization 的硬性班次上下界 helper。
@@ -154,7 +152,7 @@ PDF exporter 目前依賴固定 sheet 名稱、固定儲存格座標與求解資
 
 ### 清理過時命名與註解
 
-目前仍有 `implemented_objective_prefix_optimal`、phase-one／phase-three docstring，以及「候選診斷／候選處理」混用等歷史名稱。
+目前仍有 `implemented_objective_prefix_optimal`，以及內部「候選診斷」與使用者訊息「候選處理」混用等歷史名稱。
 
 預計處理：
 

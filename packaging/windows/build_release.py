@@ -12,6 +12,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tomllib
 import urllib.request
 import zipfile
 from datetime import UTC, datetime
@@ -40,6 +41,15 @@ def _load_config() -> dict[str, Any]:
         raise PackagingError("application.version must be a semantic version")
     if application.get("target") != "win-x64":
         raise PackagingError("the current release layer only supports win-x64")
+    project = tomllib.loads(
+        (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    project_version = project["project"]["version"]
+    if version != project_version:
+        raise PackagingError(
+            "application.version must match pyproject.toml project.version: "
+            f"{version!r} != {project_version!r}"
+        )
     return payload
 
 
@@ -321,7 +331,6 @@ def _write_manifest(
             for name in (
                 "ortools",
                 "openpyxl",
-                "pandas",
                 "reportlab",
                 "pyinstaller",
             )

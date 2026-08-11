@@ -46,7 +46,7 @@ class WeeklyAuthoringTests(unittest.TestCase):
             "甲", "乙", "丙", "丁", "戊", "己"
         })
 
-    def test_anonymous_example_runs_through_phase_four(self) -> None:
+    def test_anonymous_example_runs_through_formal_optimization(self) -> None:
         normalized = validate_and_normalize_weekly(load_example())
         result = solve_lexicographic(
             normalized,

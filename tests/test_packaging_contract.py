@@ -44,6 +44,28 @@ class PackagingContractTests(unittest.TestCase):
             project["project"]["optional-dependencies"]["release"],
         )
 
+    def test_project_and_packaging_versions_match(self) -> None:
+        project = tomllib.loads(
+            (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        self.assertEqual(
+            project["project"]["version"],
+            self.config["application"]["version"],
+        )
+
+    def test_runtime_dependencies_do_not_include_unused_pandas(self) -> None:
+        project = tomllib.loads(
+            (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+        )
+        dependencies = project["project"]["dependencies"]
+        self.assertFalse(
+            any(item.lower().startswith("pandas") for item in dependencies)
+        )
+        build_source = (
+            REPOSITORY_ROOT / "packaging/windows/build_release.py"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn('"pandas"', build_source)
+
     def test_release_only_uses_anonymous_sample_input(self) -> None:
         source = self.config["release_content"]["anonymous_input_source"]
         self.assertIn("匿名範本", source)

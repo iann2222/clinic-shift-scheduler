@@ -45,6 +45,7 @@ from .optimization import (
     diagnose_equivalent_solutions,
     solve_lexicographic,
 )
+from .time_formatting import format_seconds, format_seconds_with_minutes
 
 
 ProgressCallback = Callable[[str], None]
@@ -119,17 +120,6 @@ def _notify(callback: ProgressCallback | None, message: str) -> None:
         callback(message)
 
 
-def _seconds(value: float) -> str:
-    number = f"{value:.1f}".rstrip("0").rstrip(".")
-    return f"{number} 秒"
-
-
-def _seconds_with_minutes(value: float) -> str:
-    rounded_total_seconds = int(value + 0.5)
-    minutes, remaining_seconds = divmod(rounded_total_seconds, 60)
-    return f"{_seconds(value)}（約 {minutes} 分 {remaining_seconds} 秒）"
-
-
 def _resolve_diagnostic_config(
     config: EquivalentSolutionDiagnosticConfig,
     optimization_seconds: float,
@@ -186,7 +176,7 @@ def _run_with_elapsed_heartbeat(
     elapsed = perf_counter() - started
     _notify(
         progress,
-        f"嚴格分階段最佳化完成：共耗時 {_seconds(elapsed)}",
+        f"嚴格分階段最佳化完成：共耗時 {format_seconds(elapsed)}",
     )
     return result, elapsed
 
@@ -465,24 +455,24 @@ def run_schedule_file(
             (
                 "完成：OPTIMAL + validation PASS",
                 "執行時間紀錄：",
-                f"  輸入讀取：{_seconds(input_loading_seconds)}",
+                f"  輸入讀取：{format_seconds(input_loading_seconds)}",
                 (
                     "  驗證與正規化："
-                    f"{_seconds(validation_normalization_seconds)}"
+                    f"{format_seconds(validation_normalization_seconds)}"
                 ),
-                f"  前置可行性檢查：{_seconds(precheck_seconds)}",
-                f"  CP-SAT 最佳化：{_seconds(optimization_seconds)}",
+                f"  前置可行性檢查：{format_seconds(precheck_seconds)}",
+                f"  CP-SAT 最佳化：{format_seconds(optimization_seconds)}",
                 (
                     "  獨立驗證與結果建立："
-                    f"{_seconds(result_validation_and_build_seconds)}"
+                    f"{format_seconds(result_validation_and_build_seconds)}"
                 ),
                 (
                     "  輸出檔案（含 JSON、Excel、PDF）："
-                    f"{_seconds(file_export_seconds)}"
+                    f"{format_seconds(file_export_seconds)}"
                 ),
                 (
                     "[排班耗時] 完整排班時間（從讀檔到正式輸出）："
-                    f"{_seconds_with_minutes(formal_output_seconds)}"
+                    f"{format_seconds_with_minutes(formal_output_seconds)}"
                 ),
                 "輸出檔案：",
                 f"  中間輸入：{intermediate_input_path}",
@@ -509,7 +499,7 @@ def run_schedule_file(
         _notify(
             candidate_progress,
             "開始搜尋同品質候選班表"
-            f"（時間上限 {_seconds(resolved_diagnostic_config.max_time_seconds)}），"
+            f"（時間上限 {format_seconds(resolved_diagnostic_config.max_time_seconds)}），"
             "按 Ctrl+C 可只中止此診斷",
         )
         step_started = perf_counter()

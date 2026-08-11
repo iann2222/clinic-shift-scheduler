@@ -5,14 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "clinic-shift-scheduler"
 version = "0.1.0"
-description = "Versioned data model and CP-SAT feasibility for clinic scheduling"
+description = "Versioned CP-SAT clinic shift scheduler with validated outputs"
 requires-python = ">=3.11"
 dependencies = [
     # 9.14/9.15 native-crash on the current Windows + Python 3.12 setup;
     # keep the verified stable release until an upgrade passes solver regression tests.
     "ortools~=9.12.4544",
     "openpyxl>=3.1,<4",
-    "pandas>=2.2.3,<3",
     "reportlab>=4,<5",
 ]
 

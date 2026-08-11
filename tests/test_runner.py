@@ -24,6 +24,7 @@ from clinic_shift_scheduler import (
 )
 import clinic_shift_scheduler.cli as cli_module
 from clinic_shift_scheduler.cli import main
+from clinic_shift_scheduler.time_formatting import format_seconds_with_minutes
 import clinic_shift_scheduler.runner as runner_module
 import run_scheduler
 
@@ -104,11 +105,11 @@ class ScheduleRunnerTests(unittest.TestCase):
 
     def test_total_elapsed_format_includes_minutes_without_sixty_seconds(self) -> None:
         self.assertEqual(
-            cli_module._seconds_with_minutes(185.34),
+            format_seconds_with_minutes(185.34),
             "185.3 秒（約 3 分 5 秒）",
         )
         self.assertEqual(
-            runner_module._seconds_with_minutes(59.96),
+            format_seconds_with_minutes(59.96),
             "60 秒（約 1 分 0 秒）",
         )
 
