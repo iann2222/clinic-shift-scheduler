@@ -23,6 +23,7 @@ from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period
 from .feasibility import Assignment, DemandKey, PersonDayKey, PersonPeriodKey
 from .models import NormalizedScheduleInput
 from .optimization import (
+    COMMON_GROUP_FAIRNESS_WEIGHTS,
     FairnessMetric,
     OptimizationStage,
     PreferenceBenchmarkResult,
@@ -651,7 +652,14 @@ def recompute_schedule_metrics(
             sunday_gaps.values()
         ),
         **{
-            stage: sum(stage_gaps.values())
+            stage: (
+                sum(
+                    COMMON_GROUP_FAIRNESS_WEIGHTS[metric] * gap
+                    for (_group, metric), gap in stage_gaps.items()
+                )
+                if stage is OptimizationStage.COMMON_GROUP_FAIRNESS
+                else sum(stage_gaps.values())
+            )
             for stage, stage_gaps in fairness_gaps.items()
             if stage
             not in (

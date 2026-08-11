@@ -1998,8 +1998,66 @@ class FairnessOptimizationTests(unittest.TestCase):
         )
         sunday_gap = 0  # Each person has exactly one shift on this Sunday.
         holiday_gap = 0  # The same date is explicitly marked as a holiday.
-        self.assertEqual(period_gap_sum + sunday_gap + holiday_gap, 2)
-        self.assertEqual(common.objective_value, 2)
+        expected_weighted_gap = (
+            3 * period_gap_sum + 7 * sunday_gap + 3 * holiday_gap
+        )
+        self.assertEqual(expected_weighted_gap, 6)
+        self.assertEqual(common.objective_value, expected_weighted_gap)
+        self.assertTrue(common.locked)
+
+    def test_common_fairness_weights_sunday_gap_seven_to_three(self) -> None:
+        day = "2024-10-06"  # Sunday and explicitly marked holiday.
+        payload = synthetic_schedule_input(
+            start_date=day,
+            end_date=day,
+            roles=["assistant"],
+            employees=[
+                full_time(
+                    "A1",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=2,
+                    fairness_group="A_SHARED",
+                ),
+                full_time(
+                    "A2",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=0,
+                    fairness_group="A_SHARED",
+                ),
+            ],
+            positive_demands={
+                (day, "morning", "assistant"): 1,
+                (day, "afternoon", "assistant"): 1,
+            },
+        )
+        payload["period"]["holidays"] = [day]
+
+        data = validate_and_normalize(payload)
+        result = solve_lexicographic(data)
+        common = stage(result, OptimizationStage.COMMON_GROUP_FAIRNESS)
+        metrics = recompute_schedule_metrics(
+            data,
+            result.assignments,
+            result.preference_benchmarks,
+        )
+        report = validate_schedule_result(
+            data,
+            result.assignments,
+            result.stages,
+            result.preference_benchmarks,
+            result.class_pattern_locks,
+        )
+
+        # Sunday gap is 2. Morning, afternoon and holiday gaps are 1, 1 and 2.
+        expected_weighted_gap = 7 * 2 + 3 * (1 + 1 + 2)
+        self.assertEqual(common.objective_value, expected_weighted_gap)
+        self.assertEqual(
+            metrics.objective_values[OptimizationStage.COMMON_GROUP_FAIRNESS],
+            expected_weighted_gap,
+        )
+        self.assertEqual(report.status, ResultValidationStatus.PASS)
         self.assertTrue(common.locked)
 
     def test_final_sunday_fairness_compares_all_full_time_employees(self) -> None:

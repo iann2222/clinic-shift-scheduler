@@ -333,8 +333,8 @@ class ScheduleRunnerTests(unittest.TestCase):
             self.assertGreaterEqual(timing.scheduling_pipeline_seconds, 0)
 
             document = json.loads(result.json_path.read_text(encoding="utf-8"))
-            self.assertEqual(document["contract"]["version"], "1.8")
-            self.assertEqual(RESULT_CONTRACT_VERSION, "1.8")
+            self.assertEqual(document["contract"]["version"], "1.9")
+            self.assertEqual(RESULT_CONTRACT_VERSION, "1.9")
             self.assertAlmostEqual(
                 document["execution_timing"]["optimization_seconds"],
                 timing.optimization_seconds,

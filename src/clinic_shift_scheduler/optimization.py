@@ -124,6 +124,17 @@ class FairnessMetric(StrEnum):
     HOLIDAY_SHIFTS = "holiday_shifts"
 
 
+COMMON_GROUP_FAIRNESS_WEIGHTS: Mapping[FairnessMetric, int] = MappingProxyType(
+    {
+        FairnessMetric.MORNING_SHIFTS: 3,
+        FairnessMetric.AFTERNOON_SHIFTS: 3,
+        FairnessMetric.EVENING_SHIFTS: 3,
+        FairnessMetric.SUNDAY_SHIFTS: 7,
+        FairnessMetric.HOLIDAY_SHIFTS: 3,
+    }
+)
+
+
 class ObjectiveDirection(StrEnum):
     NONE = "NONE"
     MINIMIZE = "MINIMIZE"
@@ -1216,7 +1227,13 @@ def build_optimization_model(
                 model.add(gap == maximum - minimum)
                 stage_gaps[(group, metric)] = gap
         fairness_gaps[stage] = MappingProxyType(stage_gaps)
-        fairness_objectives[stage] = sum(stage_gaps.values())
+        if stage is OptimizationStage.COMMON_GROUP_FAIRNESS:
+            fairness_objectives[stage] = sum(
+                COMMON_GROUP_FAIRNESS_WEIGHTS[metric] * gap
+                for (_group, metric), gap in stage_gaps.items()
+            )
+        else:
+            fairness_objectives[stage] = sum(stage_gaps.values())
 
     full_time_members = tuple(
         employee
