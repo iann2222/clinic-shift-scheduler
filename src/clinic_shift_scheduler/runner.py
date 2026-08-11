@@ -381,7 +381,7 @@ def run_schedule_file(
 
     _notify(progress, "執行嚴格分階段最佳化")
     solver_result, optimization_seconds = _run_with_elapsed_heartbeat(
-        lambda: solve_lexicographic(data),
+        lambda: solve_lexicographic(data, precheck_result=precheck),
         progress,
         interval_seconds=progress_interval_seconds,
     )

@@ -23,6 +23,7 @@ from clinic_shift_scheduler import (
     run_schedule_file,
 )
 import clinic_shift_scheduler.cli as cli_module
+import clinic_shift_scheduler.console_app as console_module
 from clinic_shift_scheduler.cli import main
 from clinic_shift_scheduler.time_formatting import format_seconds_with_minutes
 import clinic_shift_scheduler.runner as runner_module
@@ -38,7 +39,7 @@ class ScheduleRunnerTests(unittest.TestCase):
                 return True
 
         stream = InteractiveBuffer()
-        printer = cli_module._ConsoleProgressPrinter("[排班]", stream)
+        printer = console_module.ConsoleProgressPrinter("[排班]", stream)
 
         printer("嚴格分階段最佳化進行中：已耗時 5 秒")
         printer("嚴格分階段最佳化進行中：已耗時 10 秒")
@@ -53,7 +54,7 @@ class ScheduleRunnerTests(unittest.TestCase):
 
     def test_noninteractive_console_keeps_heartbeat_lines(self) -> None:
         stream = StringIO()
-        printer = cli_module._ConsoleProgressPrinter("[排班]", stream)
+        printer = console_module.ConsoleProgressPrinter("[排班]", stream)
 
         printer("嚴格分階段最佳化進行中：已耗時 5 秒")
         printer("嚴格分階段最佳化進行中：已耗時 10 秒")
@@ -67,7 +68,7 @@ class ScheduleRunnerTests(unittest.TestCase):
                 return True
 
         stream = InteractiveBuffer()
-        printer = cli_module._ConsoleProgressPrinter("[候選處理]", stream)
+        printer = console_module.ConsoleProgressPrinter("[候選處理]", stream)
 
         printer("已找到 1 份同品質候選班表")
         printer("已找到 2 份同品質候選班表")
@@ -77,7 +78,7 @@ class ScheduleRunnerTests(unittest.TestCase):
 
     def test_noninteractive_console_keeps_candidate_count_lines(self) -> None:
         stream = StringIO()
-        printer = cli_module._ConsoleProgressPrinter("[候選處理]", stream)
+        printer = console_module.ConsoleProgressPrinter("[候選處理]", stream)
 
         printer("已找到 1 份同品質候選班表")
         printer("已找到 2 份同品質候選班表")
@@ -175,36 +176,41 @@ class ScheduleRunnerTests(unittest.TestCase):
             run_scheduler,
             "load_scheduler_config",
             return_value=config,
-        ), patch.object(run_scheduler, "run_cli", return_value=0) as run_cli:
+        ), patch.object(
+            run_scheduler,
+            "run_schedule_request_with_console",
+            return_value=0,
+        ) as run_request:
             exit_code = run_scheduler.main()
 
         self.assertEqual(exit_code, 0)
-        arguments = run_cli.call_args.args[0]
+        request = run_request.call_args.args[0]
         self.assertEqual(
-            Path(arguments[0]),
+            request.input_path,
             run_scheduler.PROJECT_ROOT
             / "input"
             / config.input_file,
         )
         self.assertEqual(
-            Path(arguments[2]),
+            request.output_directory,
             run_scheduler.PROJECT_ROOT / "output",
         )
-        intermediate_index = arguments.index("--intermediate-dir") + 1
         self.assertEqual(
-            Path(arguments[intermediate_index]),
+            request.intermediate_directory,
             run_scheduler.PROJECT_ROOT / "runtime" / "expanded-input",
         )
-        self.assertIn("--overwrite", arguments)
-        self.assertEqual(arguments[arguments.index("--progress-interval") + 1], "7")
-        self.assertEqual(arguments[arguments.index("--equivalent-limit") + 1], "20")
+        self.assertTrue(request.overwrite)
+        self.assertEqual(request.progress_interval_seconds, 7)
+        self.assertIsNotNone(request.diagnostic_config)
+        assert request.diagnostic_config is not None
+        self.assertEqual(request.diagnostic_config.max_alternatives, 20)
         self.assertEqual(
-            arguments[arguments.index("--equivalent-time-limit") + 1],
-            "12.5",
+            request.diagnostic_config.max_time_seconds,
+            12.5,
         )
         self.assertEqual(
-            arguments[arguments.index("--candidate-export-count") + 1],
-            "2",
+            request.candidate_export_config.max_candidates,
+            2,
         )
 
     def test_primary_script_reports_invalid_config_without_traceback(self) -> None:
@@ -454,23 +460,26 @@ class ScheduleRunnerTests(unittest.TestCase):
 
             stdout = StringIO()
 
-            def fake_run(*_args, **kwargs):
-                config = kwargs["equivalent_solution_diagnostic_config"]
+            def fake_run(request, callbacks):
+                config = request.diagnostic_config
+                assert config is not None
                 self.assertIsNone(config.max_time_seconds)
-                kwargs["progress"](
+                assert callbacks.progress is not None
+                assert callbacks.diagnostic_progress is not None
+                callbacks.progress(
                     "完成：OPTIMAL + validation PASS\n"
                     "  CP-SAT 最佳化：1.0 秒\n"
                     "[排班耗時] 完整排班時間（從讀檔到正式輸出）："
                     "2 秒（約 0 分 2 秒）\n"
                     "  輸出檔案：output/result.json"
                 )
-                kwargs["diagnostic_progress"](
+                callbacks.diagnostic_progress(
                     "開始搜尋同品質候選班表"
                 )
                 return result
 
             with patch(
-                "clinic_shift_scheduler.cli.run_schedule_file",
+                "clinic_shift_scheduler.console_app.run_schedule_application",
                 side_effect=fake_run,
             ), redirect_stdout(stdout):
                 exit_code = main([str(input_path)])

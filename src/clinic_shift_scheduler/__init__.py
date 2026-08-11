@@ -13,6 +13,14 @@ from .app_config import (
     load_scheduler_config,
     parse_scheduler_config,
 )
+from .application import (
+    ScheduleApplicationCallbacks,
+    ScheduleApplicationError,
+    ScheduleApplicationFailureKind,
+    ScheduleApplicationRequest,
+    request_from_app_config,
+    run_schedule_application,
+)
 from .class_preferences import (
     CLASS_PREFERENCES,
     ClassPreferenceDefinition,
@@ -164,6 +172,10 @@ __all__ = [
     "ResultValidationStatus",
     "ScheduleCell",
     "ScheduleCellKind",
+    "ScheduleApplicationCallbacks",
+    "ScheduleApplicationError",
+    "ScheduleApplicationFailureKind",
+    "ScheduleApplicationRequest",
     "ScheduleInput",
     "SchedulerAppConfig",
     "ScheduleRunError",
@@ -189,6 +201,8 @@ __all__ = [
     "finalize_schedule_output",
     "recompute_schedule_metrics",
     "run_prechecks",
+    "request_from_app_config",
+    "run_schedule_application",
     "run_schedule_file",
     "load_scheduler_config",
     "parse_scheduler_config",

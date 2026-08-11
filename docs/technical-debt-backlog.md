@@ -11,18 +11,6 @@
 
 ## 前端開發前置項目
 
-### 建立共用 application service
-
-目前 `src/run_scheduler.py` 會把已解析的 config 重新轉成 CLI arguments，再交由 argparse 與 runner 執行；`run_schedule_file()` 也同時負責讀檔、展開、驗證、precheck、求解、輸出、計時、候選處理與目錄管理。
-
-預計處理：
-
-- 建立 CLI、未來 GUI 與封裝入口共同使用的 application service。
-- 讓 CLI 與 GUI 都只是 adapter，不互相呼叫。
-- 消除 runner 與 solver 重複執行 precheck 的情況。
-- 將執行要求、成功結果與失敗結果改成明確型別。
-- 保留目前手動編輯 JSON／config 並執行的方式。
-
 ### 建立正式的使用者輸入模型與讀寫邊界
 
 目前使用者維護的 `weekly-v1` 由 `authoring.py` 直接操作原始 mapping，缺少獨立的 typed model、JSON Schema 與穩定 serializer；現有 Schema 只描述展開後的 canonical v1。
@@ -173,9 +161,8 @@ TARGET 絕對偏差目前包含針對 OR-Tools 9.12 `AddAbsEquality` 的已知�
 
 開始製作實際畫面前，至少應完成：
 
-1. 共用 application service。
-2. weekly input／config 的正式模型、Schema 與原子讀寫器。
-3. 結構化 validation、precheck、執行錯誤與 progress events。
-4. 輕量 package import 邊界，避免設定畫面啟動時強制載入 solver 與 exporters。
+1. weekly input／config 的正式模型、Schema 與原子讀寫器。
+2. 結構化 validation、precheck、執行錯誤與 progress events。
+3. 輕量 package import 邊界，避免設定畫面啟動時強制載入 solver 與 exporters。
 
 完成以上項目後，前端可直接維護使用者輸入 JSON 與 `config.json`，並呼叫同一套正式排班流程；原本手動編輯 JSON／config 的方式繼續保留。

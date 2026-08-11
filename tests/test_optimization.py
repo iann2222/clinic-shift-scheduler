@@ -21,6 +21,7 @@ from clinic_shift_scheduler import (
     PreferenceRank,
     ResultValidationStatus,
     recompute_schedule_metrics,
+    run_prechecks,
     solve_lexicographic,
     validate_and_normalize,
     validate_schedule_result,
@@ -131,6 +132,31 @@ def stage(result, name: OptimizationStage):
 
 
 class LexicographicOptimizationTests(unittest.TestCase):
+    def test_supplied_precheck_is_reused_without_running_it_again(self) -> None:
+        data = validate_and_normalize(
+            one_day_input(
+                [
+                    full_time(
+                        "A1",
+                        full_time_class="A",
+                        shift_mode="EXACT",
+                        required=1,
+                    )
+                ],
+                ("morning",),
+            )
+        )
+        precheck = run_prechecks(data)
+
+        with patch.object(
+            optimization,
+            "run_prechecks",
+            side_effect=AssertionError("precheck must not run twice"),
+        ):
+            result = solve_lexicographic(data, precheck_result=precheck)
+
+        self.assertTrue(result.is_feasible)
+
     def test_target_uses_symmetric_absolute_deviation(self) -> None:
         cases = (
             (3, ("morning",), 1, 2),

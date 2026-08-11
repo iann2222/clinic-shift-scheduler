@@ -1453,11 +1453,13 @@ def _discover_preference_benchmarks(
 def solve_lexicographic(
     data: NormalizedScheduleInput,
     config: LexicographicSolverConfig | None = None,
+    *,
+    precheck_result: PrecheckResult | None = None,
 ) -> LexicographicResult:
     """Solve revised class-specific preferences with fair normalized regrets."""
 
     config = config or LexicographicSolverConfig()
-    precheck = run_prechecks(data)
+    precheck = precheck_result or run_prechecks(data)
     if precheck.status is PrecheckStatus.PRECHECK_INFEASIBLE:
         return _empty_result(FeasibilityStatus.PRECHECK_INFEASIBLE, precheck)
 
