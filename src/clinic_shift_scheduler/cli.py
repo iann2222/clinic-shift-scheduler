@@ -144,7 +144,14 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _seconds(value: float) -> str:
-    return f"{value:.3f} 秒"
+    number = f"{value:.1f}".rstrip("0").rstrip(".")
+    return f"{number} 秒"
+
+
+def _seconds_with_minutes(value: float) -> str:
+    rounded_total_seconds = int(value + 0.5)
+    minutes, remaining_seconds = divmod(rounded_total_seconds, 60)
+    return f"{_seconds(value)}（約 {minutes} 分 {remaining_seconds} 秒）"
 
 
 def _equivalent_diagnostic_message(
@@ -176,7 +183,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         parser.error("候選輸出份數不可超過候選搜尋上限")
     command_started = perf_counter()
     schedule_progress = _ConsoleProgressPrinter("[排班]")
-    diagnostic_progress = _ConsoleProgressPrinter("[候選診斷]")
+    diagnostic_progress = _ConsoleProgressPrinter("[候選處理]")
     try:
         diagnostic_config = (
             None
@@ -215,24 +222,27 @@ def main(argv: Sequence[str] | None = None) -> int:
     diagnostic_progress.finish()
     if result.equivalent_solution_diagnostic is not None:
         print(
-            "[候選診斷] 診斷時間："
+            "[候選處理] 診斷時間："
             f"{_seconds(result.equivalent_solution_diagnostic_seconds)}"
         )
         print(
-            "[候選診斷] 結果："
+            "[候選處理] 結果："
             + _equivalent_diagnostic_message(
                 result.equivalent_solution_diagnostic
             )
         )
     if result.candidate_exports:
         print(
-            "[候選診斷] 已輸出 "
+            "[候選處理] 已輸出 "
             f"{len(result.candidate_exports)} 份候選班表至："
             f"{result.candidate_output_directory}"
         )
         print(
-            "[候選診斷] 候選輸出時間："
+            "[候選處理] 候選輸出時間："
             f"{_seconds(result.candidate_export_seconds)}"
         )
-    print(f"[執行] 含候選診斷總時間：{_seconds(result.total_execution_seconds)}")
+    print(
+        "[執行] 總耗時（含完整排班與候選處理）："
+        f"{_seconds_with_minutes(result.total_execution_seconds)}"
+    )
     return 0

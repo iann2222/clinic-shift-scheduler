@@ -45,10 +45,10 @@ class ScheduleRunnerTests(unittest.TestCase):
         self.assertNotIn("\n", heartbeat_output)
         self.assertEqual(heartbeat_output.count("\r"), 2)
 
-        printer("嚴格分階段最佳化完成：共耗時 20.123 秒")
+        printer("嚴格分階段最佳化完成：共耗時 20.1 秒")
         final_output = stream.getvalue()
         self.assertIn("\r", final_output)
-        self.assertTrue(final_output.endswith("20.123 秒\n"))
+        self.assertTrue(final_output.endswith("20.1 秒\n"))
 
     def test_noninteractive_console_keeps_heartbeat_lines(self) -> None:
         stream = StringIO()
@@ -66,7 +66,7 @@ class ScheduleRunnerTests(unittest.TestCase):
                 return True
 
         stream = InteractiveBuffer()
-        printer = cli_module._ConsoleProgressPrinter("[候選診斷]", stream)
+        printer = cli_module._ConsoleProgressPrinter("[候選處理]", stream)
 
         printer("已找到 1 份同品質候選班表")
         printer("已找到 2 份同品質候選班表")
@@ -76,7 +76,7 @@ class ScheduleRunnerTests(unittest.TestCase):
 
     def test_noninteractive_console_keeps_candidate_count_lines(self) -> None:
         stream = StringIO()
-        printer = cli_module._ConsoleProgressPrinter("[候選診斷]", stream)
+        printer = cli_module._ConsoleProgressPrinter("[候選處理]", stream)
 
         printer("已找到 1 份同品質候選班表")
         printer("已找到 2 份同品質候選班表")
@@ -101,6 +101,16 @@ class ScheduleRunnerTests(unittest.TestCase):
         self.assertGreaterEqual(elapsed, 0.03)
         self.assertTrue(any("進行中" in message for message in messages))
         self.assertIn("最佳化完成", messages[-1])
+
+    def test_total_elapsed_format_includes_minutes_without_sixty_seconds(self) -> None:
+        self.assertEqual(
+            cli_module._seconds_with_minutes(185.34),
+            "185.3 秒（約 3 分 5 秒）",
+        )
+        self.assertEqual(
+            runner_module._seconds_with_minutes(59.96),
+            "60 秒（約 1 分 0 秒）",
+        )
 
     def test_default_diagnostic_time_is_one_fifth_of_optimization(self) -> None:
         automatic = runner_module._resolve_diagnostic_config(
@@ -285,6 +295,26 @@ class ScheduleRunnerTests(unittest.TestCase):
                 )
             )
             self.assertTrue(any("輸出檔案" in message for message in messages))
+            combined_messages = "\n".join(messages)
+            self.assertIn(
+                "輸出正式檔案：JSON 保存完整結果，Excel 供查看與使用，"
+                "PDF 由 Excel 月班表產生",
+                combined_messages,
+            )
+            self.assertNotIn("輸出正式 JSON", combined_messages)
+            self.assertNotIn("輸出正式 Excel", combined_messages)
+            self.assertNotIn("由 Excel 月班表產生 PDF", combined_messages)
+            self.assertIn(
+                "輸出檔案（含 JSON、Excel、PDF）：",
+                combined_messages,
+            )
+            self.assertIn(
+                "[排班耗時] 完整排班時間（從讀檔到正式輸出）：",
+                combined_messages,
+            )
+            self.assertNotIn("  正式 JSON：", combined_messages)
+            self.assertNotIn("  正式 Excel：", combined_messages)
+            self.assertNotIn("  月班表 PDF：", combined_messages)
             self.assertTrue(
                 any(str(result.json_path) in message for message in messages)
             )
@@ -403,8 +433,9 @@ class ScheduleRunnerTests(unittest.TestCase):
                 self.assertIsNone(config.max_time_seconds)
                 kwargs["progress"](
                     "完成：OPTIMAL + validation PASS\n"
-                    "  CP-SAT 最佳化：1.000 秒\n"
-                    "  從讀檔到正式輸出：2.000 秒\n"
+                    "  CP-SAT 最佳化：1.0 秒\n"
+                    "[排班耗時] 完整排班時間（從讀檔到正式輸出）："
+                    "2 秒（約 0 分 2 秒）\n"
                     "  輸出檔案：output/result.json"
                 )
                 kwargs["diagnostic_progress"](
@@ -422,8 +453,12 @@ class ScheduleRunnerTests(unittest.TestCase):
             self.assertIn("完成：OPTIMAL + validation PASS", printed)
             self.assertIn("CP-SAT 最佳化", printed)
             self.assertIn("從讀檔到正式輸出", printed)
-            self.assertIn("[候選診斷] 開始搜尋", printed)
+            self.assertIn("[候選處理] 開始搜尋", printed)
             self.assertNotIn("[排班] 開始搜尋", printed)
+            self.assertIn(
+                "[執行] 總耗時（含完整排班與候選處理）：",
+                printed,
+            )
 
 
 if __name__ == "__main__":

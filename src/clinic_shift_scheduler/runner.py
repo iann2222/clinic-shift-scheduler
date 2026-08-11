@@ -107,6 +107,17 @@ def _notify(callback: ProgressCallback | None, message: str) -> None:
         callback(message)
 
 
+def _seconds(value: float) -> str:
+    number = f"{value:.1f}".rstrip("0").rstrip(".")
+    return f"{number} 秒"
+
+
+def _seconds_with_minutes(value: float) -> str:
+    rounded_total_seconds = int(value + 0.5)
+    minutes, remaining_seconds = divmod(rounded_total_seconds, 60)
+    return f"{_seconds(value)}（約 {minutes} 分 {remaining_seconds} 秒）"
+
+
 def _resolve_diagnostic_config(
     config: EquivalentSolutionDiagnosticConfig,
     optimization_seconds: float,
@@ -163,7 +174,7 @@ def _run_with_elapsed_heartbeat(
     elapsed = perf_counter() - started
     _notify(
         progress,
-        f"嚴格分階段最佳化完成：共耗時 {elapsed:.3f} 秒",
+        f"嚴格分階段最佳化完成：共耗時 {_seconds(elapsed)}",
     )
     return result, elapsed
 
@@ -402,7 +413,11 @@ def run_schedule_file(
             f"validation={validation}"
         )
 
-    _notify(progress, "輸出正式 JSON")
+    _notify(
+        progress,
+        "輸出正式檔案：JSON 保存完整結果，Excel 供查看與使用，"
+        "PDF 由 Excel 月班表產生",
+    )
     step_started = perf_counter()
     json_path = export_result_json(
         data,
@@ -412,7 +427,6 @@ def run_schedule_file(
     )
     json_export_seconds = perf_counter() - step_started
 
-    _notify(progress, "輸出正式 Excel")
     step_started = perf_counter()
     excel_path = export_result_excel(
         data,
@@ -422,7 +436,6 @@ def run_schedule_file(
     )
     excel_export_seconds = perf_counter() - step_started
 
-    _notify(progress, "由 Excel 月班表產生 PDF")
     step_started = perf_counter()
     pdf_path = export_schedule_pdf_from_excel(
         excel_path,
@@ -431,27 +444,34 @@ def run_schedule_file(
     pdf_export_seconds = perf_counter() - step_started
 
     formal_output_seconds = perf_counter() - started
+    file_export_seconds = (
+        json_export_seconds + excel_export_seconds + pdf_export_seconds
+    )
     _notify(
         progress,
         "\n".join(
             (
                 "完成：OPTIMAL + validation PASS",
                 "執行時間紀錄：",
-                f"  輸入讀取：{input_loading_seconds:.3f} 秒",
+                f"  輸入讀取：{_seconds(input_loading_seconds)}",
                 (
                     "  驗證與正規化："
-                    f"{validation_normalization_seconds:.3f} 秒"
+                    f"{_seconds(validation_normalization_seconds)}"
                 ),
-                f"  前置可行性檢查：{precheck_seconds:.3f} 秒",
-                f"  CP-SAT 最佳化：{optimization_seconds:.3f} 秒",
+                f"  前置可行性檢查：{_seconds(precheck_seconds)}",
+                f"  CP-SAT 最佳化：{_seconds(optimization_seconds)}",
                 (
                     "  獨立驗證與結果建立："
-                    f"{result_validation_and_build_seconds:.3f} 秒"
+                    f"{_seconds(result_validation_and_build_seconds)}"
                 ),
-                f"  正式 JSON：{json_export_seconds:.3f} 秒",
-                f"  正式 Excel：{excel_export_seconds:.3f} 秒",
-                f"  月班表 PDF：{pdf_export_seconds:.3f} 秒",
-                f"  從讀檔到正式輸出：{formal_output_seconds:.3f} 秒",
+                (
+                    "  輸出檔案（含 JSON、Excel、PDF）："
+                    f"{_seconds(file_export_seconds)}"
+                ),
+                (
+                    "[排班耗時] 完整排班時間（從讀檔到正式輸出）："
+                    f"{_seconds_with_minutes(formal_output_seconds)}"
+                ),
                 "輸出檔案：",
                 f"  中間輸入：{intermediate_input_path}",
                 f"  {json_path}",
@@ -476,8 +496,8 @@ def run_schedule_file(
         candidate_progress = diagnostic_progress or progress
         _notify(
             candidate_progress,
-            "開始搜尋同品質候選班表；"
-            f"時間上限 {resolved_diagnostic_config.max_time_seconds:.3f} 秒，"
+            "開始搜尋同品質候選班表"
+            f"（時間上限 {_seconds(resolved_diagnostic_config.max_time_seconds)}），"
             "按 Ctrl+C 可只中止此診斷",
         )
         step_started = perf_counter()
