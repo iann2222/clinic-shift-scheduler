@@ -61,6 +61,22 @@ conda env create --file environment.yml
 conda activate clinic_shift_scheduler
 ```
 
+### 建立 Windows 一般使用者發布包
+
+Windows 64 位元 portable 發布設定集中在
+[`packaging/config_packaging.json`](packaging/config_packaging.json)，包含發布版本、
+PyInstaller 版本、匿名範例、Noto Sans TC 固定來源與建置／驗收開關。啟用專案
+Conda environment 後執行：
+
+```powershell
+.\packaging\windows\build.ps1
+```
+
+建置器會執行測試、產生 PyInstaller `onedir`、使用匿名月份完成封裝後 smoke test，
+並在被 Git 忽略的 `release/版本名稱/` 建立 ZIP、SHA-256 與 build manifest；
+不另外保留已解壓的 onedir。完整維護方式請見
+[`packaging/windows/README.md`](packaging/windows/README.md)。
+
 後續開發或執行前先啟用環境：
 
 ```powershell

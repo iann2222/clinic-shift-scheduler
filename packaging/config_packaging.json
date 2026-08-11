@@ -1,0 +1,39 @@
+{
+  "config_version": "1",
+  "application": {
+    "name": "ClinicShiftScheduler",
+    "display_name": "診所排班系統",
+    "version": "0.1.0",
+    "target": "win-x64",
+    "entry_point": "src/run_scheduler.py",
+    "console": true
+  },
+  "build": {
+    "pyinstaller_version": "6.21.0",
+    "run_tests": true,
+    "run_smoke_test": true,
+    "smoke_test_timeout_seconds": 3600,
+    "work_directory": "build/pyinstaller",
+    "pyinstaller_dist_directory": "build/pyinstaller-dist",
+    "asset_directory": "build/packaging-assets",
+    "release_staging_directory": "build/release-staging",
+    "release_directory": "release"
+  },
+  "release_content": {
+    "config_source": "config.json",
+    "anonymous_input_source": "input/匿名範本/排班輸入_匿名_2026-08.json",
+    "sample_input_filename": "排班輸入_2026-08.json",
+    "readme_source": "packaging/windows/resources/README.txt",
+    "third_party_notices_source": "packaging/windows/resources/THIRD_PARTY_NOTICES.txt"
+  },
+  "font": {
+    "family": "Noto Sans TC",
+    "version": "2.004",
+    "source_url": "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/Sans/Variable/TTF/Subset/NotoSansTC-VF.ttf",
+    "source_sha256": "AC091CC8CD19E848202AFC8FE6D3809B4526C8FDBDB4BE82DA20C4F785949591",
+    "license_url": "https://raw.githubusercontent.com/notofonts/noto-cjk/Sans2.004/LICENSE",
+    "license_sha256": "6A73F9541C2DE74158C0E7CF6B0A58EF774F5A780BF191F2D7EC9CC53EFE2BF2",
+    "regular_weight": 400,
+    "bold_weight": 700
+  }
+}

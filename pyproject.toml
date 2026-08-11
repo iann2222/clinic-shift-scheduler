@@ -24,6 +24,10 @@ test = [
     "pypdf>=5,<7",
     "pytest>=8,<10",
 ]
+release = [
+    "fonttools>=4.59,<5",
+    "pyinstaller==6.21.0",
+]
 
 [tool.setuptools]
 package-dir = {"" = "src"}
@@ -33,7 +37,11 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-clinic_shift_scheduler = ["py.typed", "schemas/*.json"]
+clinic_shift_scheduler = [
+    "py.typed",
+    "schemas/*.json",
+    "resources/fonts/*.ttf",
+]
 
 [tool.pytest.ini_options]
 addopts = "-ra"

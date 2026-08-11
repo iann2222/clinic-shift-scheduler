@@ -3,13 +3,13 @@ CONFIG_FILENAME = "config.json"
 # Edit the root config.json and monthly input JSON for a normal scheduling run.
 
 import sys
-from pathlib import Path
 
 from clinic_shift_scheduler.app_config import load_scheduler_config
+from clinic_shift_scheduler.application_paths import application_root
 from clinic_shift_scheduler.cli import main as run_cli
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+PROJECT_ROOT = application_root(__file__)
 INPUT_DIRECTORY = PROJECT_ROOT / "input"
 OUTPUT_DIRECTORY = PROJECT_ROOT / "output"
 INTERMEDIATE_DIRECTORY = PROJECT_ROOT / "runtime" / "expanded-input"

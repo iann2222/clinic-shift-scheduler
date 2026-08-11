@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from datetime import date, datetime
+from importlib.resources import as_file, files
 from pathlib import Path
 from typing import Any
 
@@ -31,43 +32,86 @@ _PDF_SUMMARY_HEADER_OVERRIDES = {"週日出勤天數": "週日天數"}
 _CJK_FONT = "ClinicScheduleCJK"
 _CJK_FONT_BOLD = "ClinicScheduleCJKBold"
 _CJK_FONT_ENVIRONMENT_VARIABLE = "CLINIC_SCHEDULER_PDF_FONT"
-_CJK_FONT_CANDIDATES = (
-    Path("C:/Windows/Fonts/NotoSansTC-VF.ttf"),
-    Path("C:/Windows/Fonts/msjh.ttc"),
-    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
-    Path("/usr/share/fonts/truetype/noto/NotoSansTC-Regular.ttf"),
-    Path("/System/Library/Fonts/PingFang.ttc"),
+_CJK_BOLD_FONT_ENVIRONMENT_VARIABLE = "CLINIC_SCHEDULER_PDF_FONT_BOLD"
+_BUNDLED_FONT_PACKAGE = "clinic_shift_scheduler.resources.fonts"
+_BUNDLED_FONT_FILENAMES = (
+    "NotoSansTC-Regular.ttf",
+    "NotoSansTC-Bold.ttf",
 )
-_CJK_BOLD_FONT_CANDIDATES = (
-    Path("C:/Windows/Fonts/msjhbd.ttc"),
-    Path("C:/Windows/Fonts/NotoSansTC-VF.ttf"),
-    Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
-    Path("/usr/share/fonts/truetype/noto/NotoSansTC-Bold.ttf"),
-    Path("/System/Library/Fonts/PingFang.ttc"),
+_SYSTEM_CJK_FONT_PAIRS = (
+    # Windows 10/11 Traditional Chinese default and broad system fallbacks.
+    (Path("C:/Windows/Fonts/msjh.ttc"), Path("C:/Windows/Fonts/msjhbd.ttc")),
+    (Path("C:/Windows/Fonts/msyh.ttc"), Path("C:/Windows/Fonts/msyhbd.ttc")),
+    (Path("C:/Windows/Fonts/mingliu.ttc"), Path("C:/Windows/Fonts/mingliub.ttc")),
+    # Development fallbacks for non-Windows hosts; v1 releases remain Windows-only.
+    (
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
+        Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"),
+    ),
+    (
+        Path("/usr/share/fonts/truetype/noto/NotoSansTC-Regular.ttf"),
+        Path("/usr/share/fonts/truetype/noto/NotoSansTC-Bold.ttf"),
+    ),
+    (Path("/System/Library/Fonts/PingFang.ttc"),) * 2,
 )
+
+
+def _try_register_font_pair(regular: Path, bold: Path) -> bool:
+    if not regular.is_file() or not bold.is_file():
+        return False
+    try:
+        regular_font = TTFont(_CJK_FONT, str(regular))
+        bold_font = TTFont(_CJK_FONT_BOLD, str(bold))
+    except Exception:
+        return False
+    pdfmetrics.registerFont(regular_font)
+    pdfmetrics.registerFont(bold_font)
+    return True
+
+
+def _register_bundled_font_pair() -> bool:
+    try:
+        font_root = files(_BUNDLED_FONT_PACKAGE)
+        regular_resource = font_root.joinpath(_BUNDLED_FONT_FILENAMES[0])
+        bold_resource = font_root.joinpath(_BUNDLED_FONT_FILENAMES[1])
+        if not regular_resource.is_file() or not bold_resource.is_file():
+            return False
+        with as_file(regular_resource) as regular, as_file(bold_resource) as bold:
+            return _try_register_font_pair(regular, bold)
+    except (FileNotFoundError, ModuleNotFoundError, TypeError):
+        return False
 
 
 def _register_cjk_font() -> None:
-    configured = os.environ.get(_CJK_FONT_ENVIRONMENT_VARIABLE)
-    candidates = (
-        (Path(configured), *_CJK_FONT_CANDIDATES)
-        if configured
-        else _CJK_FONT_CANDIDATES
-    )
-    source = next((path for path in candidates if path.is_file()), None)
-    if source is None:
-        raise FormalExportError(
-            "PDF export requires an embeddable Traditional Chinese font; "
-            f"set {_CJK_FONT_ENVIRONMENT_VARIABLE} to a TTF/TTC font path"
+    registered = pdfmetrics.getRegisteredFontNames()
+    if _CJK_FONT in registered and _CJK_FONT_BOLD in registered:
+        return
+
+    configured_regular = os.environ.get(_CJK_FONT_ENVIRONMENT_VARIABLE)
+    if configured_regular:
+        configured_bold = os.environ.get(
+            _CJK_BOLD_FONT_ENVIRONMENT_VARIABLE,
+            configured_regular,
         )
-    if _CJK_FONT not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(TTFont(_CJK_FONT, str(source)))
-    bold_source = next(
-        (path for path in _CJK_BOLD_FONT_CANDIDATES if path.is_file()),
-        source,
+        if _try_register_font_pair(
+            Path(configured_regular),
+            Path(configured_bold),
+        ):
+            return
+
+    if _register_bundled_font_pair():
+        return
+
+    for regular, bold in _SYSTEM_CJK_FONT_PAIRS:
+        if _try_register_font_pair(regular, bold):
+            return
+
+    raise FormalExportError(
+        "PDF export requires a Traditional Chinese TTF/TTC font; "
+        "the bundled Noto Sans TC and system fallbacks were unavailable. "
+        f"Set {_CJK_FONT_ENVIRONMENT_VARIABLE} and optionally "
+        f"{_CJK_BOLD_FONT_ENVIRONMENT_VARIABLE} to valid font paths."
     )
-    if _CJK_FONT_BOLD not in pdfmetrics.getRegisteredFontNames():
-        pdfmetrics.registerFont(TTFont(_CJK_FONT_BOLD, str(bold_source)))
 
 
 def _key_value(sheet: Worksheet, label: str) -> Any | None:

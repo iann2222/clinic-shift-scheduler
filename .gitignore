@@ -9,6 +9,7 @@ htmlcov/
 venv/
 build/
 dist/
+/release/
 *.egg-info/
 /output/
 /runtime/
