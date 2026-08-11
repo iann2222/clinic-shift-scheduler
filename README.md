@@ -1,6 +1,6 @@
 # Clinic Shift Scheduler
 
-本 repository 依據 `診所排班系統.md` 實作診所排班系統。目前完成 v1 資料契約、輸入驗證、正規化、OR-Tools CP-SAT 硬性可行性模型、保守前置可行性檢查、完整嚴格字典序目標、獨立結果驗證器、媒介無關的正式班表與統計輸出模型，以及 JSON／Excel／PDF 正式輸出 adapter。
+本 repository 依據 [診所排班系統規格](docs/scheduling-specification.md) 實作診所排班系統。目前完成 v1 資料契約、輸入驗證、正規化、OR-Tools CP-SAT 硬性可行性模型、保守前置可行性檢查、完整嚴格字典序目標、獨立結果驗證器、媒介無關的正式班表與統計輸出模型，以及 JSON／Excel／PDF 正式輸出 adapter。
 
 ## 專案結構
 

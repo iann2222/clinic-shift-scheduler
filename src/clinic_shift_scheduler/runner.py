@@ -2,6 +2,18 @@
 
 from __future__ import annotations
 
+# VS Code's "Run Python File" executes the open file as a standalone script.
+# Redirect that convenience action to the single formal application entry point.
+if __name__ == "__main__" and not __package__:
+    import runpy
+    import sys
+    from pathlib import Path as _EntryPath
+
+    _src_directory = _EntryPath(__file__).resolve().parents[1]
+    sys.path.insert(0, str(_src_directory))
+    runpy.run_path(str(_src_directory / "run_scheduler.py"), run_name="__main__")
+    raise SystemExit(0)
+
 import json
 import os
 import shutil
