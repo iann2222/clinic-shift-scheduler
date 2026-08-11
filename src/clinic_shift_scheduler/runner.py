@@ -34,6 +34,7 @@ from .exporters import (
     export_schedule_pdf_from_excel,
 )
 from .feasibility import Assignment, FeasibilityStatus
+from .json_io import read_json_object
 from .models import NormalizedScheduleInput
 from .output import ExecutionTiming, FormalScheduleOutput, finalize_schedule_output
 from .precheck import PrecheckResult, run_prechecks
@@ -182,10 +183,7 @@ def _run_with_elapsed_heartbeat(
 
 
 def _load_payload(path: Path) -> Mapping[str, Any]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(payload, Mapping):
-        raise ValueError("input JSON root must be an object")
-    return payload
+    return read_json_object(path)
 
 
 def _write_intermediate_input(

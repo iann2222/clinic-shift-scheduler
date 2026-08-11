@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/clinic-shift-scheduler/schemas/weekly-v1",
+  "title": "Clinic Shift Scheduler Weekly Authoring Input v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "authoring_version",
+    "schema_version",
+    "period",
+    "periods",
+    "roles",
+    "weekly_demands",
+    "employees"
+  ],
+  "properties": {
+    "authoring_version": {"const": "weekly-v1"},
+    "schema_version": {"const": "v1"},
+    "period": {"$ref": "#/$defs/weeklyPeriod"},
+    "periods": {"$ref": "#/$defs/fixedPeriods"},
+    "roles": {"$ref": "#/$defs/stringList"},
+    "weekly_demands": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/weeklyDemand"}
+    },
+    "date_overrides": {
+      "type": "array",
+      "default": [],
+      "items": {"$ref": "#/$defs/dateOverride"}
+    },
+    "employees": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/employee"}
+    },
+    "leave_requests": {
+      "type": "array",
+      "default": [],
+      "items": {"$ref": "#/$defs/leaveRequest"}
+    },
+    "unavailable_slots": {
+      "type": "array",
+      "default": [],
+      "items": {"$ref": "#/$defs/personPeriod"}
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {"type": "string", "minLength": 1, "pattern": ".*\\S.*"},
+    "date": {"type": "string", "format": "date"},
+    "period": {"enum": ["morning", "afternoon", "evening"]},
+    "weekday": {
+      "enum": [
+        "monday", "tuesday", "wednesday", "thursday",
+        "friday", "saturday", "sunday"
+      ]
+    },
+    "fixedPeriods": {
+      "type": "array",
+      "prefixItems": [
+        {"const": "morning"},
+        {"const": "afternoon"},
+        {"const": "evening"}
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "stringList": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/nonEmptyString"}
+    },
+    "weeklyPeriod": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_date", "end_date"],
+      "properties": {
+        "start_date": {"$ref": "#/$defs/date"},
+        "end_date": {"$ref": "#/$defs/date"},
+        "holidays": {
+          "type": "array",
+          "default": [],
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/date"}
+        }
+      }
+    },
+    "staffing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["morning", "afternoon", "evening"],
+      "properties": {
+        "morning": {"$ref": "#/$defs/roleCounts"},
+        "afternoon": {"$ref": "#/$defs/roleCounts"},
+        "evening": {"$ref": "#/$defs/roleCounts"}
+      }
+    },
+    "roleCounts": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"type": "integer", "minimum": 0}
+    },
+    "weeklyDemand": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["weekdays", "is_open"],
+      "properties": {
+        "weekdays": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/weekday"}
+        },
+        "is_open": {"type": "boolean"},
+        "staffing": {"$ref": "#/$defs/staffing"}
+      },
+      "allOf": [{
+        "if": {"properties": {"is_open": {"const": true}}},
+        "then": {"required": ["staffing"]},
+        "else": {"not": {"required": ["staffing"]}}
+      }]
+    },
+    "dateOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["date", "is_open"],
+      "properties": {
+        "date": {"$ref": "#/$defs/date"},
+        "is_open": {"type": "boolean"},
+        "staffing": {"$ref": "#/$defs/staffing"}
+      },
+      "allOf": [{
+        "if": {"properties": {"is_open": {"const": true}}},
+        "then": {"required": ["staffing"]},
+        "else": {"not": {"required": ["staffing"]}}
+      }]
+    },
+    "availableSlot": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["date", "period"],
+      "properties": {
+        "date": {"$ref": "#/$defs/date"},
+        "period": {"$ref": "#/$defs/period"},
+        "roles": {"$ref": "#/$defs/stringList"}
+      }
+    },
+    "personPeriod": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["employee_id", "date", "period"],
+      "properties": {
+        "employee_id": {"$ref": "#/$defs/nonEmptyString"},
+        "date": {"$ref": "#/$defs/date"},
+        "period": {"$ref": "#/$defs/period"}
+      }
+    },
+    "leaveRequest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["employee_id", "date", "all_day"],
+      "properties": {
+        "employee_id": {"$ref": "#/$defs/nonEmptyString"},
+        "date": {"$ref": "#/$defs/date"},
+        "all_day": {"type": "boolean"},
+        "period": {"$ref": "#/$defs/period"},
+        "note": {"type": ["string", "null"]}
+      },
+      "allOf": [{
+        "if": {"properties": {"all_day": {"const": true}}},
+        "then": {"not": {"required": ["period"]}},
+        "else": {"required": ["period"]}
+      }]
+    },
+    "employee": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "employee_id", "name", "employment_type", "roles",
+        "fairness_group", "shift_mode"
+      ],
+      "properties": {
+        "employee_id": {"$ref": "#/$defs/nonEmptyString"},
+        "name": {"$ref": "#/$defs/nonEmptyString"},
+        "employment_type": {"enum": ["full_time", "part_time"]},
+        "full_time_class": {"enum": ["A", "B", null]},
+        "roles": {"$ref": "#/$defs/stringList"},
+        "fairness_group": {"$ref": "#/$defs/nonEmptyString"},
+        "shift_mode": {"enum": ["EXACT", "RANGE", "TARGET"]},
+        "required_shifts": {"type": "integer", "minimum": 0},
+        "target_shifts": {"type": "integer", "minimum": 0},
+        "min_shifts": {"type": "integer", "minimum": 0},
+        "max_shifts": {"type": "integer", "minimum": 0},
+        "available_slots": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/availableSlot"}
+        },
+        "notes": {"type": ["string", "null"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"employment_type": {"const": "full_time"}}},
+          "then": {"required": ["full_time_class"]},
+          "else": {
+            "properties": {
+              "full_time_class": {"type": "null"},
+              "shift_mode": {"enum": ["EXACT", "RANGE"]}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"shift_mode": {"const": "EXACT"}}},
+          "then": {
+            "required": ["required_shifts"],
+            "not": {"anyOf": [
+              {"required": ["target_shifts"]},
+              {"required": ["min_shifts"]},
+              {"required": ["max_shifts"]}
+            ]}
+          }
+        },
+        {
+          "if": {"properties": {"shift_mode": {"const": "RANGE"}}},
+          "then": {
+            "required": ["min_shifts", "max_shifts"],
+            "not": {"anyOf": [
+              {"required": ["required_shifts"]},
+              {"required": ["target_shifts"]}
+            ]}
+          }
+        },
+        {
+          "if": {"properties": {"shift_mode": {"const": "TARGET"}}},
+          "then": {
+            "required": ["target_shifts"],
+            "not": {"required": ["required_shifts"]}
+          }
+        }
+      ]
+    }
+  }
+}

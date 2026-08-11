@@ -5,7 +5,10 @@
 ## 專案結構
 
 - `src/clinic_shift_scheduler/models.py`：不可變的輸入與正規化型別。
-- `src/clinic_shift_scheduler/authoring.py`：將使用者維護的每週營業／需求範本展開成 canonical v1 逐日需求。
+- `src/clinic_shift_scheduler/authoring_models.py`：使用者維護的 weekly-v1 不可變 typed document。
+- `src/clinic_shift_scheduler/authoring.py`：weekly-v1 的驗證、讀寫與 canonical v1 逐日需求展開。
+- `src/clinic_shift_scheduler/input_contracts.py`：JSON Schema 與 runtime parser 共用的輕量欄位契約。
+- `src/clinic_shift_scheduler/json_io.py`：使用者 JSON 文件的 UTF-8 讀取與原子替換。
 - `src/clinic_shift_scheduler/schemas/`：版本化 JSON Schema。
 - `src/clinic_shift_scheduler/validation.py`：結構與語意驗證，失敗統一回報 `INPUT_INVALID`。
 - `src/clinic_shift_scheduler/normalization.py`：日期、休診、可用性、請假及需求的正規化。
@@ -24,6 +27,14 @@
 - `tests/`：synthetic fixtures 與單元測試。
 - `input/`：本機實際排班資料；直接放在此層的真名檔案由 Git 忽略，只有 `input/匿名範本/` 會納入版本控制並作為開發與整合驗證資料。
 - `runtime/expanded-input/`：由 weekly-v1 自動展開的逐日 canonical 輸入；每次排班會先清空再重建，整個 `runtime/` 不納入 Git。
+
+## 使用者輸入文件邊界
+
+weekly-v1 與 `config.json` 都有版本化 typed document、bundled JSON Schema、
+`from_dict()`／`to_dict()`、讀檔及原子寫入功能。weekly round-trip 會保留員工
+`notes`、請假 note、欄位是否明確宣告及原始排序；config round-trip 會保留所有
+`__...__` 說明與分隔欄位。前端應只透過這些文件模型維護 `input/` 與
+`config.json`，不得直接編輯 `runtime/expanded-input/` 的 solver 中間資料。
 
 `solve_lexicographic` 將 A 類「連續雙班、早晚雙班、單節日」與 B 類
 「避免單節日、連續雙班、三節班 fallback」視為不同偏好順位；B 類另有每人每個

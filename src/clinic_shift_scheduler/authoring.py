@@ -7,13 +7,40 @@ validation is unchanged.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping, Sequence, Set as AbstractSet
 from copy import deepcopy
 from datetime import date, timedelta
+from pathlib import Path
 from typing import Any
 
-from .enums import PERIODS_V1, WEEKDAY_BY_INDEX, Weekday
+from .authoring_models import (
+    AuthoringAvailableSlot,
+    AuthoringEmployee,
+    AuthoringLeaveRequest,
+    AuthoringUnavailableSlot,
+    DateOverrideRule,
+    StaffingPlan,
+    WeeklyAuthoringDocument,
+    WeeklyDemandRule,
+    WeeklyPeriod,
+)
+from .enums import (
+    PERIODS_V1,
+    WEEKDAY_BY_INDEX,
+    EmploymentType,
+    FullTimeClass,
+    Period,
+    ShiftMode,
+    Weekday,
+)
 from .errors import InputValidationError, ValidationIssue
+from .json_io import read_json_object, write_json_object_atomic
+from .input_contracts import (
+    DATE_OVERRIDE_FIELDS,
+    WEEKLY_DEMAND_FIELDS,
+    WEEKLY_PERIOD_FIELDS,
+    WEEKLY_TOP_LEVEL_FIELDS,
+)
 from .models import NormalizedScheduleInput
 
 
@@ -45,7 +72,11 @@ def _date(value: object, path: str) -> date:
         _invalid("invalid_date", path, "must be a valid ISO date (YYYY-MM-DD)")
 
 
-def _reject_unknown(value: Mapping[str, Any], allowed: set[str], path: str) -> None:
+def _reject_unknown(
+    value: Mapping[str, Any],
+    allowed: AbstractSet[str],
+    path: str,
+) -> None:
     unknown = sorted(set(value) - allowed)
     if unknown:
         _invalid(
@@ -91,8 +122,8 @@ def _parse_staffing(
     return parsed
 
 
-def expand_weekly_template(payload: Mapping[str, Any]) -> dict[str, Any]:
-    """Return a canonical v1 mapping with complete per-date demands."""
+def _expand_weekly_mapping(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate and expand a raw weekly mapping into canonical v1."""
 
     root = _mapping(payload, "$")
     if root.get("authoring_version") != WEEKLY_AUTHORING_VERSION:
@@ -107,9 +138,10 @@ def expand_weekly_template(payload: Mapping[str, Any]) -> dict[str, Any]:
             "$.demands",
             "weekly authoring input must not also provide canonical demands",
         )
+    _reject_unknown(root, WEEKLY_TOP_LEVEL_FIELDS, "$")
 
     period = _mapping(root.get("period"), "$.period")
-    _reject_unknown(period, {"start_date", "end_date", "holidays"}, "$.period")
+    _reject_unknown(period, WEEKLY_PERIOD_FIELDS, "$.period")
     start = _date(period.get("start_date"), "$.period.start_date")
     end = _date(period.get("end_date"), "$.period.end_date")
     if start > end:
@@ -129,7 +161,7 @@ def expand_weekly_template(payload: Mapping[str, Any]) -> dict[str, Any]:
     for index, raw in enumerate(templates):
         path = f"$.weekly_demands[{index}]"
         item = _mapping(raw, path)
-        _reject_unknown(item, {"weekdays", "is_open", "staffing"}, path)
+        _reject_unknown(item, WEEKLY_DEMAND_FIELDS, path)
         weekday_values = _sequence(item.get("weekdays"), f"{path}.weekdays")
         if not weekday_values:
             _invalid("empty_weekdays", f"{path}.weekdays", "must not be empty")
@@ -188,7 +220,7 @@ def expand_weekly_template(payload: Mapping[str, Any]) -> dict[str, Any]:
     for index, raw in enumerate(overrides_raw):
         path = f"$.date_overrides[{index}]"
         item = _mapping(raw, path)
-        _reject_unknown(item, {"date", "is_open", "staffing"}, path)
+        _reject_unknown(item, DATE_OVERRIDE_FIELDS, path)
         day = _date(item.get("date"), f"{path}.date")
         if not start <= day <= end:
             _invalid("date_out_of_range", f"{path}.date", "must be inside the period")
@@ -259,6 +291,158 @@ def expand_weekly_template(payload: Mapping[str, Any]) -> dict[str, Any]:
     }
     canonical["demands"] = demands
     return canonical
+
+
+def _document_from_validated_mapping(
+    payload: Mapping[str, Any],
+) -> WeeklyAuthoringDocument:
+    """Build immutable authoring models after complete validation succeeds."""
+
+    roles = tuple(payload["roles"])
+
+    def staffing(value: Mapping[str, Any] | None) -> StaffingPlan | None:
+        return None if value is None else StaffingPlan.from_dict(value, roles)
+
+    period = payload["period"]
+    weekly_demands = tuple(
+        WeeklyDemandRule(
+            weekdays=tuple(Weekday(item) for item in raw["weekdays"]),
+            is_open=raw["is_open"],
+            staffing=staffing(raw.get("staffing")),
+        )
+        for raw in payload["weekly_demands"]
+    )
+    overrides = tuple(
+        DateOverrideRule(
+            date=date.fromisoformat(raw["date"]),
+            is_open=raw["is_open"],
+            staffing=staffing(raw.get("staffing")),
+        )
+        for raw in payload.get("date_overrides", [])
+    )
+    employees: list[AuthoringEmployee] = []
+    for raw in payload["employees"]:
+        available = None
+        if "available_slots" in raw:
+            available = tuple(
+                AuthoringAvailableSlot(
+                    date=date.fromisoformat(slot["date"]),
+                    period=Period(slot["period"]),
+                    roles=(
+                        tuple(slot["roles"])
+                        if "roles" in slot
+                        else None
+                    ),
+                )
+                for slot in raw["available_slots"]
+            )
+        class_value = raw.get("full_time_class")
+        employees.append(
+            AuthoringEmployee(
+                employee_id=raw["employee_id"],
+                name=raw["name"],
+                employment_type=EmploymentType(raw["employment_type"]),
+                full_time_class=(
+                    None if class_value is None else FullTimeClass(class_value)
+                ),
+                full_time_class_declared="full_time_class" in raw,
+                roles=tuple(raw["roles"]),
+                fairness_group=raw["fairness_group"],
+                shift_mode=ShiftMode(raw["shift_mode"]),
+                required_shifts=raw.get("required_shifts"),
+                target_shifts=raw.get("target_shifts"),
+                min_shifts=raw.get("min_shifts"),
+                max_shifts=raw.get("max_shifts"),
+                available_slots=available,
+                notes=raw.get("notes"),
+                notes_declared="notes" in raw,
+            )
+        )
+    leaves = tuple(
+        AuthoringLeaveRequest(
+            employee_id=raw["employee_id"],
+            date=date.fromisoformat(raw["date"]),
+            all_day=raw["all_day"],
+            period=(Period(raw["period"]) if "period" in raw else None),
+            note=raw.get("note"),
+            note_declared="note" in raw,
+        )
+        for raw in payload.get("leave_requests", [])
+    )
+    unavailable = tuple(
+        AuthoringUnavailableSlot(
+            employee_id=raw["employee_id"],
+            date=date.fromisoformat(raw["date"]),
+            period=Period(raw["period"]),
+        )
+        for raw in payload.get("unavailable_slots", [])
+    )
+    return WeeklyAuthoringDocument(
+        authoring_version=payload["authoring_version"],
+        schema_version=payload["schema_version"],
+        period=WeeklyPeriod(
+            start_date=date.fromisoformat(period["start_date"]),
+            end_date=date.fromisoformat(period["end_date"]),
+            holidays=tuple(
+                date.fromisoformat(item) for item in period.get("holidays", [])
+            ),
+            holidays_declared="holidays" in period,
+        ),
+        periods=tuple(Period(item) for item in payload["periods"]),
+        roles=roles,
+        weekly_demands=weekly_demands,
+        date_overrides=overrides,
+        employees=tuple(employees),
+        leave_requests=leaves,
+        unavailable_slots=unavailable,
+        date_overrides_declared="date_overrides" in payload,
+        leave_requests_declared="leave_requests" in payload,
+        unavailable_slots_declared="unavailable_slots" in payload,
+    )
+
+
+def parse_weekly_authoring(
+    payload: Mapping[str, Any],
+) -> WeeklyAuthoringDocument:
+    """Validate one weekly-v1 mapping and return its typed document."""
+
+    canonical = _expand_weekly_mapping(payload)
+    from .validation import validate_and_normalize
+
+    validate_and_normalize(canonical)
+    return _document_from_validated_mapping(payload)
+
+
+def expand_weekly_template(
+    payload: Mapping[str, Any] | WeeklyAuthoringDocument,
+) -> dict[str, Any]:
+    """Return canonical v1 demands from a validated typed authoring document."""
+
+    document = (
+        payload
+        if isinstance(payload, WeeklyAuthoringDocument)
+        else parse_weekly_authoring(payload)
+    )
+    return _expand_weekly_mapping(document.to_dict())
+
+
+def load_weekly_authoring_document(
+    path: str | Path,
+) -> WeeklyAuthoringDocument:
+    """Read and validate a weekly-v1 user document."""
+
+    return parse_weekly_authoring(read_json_object(path))
+
+
+def write_weekly_authoring_document(
+    path: str | Path,
+    document: WeeklyAuthoringDocument,
+) -> Path:
+    """Atomically persist a validated weekly-v1 user document."""
+
+    # Re-validate edited/replaced dataclass instances before committing them.
+    validated = parse_weekly_authoring(document.to_dict())
+    return write_json_object_atomic(path, validated.to_dict())
 
 
 def validate_and_normalize_weekly(

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
 from datetime import date
-from typing import Any, TypeVar
+from typing import AbstractSet, Any, TypeVar
 
 from .enums import (
     PERIODS_V1,
@@ -16,6 +16,11 @@ from .enums import (
     Weekday,
 )
 from .errors import InputValidationError, ValidationIssue
+from .input_contracts import (
+    CANONICAL_PERIOD_FIELDS,
+    CANONICAL_TOP_LEVEL_FIELDS,
+    EMPLOYEE_FIELDS,
+)
 from .models import (
     AvailableSlot,
     Demand,
@@ -31,40 +36,6 @@ from .normalization import date_range, normalize
 
 E = TypeVar("E")
 
-_TOP_LEVEL_KEYS = {
-    "schema_version",
-    "period",
-    "periods",
-    "roles",
-    "demands",
-    "employees",
-    "leave_requests",
-    "unavailable_slots",
-}
-_PERIOD_KEYS = {
-    "start_date",
-    "end_date",
-    "closed_weekdays",
-    "closed_dates",
-    "holidays",
-}
-_EMPLOYEE_KEYS = {
-    "employee_id",
-    "name",
-    "employment_type",
-    "full_time_class",
-    "roles",
-    "fairness_group",
-    "shift_mode",
-    "required_shifts",
-    "target_shifts",
-    "min_shifts",
-    "max_shifts",
-    "available_slots",
-    "notes",
-}
-
-
 class _Issues:
     def __init__(self) -> None:
         self.items: list[ValidationIssue] = []
@@ -72,7 +43,12 @@ class _Issues:
     def add(self, code: str, path: str, message: str) -> None:
         self.items.append(ValidationIssue(code=code, path=path, message=message))
 
-    def unknown_keys(self, value: Mapping[str, Any], allowed: set[str], path: str) -> None:
+    def unknown_keys(
+        self,
+        value: Mapping[str, Any],
+        allowed: AbstractSet[str],
+        path: str,
+    ) -> None:
         for key in sorted(set(value) - allowed):
             self.add("unknown_field", f"{path}.{key}", "field is not allowed in schema v1")
 
@@ -174,7 +150,7 @@ def _parse_period(payload: object, issues: _Issues) -> PeriodConfig | None:
     value = _mapping(payload, "$.period", issues)
     if value is None:
         return None
-    issues.unknown_keys(value, _PERIOD_KEYS, "$.period")
+    issues.unknown_keys(value, CANONICAL_PERIOD_FIELDS, "$.period")
     start = _date(value.get("start_date"), "$.period.start_date", issues)
     end = _date(value.get("end_date"), "$.period.end_date", issues)
 
@@ -334,7 +310,7 @@ def _parse_employees(
         value = _mapping(raw, path, issues)
         if value is None:
             continue
-        issues.unknown_keys(value, _EMPLOYEE_KEYS, path)
+        issues.unknown_keys(value, EMPLOYEE_FIELDS, path)
         employee_id = _text(value.get("employee_id"), f"{path}.employee_id", issues)
         name = _text(value.get("name"), f"{path}.name", issues)
         employment_type = _enum(
@@ -580,7 +556,7 @@ def validate_and_normalize(payload: Mapping[str, Any]) -> NormalizedScheduleInpu
     if root is None:
         issues.raise_if_any()
         raise AssertionError("unreachable")
-    issues.unknown_keys(root, _TOP_LEVEL_KEYS, "$")
+    issues.unknown_keys(root, CANONICAL_TOP_LEVEL_FIELDS, "$")
 
     version = _text(root.get("schema_version"), "$.schema_version", issues)
     if version is not None and version != "v1":

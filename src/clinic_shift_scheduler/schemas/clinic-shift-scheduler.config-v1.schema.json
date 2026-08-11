@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.invalid/clinic-shift-scheduler/schemas/config-v1",
+  "title": "Clinic Shift Scheduler User Config v1",
+  "type": "object",
+  "additionalProperties": false,
+  "patternProperties": {"^__.*__$": {}},
+  "required": ["使用者設定", "預設設定"],
+  "properties": {
+    "使用者設定": {"$ref": "#/$defs/settings"},
+    "預設設定": {"$ref": "#/$defs/settings"}
+  },
+  "$defs": {
+    "settings": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^__.*__$": {}},
+      "required": ["輸入檔名"],
+      "properties": {
+        "設定版本": {"const": "1"},
+        "輸入檔名": {"type": "string", "pattern": "^[^/\\\\]+\\.json$"},
+        "覆寫既有結果": {"type": "boolean"},
+        "進度更新秒數": {"type": "number", "exclusiveMinimum": 0},
+        "候選診斷": {"$ref": "#/$defs/candidate"}
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^__.*__$": {}},
+      "properties": {
+        "啟用": {"type": "boolean"},
+        "搜尋上限": {"type": "integer", "minimum": 1},
+        "診斷時間上限": {"$ref": "#/$defs/diagnosticTime"},
+        "額外輸出候選班表份數上限": {"type": "integer", "minimum": 0},
+        "輸出格式": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string"}
+        }
+      }
+    },
+    "diagnosticTime": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^__.*__$": {}},
+      "properties": {
+        "模式": {"enum": ["比例", "定值"]},
+        "秒數": {"type": "number", "exclusiveMinimum": 0},
+        "排班時間比例": {"type": "number", "exclusiveMinimum": 0}
+      },
+      "oneOf": [
+        {
+          "properties": {"模式": {"const": "比例"}},
+          "not": {"required": ["秒數"]}
+        },
+        {
+          "properties": {"模式": {"const": "定值"}},
+          "required": ["模式", "秒數"],
+          "not": {"required": ["排班時間比例"]}
+        }
+      ]
+    }
+  }
+}

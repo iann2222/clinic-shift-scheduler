@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
-import json
+from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Mapping
+from typing import AbstractSet, Any, Mapping
+
+from .input_contracts import (
+    CONFIG_CANDIDATE_FIELDS,
+    CONFIG_DIAGNOSTIC_TIME_FIELDS,
+    CONFIG_ROOT_FIELDS,
+    CONFIG_SETTINGS_FIELDS,
+)
+from .json_io import read_json_object, write_json_object_atomic
 
 
 APP_CONFIG_VERSION = "1"
@@ -35,7 +43,7 @@ def _require_object(value: object, field: str) -> Mapping[str, Any]:
 
 def _reject_unknown_fields(
     payload: Mapping[str, Any],
-    allowed: set[str],
+    allowed: AbstractSet[str],
     field: str,
 ) -> None:
     unknown = sorted(
@@ -199,12 +207,67 @@ def scheduler_config_to_user_settings(
     }
 
 
+@dataclass(frozen=True, slots=True)
+class SchedulerConfigDocument:
+    """Typed user/default settings plus preserved ``__...__`` annotations."""
+
+    user_config: SchedulerAppConfig
+    default_config: SchedulerAppConfig
+    _template: Mapping[str, Any] = field(repr=False, compare=False)
+
+    @classmethod
+    def from_dict(
+        cls,
+        payload: Mapping[str, Any],
+    ) -> SchedulerConfigDocument:
+        """Validate both config sections before constructing a document."""
+
+        return parse_scheduler_config_document(payload)
+
+    def to_dict(self) -> dict[str, Any]:
+        template = deepcopy(dict(self._template))
+
+        def merge_annotations(
+            existing: object,
+            values: Mapping[str, Any],
+        ) -> dict[str, Any]:
+            source = existing if isinstance(existing, Mapping) else {}
+            result = {
+                key: deepcopy(value)
+                for key, value in source.items()
+                if key.startswith("__") and key.endswith("__")
+            }
+            for key, value in values.items():
+                prior = source.get(key)
+                result[key] = (
+                    merge_annotations(prior, value)
+                    if isinstance(value, Mapping)
+                    else deepcopy(value)
+                )
+            return result
+
+        root_annotations = {
+            key: deepcopy(value)
+            for key, value in template.items()
+            if key.startswith("__") and key.endswith("__")
+        }
+        root_annotations["使用者設定"] = merge_annotations(
+            template.get("使用者設定"),
+            scheduler_config_to_user_settings(self.user_config),
+        )
+        root_annotations["預設設定"] = merge_annotations(
+            template.get("預設設定"),
+            scheduler_config_to_user_settings(self.default_config),
+        )
+        return root_annotations
+
+
 def parse_scheduler_config(payload: Mapping[str, Any]) -> SchedulerAppConfig:
     """Validate and normalize a user-facing configuration object."""
 
     _reject_unknown_fields(
         payload,
-        {"使用者設定", "預設設定"},
+        CONFIG_ROOT_FIELDS,
         "config",
     )
     if "使用者設定" not in payload:
@@ -215,13 +278,7 @@ def parse_scheduler_config(payload: Mapping[str, Any]) -> SchedulerAppConfig:
     _require_object(payload["預設設定"], "預設設定")
     _reject_unknown_fields(
         settings,
-        {
-            "設定版本",
-            "輸入檔名",
-            "覆寫既有結果",
-            "進度更新秒數",
-            "候選診斷",
-        },
+        CONFIG_SETTINGS_FIELDS,
         "使用者設定",
     )
     if "輸入檔名" not in settings:
@@ -235,13 +292,7 @@ def parse_scheduler_config(payload: Mapping[str, Any]) -> SchedulerAppConfig:
     )
     _reject_unknown_fields(
         candidate_payload,
-        {
-            "啟用",
-            "搜尋上限",
-            "診斷時間上限",
-            "額外輸出候選班表份數上限",
-            "輸出格式",
-        },
+        CONFIG_CANDIDATE_FIELDS,
         "候選診斷",
     )
     time_payload = _require_object(
@@ -258,7 +309,7 @@ def parse_scheduler_config(payload: Mapping[str, Any]) -> SchedulerAppConfig:
     )
     _reject_unknown_fields(
         time_payload,
-        {"模式", "秒數", "排班時間比例"},
+        CONFIG_DIAGNOSTIC_TIME_FIELDS,
         "候選診斷.診斷時間上限",
     )
     time_mode = time_payload.get("模式", candidate_defaults.time.mode)
@@ -311,9 +362,45 @@ def parse_scheduler_config(payload: Mapping[str, Any]) -> SchedulerAppConfig:
     )
 
 
+def parse_scheduler_config_document(
+    payload: Mapping[str, Any],
+) -> SchedulerConfigDocument:
+    """Validate both effective and restore-default sections."""
+
+    user_config = parse_scheduler_config(payload)
+    default_payload = _require_object(payload["預設設定"], "預設設定")
+    default_document = {
+        "使用者設定": default_payload,
+        "預設設定": default_payload,
+    }
+    default_config = parse_scheduler_config(default_document)
+    return SchedulerConfigDocument(
+        user_config=user_config,
+        default_config=default_config,
+        _template=deepcopy(dict(payload)),
+    )
+
+
 def load_scheduler_config(path: str | Path) -> SchedulerAppConfig:
     """Read one UTF-8 JSON configuration file."""
 
-    source = Path(path)
-    payload = json.loads(source.read_text(encoding="utf-8"))
-    return parse_scheduler_config(_require_object(payload, "config"))
+    return load_scheduler_config_document(path).user_config
+
+
+def load_scheduler_config_document(
+    path: str | Path,
+) -> SchedulerConfigDocument:
+    """Read and validate a complete versioned config document."""
+
+    return parse_scheduler_config_document(read_json_object(path))
+
+
+def write_scheduler_config_document(
+    path: str | Path,
+    document: SchedulerConfigDocument,
+) -> Path:
+    """Atomically persist both config sections and preserved annotations."""
+
+    payload = document.to_dict()
+    validated = parse_scheduler_config_document(payload)
+    return write_json_object_atomic(path, validated.to_dict())

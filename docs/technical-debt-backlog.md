@@ -11,19 +11,6 @@
 
 ## 前端開發前置項目
 
-### 建立正式的使用者輸入模型與讀寫邊界
-
-目前使用者維護的 `weekly-v1` 由 `authoring.py` 直接操作原始 mapping，缺少獨立的 typed model、JSON Schema 與穩定 serializer；現有 Schema 只描述展開後的 canonical v1。
-
-預計處理：
-
-- 為 weekly authoring input 建立版本化資料模型與 Schema。
-- 為 `config.json` 建立版本化 Schema 或等價的正式欄位契約。
-- 提供 `from_dict()`、`to_dict()`、讀檔與原子寫檔功能。
-- round-trip 時保留 `notes` 等使用者資料。
-- 統一 Schema 與 runtime validation，避免兩套規則漂移。
-- 前端只編輯使用者輸入與 config，不直接編輯 `runtime/expanded-input`。
-
 ### 統一結構化錯誤與進度事件
 
 目前 canonical validation、weekly authoring、config、precheck、runner 與 CLI 使用不同的錯誤形式；進度回呼則是純文字，CLI 依文字前綴判斷是否覆寫同一行。
@@ -161,8 +148,7 @@ TARGET 絕對偏差目前包含針對 OR-Tools 9.12 `AddAbsEquality` 的已知�
 
 開始製作實際畫面前，至少應完成：
 
-1. weekly input／config 的正式模型、Schema 與原子讀寫器。
-2. 結構化 validation、precheck、執行錯誤與 progress events。
-3. 輕量 package import 邊界，避免設定畫面啟動時強制載入 solver 與 exporters。
+1. 結構化 validation、precheck、執行錯誤與 progress events。
+2. 輕量 package import 邊界，避免設定畫面啟動時強制載入 solver 與 exporters。
 
 完成以上項目後，前端可直接維護使用者輸入 JSON 與 `config.json`，並呼叫同一套正式排班流程；原本手動編輯 JSON／config 的方式繼續保留。
