@@ -19,6 +19,11 @@ dependencies = [
 clinic-shift-scheduler = "clinic_shift_scheduler.cli:main"
 
 [project.optional-dependencies]
+gui = [
+    # Qt Widgets is provided by the official PySide6 Essentials distribution.
+    # Keep the verified GUI baseline pinned for Windows packaging reproducibility.
+    "PySide6-Essentials==6.8.3",
+]
 test = [
     "pypdf>=5,<7",
     "pytest>=8,<10",
@@ -40,6 +45,7 @@ clinic_shift_scheduler = [
     "py.typed",
     "schemas/*.json",
     "resources/fonts/*.ttf",
+    "gui/styles/*.qss",
 ]
 
 [tool.pytest.ini_options]

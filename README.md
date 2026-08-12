@@ -98,6 +98,17 @@ Conda environment 後執行：
 conda activate clinic_shift_scheduler
 ```
 
+### 桌面輸入編輯器
+
+PySide6 桌面前端目前先建立獨立、低耦合的輸入編輯器骨架：
+
+```powershell
+python src/run_gui.py
+```
+
+第一個 GUI milestone 只負責輸入、驗證與儲存。完整資料頁尚未接上以前，正式排班
+仍使用下方既有入口；GUI 不會載入 OR-Tools、輸出器或更動排班規則。
+
 ### 完整執行一次排班
 
 日常使用只需準備兩份 JSON：`input/` 內的每月排班輸入，以及 repository root

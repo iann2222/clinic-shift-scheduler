@@ -33,6 +33,26 @@ if blocked:
         )
         self.assertEqual(completed.returncode, 0, completed.stderr + completed.stdout)
 
+    def test_gui_shell_does_not_load_solver_or_exporters(self) -> None:
+        script = """
+import sys
+from clinic_shift_scheduler.gui.main_window import MainWindow
+blocked = [name for name in ('ortools', 'openpyxl', 'reportlab') if name in sys.modules]
+if blocked:
+    raise SystemExit('unexpected GUI imports: ' + ', '.join(blocked))
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stderr + completed.stdout,
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

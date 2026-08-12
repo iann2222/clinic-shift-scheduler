@@ -1,0 +1,93 @@
+QWidget {
+    background-color: $BACKGROUND;
+    color: $TEXT;
+    font-family: "Segoe UI", "Microsoft JhengHei UI", "Microsoft JhengHei", sans-serif;
+    font-size: 10pt;
+}
+
+QLabel {
+    background-color: transparent;
+}
+
+QFrame#navigationSidebar {
+    background-color: $SIDEBAR;
+    border-right: 1px solid $BORDER;
+}
+
+QLabel#applicationTitle {
+    color: $PRIMARY;
+    font-size: 15pt;
+    font-weight: 600;
+}
+
+QLabel#pageTitle {
+    font-size: 17pt;
+    font-weight: 600;
+}
+
+QLabel#mutedText, QLabel#documentPath {
+    color: $TEXT_MUTED;
+}
+
+QFrame#documentHeader, QFrame#pageSurface {
+    background-color: $SURFACE;
+    border: 1px solid $BORDER;
+    border-radius: 5px;
+}
+
+QPushButton, QToolButton {
+    background-color: $SURFACE;
+    border: 1px solid $BORDER;
+    border-radius: 4px;
+    min-height: 28px;
+    padding: 3px 10px;
+}
+
+QPushButton:hover, QToolButton:hover {
+    border-color: $PRIMARY;
+}
+
+QPushButton:pressed, QToolButton:pressed {
+    background-color: $PRIMARY_SOFT;
+}
+
+QPushButton:disabled, QToolButton:disabled {
+    color: $TEXT_MUTED;
+    background-color: $BACKGROUND;
+}
+
+QListWidget#navigationList {
+    background: transparent;
+    border: none;
+    outline: none;
+}
+
+QListWidget#navigationList::item {
+    border-radius: 4px;
+    margin: 2px 0;
+    min-height: 38px;
+    padding: 4px 9px;
+}
+
+QListWidget#navigationList::item:selected {
+    background-color: $PRIMARY;
+    color: white;
+}
+
+QListWidget#navigationList::item:hover:!selected {
+    background-color: $PRIMARY_SOFT;
+}
+
+QLabel#documentStatusClean {
+    color: $SUCCESS;
+    font-weight: 600;
+}
+
+QLabel#documentStatusDirty {
+    color: $WARNING;
+    font-weight: 600;
+}
+
+QDialog, QTabWidget::pane {
+    background-color: $SURFACE;
+}
