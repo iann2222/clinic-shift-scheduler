@@ -18,7 +18,7 @@ font_directory = asset_directory / "fonts"
 
 datas = collect_data_files(
     "clinic_shift_scheduler",
-    includes=["schemas/*.json"],
+    includes=["schemas/*.json", "gui/styles/*.qss"],
 )
 datas += [
     (
@@ -31,7 +31,7 @@ datas += [
     ),
 ]
 
-a = Analysis(
+scheduler_analysis = Analysis(
     [str(repository_root / application["entry_point"])],
     pathex=[str(repository_root / "src")],
     binaries=[],
@@ -44,11 +44,11 @@ a = Analysis(
     noarchive=False,
     optimize=0,
 )
-pyz = PYZ(a.pure)
+scheduler_pyz = PYZ(scheduler_analysis.pure)
 
-exe = EXE(
-    pyz,
-    a.scripts,
+scheduler_exe = EXE(
+    scheduler_pyz,
+    scheduler_analysis.scripts,
     [],
     exclude_binaries=True,
     name=application["name"],
@@ -64,10 +64,46 @@ exe = EXE(
     entitlements_file=None,
     contents_directory="_internal",
 )
+editor = packaging_config["editor"]
+editor_analysis = Analysis(
+    [str(repository_root / editor["entry_point"])],
+    pathex=[str(repository_root / "src")],
+    binaries=[],
+    datas=datas,
+    hiddenimports=[],
+    hookspath=[str(repository_root / "packaging" / "windows" / "hooks")],
+    hooksconfig={},
+    runtime_hooks=[],
+    excludes=[],
+    noarchive=False,
+    optimize=0,
+)
+editor_pyz = PYZ(editor_analysis.pure)
+editor_exe = EXE(
+    editor_pyz,
+    editor_analysis.scripts,
+    [],
+    exclude_binaries=True,
+    name=editor["name"],
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=bool(editor["console"]),
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    contents_directory="_internal",
+)
 coll = COLLECT(
-    exe,
-    a.binaries,
-    a.datas,
+    scheduler_exe,
+    editor_exe,
+    scheduler_analysis.binaries,
+    scheduler_analysis.datas,
+    editor_analysis.binaries,
+    editor_analysis.datas,
     strip=False,
     upx=False,
     upx_exclude=[],

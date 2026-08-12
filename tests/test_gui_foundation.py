@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -179,6 +181,38 @@ class GuiFoundationTests(unittest.TestCase):
             0,
             completed.stderr + completed.stdout,
         )
+
+    def test_gui_smoke_round_trips_formal_input(self) -> None:
+        environment = os.environ.copy()
+        environment["QT_QPA_PLATFORM"] = "offscreen"
+        source = REPOSITORY_ROOT / "input/匿名範本/排班輸入_匿名_2026-08.json"
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "round-trip.json"
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    "src/run_gui.py",
+                    "--smoke-test",
+                    f"--smoke-input={source}",
+                    f"--smoke-output={output}",
+                ],
+                cwd=REPOSITORY_ROOT,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+
+            self.assertEqual(
+                completed.returncode,
+                0,
+                completed.stderr + completed.stdout,
+            )
+            self.assertEqual(
+                json.loads(output.read_text(encoding="utf-8")),
+                json.loads(source.read_text(encoding="utf-8")),
+            )
 
 
 if __name__ == "__main__":

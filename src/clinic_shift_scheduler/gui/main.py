@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
 import sys
+import traceback
 from collections.abc import Sequence
 from pathlib import Path
 
@@ -11,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 
 from ..application_paths import application_root
 from .main_window import MainWindow
+from .presenters import SchedulePresenter
 from .styles.loader import load_application_stylesheet
 
 
@@ -32,13 +35,71 @@ def create_application(argv: Sequence[str] | None = None) -> QApplication:
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(argv) if argv is not None else sys.argv
-    smoke_test = "--smoke-test" in arguments
-    qt_arguments = [item for item in arguments if item != "--smoke-test"]
+    smoke, qt_arguments = _parse_gui_arguments(arguments)
     app = create_application(qt_arguments)
     entry_file = Path(__file__).resolve().parents[2] / "run_gui.py"
     root = application_root(entry_file)
     window = MainWindow(input_directory=root / "input")
     window.show()
-    if smoke_test:
-        QTimer.singleShot(0, app.quit)
+    if smoke.enabled:
+        QTimer.singleShot(
+            0,
+            lambda: _run_smoke_test(app, window, smoke),
+        )
     return app.exec()
+
+
+class _SmokeArguments(argparse.Namespace):
+    enabled: bool
+    input: Path | None
+    output: Path | None
+
+
+def _parse_gui_arguments(
+    arguments: list[str],
+) -> tuple[_SmokeArguments, list[str]]:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("--smoke-test", action="store_true", dest="enabled")
+    parser.add_argument("--smoke-input", type=Path, dest="input")
+    parser.add_argument("--smoke-output", type=Path, dest="output")
+    smoke, remaining = parser.parse_known_args(arguments[1:], namespace=_SmokeArguments())
+    if (smoke.input is None) != (smoke.output is None):
+        parser.error("--smoke-input and --smoke-output must be provided together")
+    return smoke, [arguments[0], *remaining]
+
+
+def _run_smoke_test(
+    app: QApplication,
+    window: MainWindow,
+    smoke: _SmokeArguments,
+) -> None:
+    exit_code = 0
+    error_path = (
+        None
+        if smoke.output is None
+        else smoke.output.with_suffix(smoke.output.suffix + ".error.txt")
+    )
+    try:
+        if smoke.input is not None and smoke.output is not None:
+            smoke.output.parent.mkdir(parents=True, exist_ok=True)
+            smoke.output.unlink(missing_ok=True)
+            if error_path is not None:
+                error_path.unlink(missing_ok=True)
+            window.open_document_path(smoke.input)
+            assert window.session is not None
+            original_snapshot = SchedulePresenter.snapshot(window.session.draft)
+            validation = window.validate_document()
+            if validation is None or not validation.is_valid:
+                raise RuntimeError("GUI smoke input did not pass formal validation")
+            window.authoring_application.save(window.session, smoke.output)
+            reopened = window.authoring_application.open_document(smoke.output)
+            if SchedulePresenter.snapshot(reopened.draft) != original_snapshot:
+                raise RuntimeError("GUI smoke round-trip changed the input document")
+    except Exception:
+        exit_code = 1
+        if error_path is not None:
+            error_path.write_text(traceback.format_exc(), encoding="utf-8")
+    finally:
+        window._bind_session(None)
+        window.close()
+        app.exit(exit_code)

@@ -8,6 +8,12 @@
     "entry_point": "src/run_scheduler.py",
     "console": true
   },
+  "editor": {
+    "name": "ClinicShiftSchedulerEditor",
+    "display_name": "診所排班資料編輯器",
+    "entry_point": "src/run_gui.py",
+    "console": false
+  },
   "build": {
     "pyinstaller_version": "6.21.0",
     "run_tests": true,

@@ -4,6 +4,11 @@ Third-party notices
 This application includes third-party Python packages and native libraries.
 Their respective licenses continue to apply.
 
+PySide6 and Qt
+--------------
+The desktop input editor uses PySide6 and Qt under their applicable licenses.
+See the official Qt for Python distribution for complete license terms.
+
 Noto Sans TC
 ------------
 Noto Sans CJK is distributed under the SIL Open Font License, Version 1.1.

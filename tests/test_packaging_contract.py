@@ -31,6 +31,15 @@ class PackagingContractTests(unittest.TestCase):
             self.config["application"]["entry_point"],
             "src/run_scheduler.py",
         )
+        self.assertEqual(
+            self.config["editor"]["entry_point"],
+            "src/run_gui.py",
+        )
+        self.assertFalse(self.config["editor"]["console"])
+        self.assertNotEqual(
+            self.config["application"]["name"],
+            self.config["editor"]["name"],
+        )
 
     def test_pyinstaller_pin_matches_release_optional_dependency(self) -> None:
         project = tomllib.loads(
@@ -100,6 +109,15 @@ class PackagingContractTests(unittest.TestCase):
             "packaging/windows/resources/README.txt",
         ):
             self.assertTrue((REPOSITORY_ROOT / relative).is_file(), relative)
+
+    def test_pyinstaller_spec_collects_editor_and_gui_styles(self) -> None:
+        source = (
+            REPOSITORY_ROOT / "packaging/windows/ClinicShiftScheduler.spec"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn('packaging_config["editor"]', source)
+        self.assertIn('"gui/styles/*.qss"', source)
+        self.assertIn("editor_exe", source)
 
     def test_release_uses_separate_staging_and_versioned_delivery_directories(self) -> None:
         build = self.config["build"]

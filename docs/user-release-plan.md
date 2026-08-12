@@ -19,19 +19,20 @@ Web App 仍可作為未來多人共用、集中管理或跨裝置使用時的選
 
 ## 3. 預計的使用者操作方式
 
-1. 修改根目錄的 `config.json`。
-2. 將當月排班輸入 JSON 放入 `input/`。
+1. 執行 `ClinicShiftSchedulerEditor.exe` 建立、編輯、驗證並儲存 `input/` 內的月份 JSON；進階使用者仍可直接編輯 JSON。
+2. 確認根目錄 `config.json` 指向要執行的輸入檔。
 3. 執行 `ClinicShiftScheduler.exe`。
 4. 在主控台查看排班進度、耗時與錯誤訊息。
 5. 從 `output/` 取得正式 JSON、Excel、PDF，以及設定要求的候選班表。
 
-第一版不以開發 GUI 為必要條件，先維持目前簡單、可稽核的檔案式操作流程。
+輸入編輯器與排班執行檔共用正式文件契約，但保持獨立；編輯器不載入或呼叫 solver。
 
 ## 4. 預計的發布目錄
 
 ```text
 ClinicShiftScheduler/
 ├─ ClinicShiftScheduler.exe
+├─ ClinicShiftSchedulerEditor.exe
 ├─ config.json
 ├─ input/
 │  └─ 排班輸入_YYYY-MM.json
@@ -76,10 +77,11 @@ ClinicShiftScheduler/
 2. 使用受版本控制的 PyInstaller 設定建立 `onedir` 發布包。
 3. 確認必要的 OR-Tools DLL、Schema、繁中字型與預設文件均已包含。
 4. 在未安裝 Python、Conda 與開發工具的乾淨 Windows 電腦或虛擬機測試。
-5. 使用匿名月份範本完成一次完整流程，確認結果為 `OPTIMAL` 且 validation PASS。
-6. 重新開啟並人工抽查 JSON、Excel 與 PDF，確認中文、表格、統計及檔案路徑正常。
-7. 測試中文路徑、含空白路徑、既有輸出、錯誤輸入與中途停止等常見情境。
-8. 發布前記錄應用程式版本、Schema 版本、依賴版本與驗收結果，再產生 ZIP 或安裝程式。
+5. 使用輸入編輯器開啟匿名月份、正式驗證、另存並重開，確認 weekly JSON 語意等價。
+6. 使用匿名月份範本完成一次完整排班，確認結果為 `OPTIMAL` 且 validation PASS。
+7. 重新開啟並人工抽查 JSON、Excel 與 PDF，確認中文、表格、統計及檔案路徑正常。
+8. 測試中文路徑、含空白路徑、既有輸出、錯誤輸入與中途停止等常見情境。
+9. 發布前記錄應用程式版本、Schema 版本、依賴版本與驗收結果，再產生 ZIP 或安裝程式。
 
 ## 8. 預計支援平台
 

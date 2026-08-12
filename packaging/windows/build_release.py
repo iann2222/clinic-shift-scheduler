@@ -41,6 +41,15 @@ def _load_config() -> dict[str, Any]:
         raise PackagingError("application.version must be a semantic version")
     if application.get("target") != "win-x64":
         raise PackagingError("the current release layer only supports win-x64")
+    editor = payload.get("editor")
+    if not isinstance(editor, dict):
+        raise PackagingError("config_packaging.json.editor must be an object")
+    if editor.get("name") == application.get("name"):
+        raise PackagingError("editor.name must differ from application.name")
+    if editor.get("entry_point") != "src/run_gui.py" or editor.get("console") is not False:
+        raise PackagingError(
+            "editor must use src/run_gui.py with console disabled"
+        )
     project = tomllib.loads(
         (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
     )
@@ -233,6 +242,8 @@ def _stage_release(
 def _smoke_test(config: dict[str, Any], release_directory: Path) -> None:
     application_name = config["application"]["name"]
     executable = release_directory / f"{application_name}.exe"
+    editor_name = config["editor"]["name"]
+    editor_executable = release_directory / f"{editor_name}.exe"
     config_path = release_directory / "config.json"
     original_config = config_path.read_bytes()
     payload = json.loads(original_config.decode("utf-8"))
@@ -250,7 +261,119 @@ def _smoke_test(config: dict[str, Any], release_directory: Path) -> None:
     _remove_tree(runtime_directory)
     output_directory.mkdir()
     runtime_directory.mkdir()
-    print("[發布] 以匿名月份執行封裝後 smoke test")
+    smoke_environment = _isolated_smoke_environment()
+    try:
+        _gui_smoke_test(
+            config,
+            release_directory,
+            editor_executable,
+            runtime_directory,
+            smoke_environment,
+        )
+        _scheduler_smoke_test(
+            config,
+            release_directory,
+            executable,
+            output_directory,
+            smoke_environment,
+        )
+    finally:
+        config_path.write_bytes(original_config)
+
+    _remove_tree(output_directory)
+    _remove_tree(runtime_directory)
+    output_directory.mkdir()
+    runtime_directory.mkdir()
+
+
+def _gui_smoke_test(
+    config: dict[str, Any],
+    release_directory: Path,
+    editor_executable: Path,
+    runtime_directory: Path,
+    smoke_environment: dict[str, str],
+) -> None:
+    sample_input = (
+        release_directory
+        / "input"
+        / config["release_content"]["sample_input_filename"]
+    )
+    gui_smoke_directory = runtime_directory / "gui-smoke"
+    gui_smoke_directory.mkdir(parents=True)
+    gui_output = gui_smoke_directory / "round-trip.json"
+    print("[發布] 執行封裝後 GUI 輸入 round-trip smoke test")
+    completed = subprocess.run(
+        [
+            str(editor_executable),
+            "--smoke-test",
+            f"--smoke-input={sample_input}",
+            f"--smoke-output={gui_output}",
+        ],
+        cwd=release_directory,
+        check=False,
+        timeout=min(
+            180.0,
+            float(config["build"]["smoke_test_timeout_seconds"]),
+        ),
+        env=smoke_environment,
+    )
+    if completed.returncode:
+        error_path = gui_output.with_suffix(gui_output.suffix + ".error.txt")
+        details = (
+            error_path.read_text(encoding="utf-8")
+            if error_path.is_file()
+            else "no GUI error report was produced"
+        )
+        raise PackagingError(
+            "packaged GUI smoke test failed with exit code "
+            f"{completed.returncode}: {details}"
+        )
+    if not gui_output.is_file():
+        raise PackagingError("packaged GUI smoke test did not save its output")
+    if json.loads(gui_output.read_text(encoding="utf-8")) != json.loads(
+        sample_input.read_text(encoding="utf-8")
+    ):
+        raise PackagingError("packaged GUI smoke round-trip changed the input")
+    print("[發布] GUI smoke test：開啟／驗證／儲存／重開 PASS")
+
+
+def _scheduler_smoke_test(
+    config: dict[str, Any],
+    release_directory: Path,
+    executable: Path,
+    output_directory: Path,
+    smoke_environment: dict[str, str],
+) -> None:
+    print("[發布] 以匿名月份執行封裝後排班 smoke test")
+    completed = subprocess.run(
+        [str(executable)],
+        cwd=release_directory,
+        check=False,
+        timeout=float(config["build"]["smoke_test_timeout_seconds"]),
+        env=smoke_environment,
+    )
+    if completed.returncode:
+        raise PackagingError(
+            f"packaged smoke test failed with exit code {completed.returncode}"
+        )
+    json_paths = tuple(output_directory.glob("*.result-v1.json"))
+    excel_paths = tuple(output_directory.glob("*.result-v1.xlsx"))
+    pdf_paths = tuple(output_directory.glob("*.result-v1.pdf"))
+    if not (len(json_paths) == len(excel_paths) == len(pdf_paths) == 1):
+        raise PackagingError("smoke test did not create exactly one JSON/Excel/PDF")
+    result = json.loads(json_paths[0].read_text(encoding="utf-8"))
+    if result.get("status") != "OPTIMAL":
+        raise PackagingError("smoke test result status is not OPTIMAL")
+    if result.get("validation", {}).get("status") != "PASS":
+        raise PackagingError("smoke test validation status is not PASS")
+    if not zipfile.is_zipfile(excel_paths[0]):
+        raise PackagingError("smoke test Excel is not a valid XLSX archive")
+    if not pdf_paths[0].read_bytes().startswith(b"%PDF-"):
+        raise PackagingError("smoke test PDF does not have a PDF header")
+    print("[發布] 排班 smoke test：OPTIMAL + validation PASS")
+
+
+def _isolated_smoke_environment() -> dict[str, str]:
     smoke_environment = os.environ.copy()
     for name in (
         "CONDA_DEFAULT_ENV",
@@ -266,41 +389,7 @@ def _smoke_test(config: dict[str, Any], release_directory: Path) -> None:
         (str(windows_directory / "System32"), str(windows_directory))
     )
     smoke_environment["CLINIC_SCHEDULER_NO_PAUSE"] = "1"
-    try:
-        completed = subprocess.run(
-            [str(executable)],
-            cwd=release_directory,
-            check=False,
-            timeout=float(config["build"]["smoke_test_timeout_seconds"]),
-            env=smoke_environment,
-        )
-        if completed.returncode:
-            raise PackagingError(
-                f"packaged smoke test failed with exit code {completed.returncode}"
-            )
-
-        json_paths = tuple(output_directory.glob("*.result-v1.json"))
-        excel_paths = tuple(output_directory.glob("*.result-v1.xlsx"))
-        pdf_paths = tuple(output_directory.glob("*.result-v1.pdf"))
-        if not (len(json_paths) == len(excel_paths) == len(pdf_paths) == 1):
-            raise PackagingError("smoke test did not create exactly one JSON/Excel/PDF")
-        result = json.loads(json_paths[0].read_text(encoding="utf-8"))
-        if result.get("status") != "OPTIMAL":
-            raise PackagingError("smoke test result status is not OPTIMAL")
-        if result.get("validation", {}).get("status") != "PASS":
-            raise PackagingError("smoke test validation status is not PASS")
-        if not zipfile.is_zipfile(excel_paths[0]):
-            raise PackagingError("smoke test Excel is not a valid XLSX archive")
-        if not pdf_paths[0].read_bytes().startswith(b"%PDF-"):
-            raise PackagingError("smoke test PDF does not have a PDF header")
-    finally:
-        config_path.write_bytes(original_config)
-
-    _remove_tree(output_directory)
-    _remove_tree(runtime_directory)
-    output_directory.mkdir()
-    runtime_directory.mkdir()
-    print("[發布] smoke test：OPTIMAL + validation PASS")
+    return smoke_environment
 
 
 def _git_value(*arguments: str) -> str | None:
@@ -322,6 +411,7 @@ def _write_manifest(
 ) -> dict[str, Any]:
     manifest = {
         "application": config["application"],
+        "editor": config["editor"],
         "built_at": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "git_commit": _git_value("rev-parse", "HEAD"),
         "git_dirty": bool(_git_value("status", "--porcelain")),
@@ -332,6 +422,7 @@ def _write_manifest(
                 "ortools",
                 "openpyxl",
                 "reportlab",
+                "PySide6_Essentials",
                 "pyinstaller",
             )
         },
@@ -497,6 +588,9 @@ def main(arguments: list[str] | None = None) -> int:
     pyinstaller_output = pyinstaller_dist / application["name"]
     if not (pyinstaller_output / f"{application['name']}.exe").is_file():
         raise PackagingError("PyInstaller did not create the expected executable")
+    editor_name = config["editor"]["name"]
+    if not (pyinstaller_output / f"{editor_name}.exe").is_file():
+        raise PackagingError("PyInstaller did not create the expected GUI executable")
     artifact_stem = (
         f"{application['name']}-{application['version']}-{application['target']}"
     )
