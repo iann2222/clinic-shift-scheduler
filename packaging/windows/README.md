@@ -41,6 +41,10 @@ release/
 
 `build/`、`dist/`、`release/` 與 `runtime/packaging-cache/` 都是本機產物，不得提交 Git。發布包只納入匿名範例，不會複製根目錄 `input/` 或 `output/` 中的真實排班資料。
 
+根目錄 `licenses/` 是第三方聲明與授權全文的唯一來源。封裝前會驗證其
+`manifest.json` SHA-256 與本次 Noto 字型授權，通過後完整複製到發布包；依賴版本變更
+時使用 `python packaging/windows/sync_licenses.py` 更新並提交，不得直接修改發布產物。
+
 如需對既有 ZIP 重新執行 smoke test：
 
 ```powershell

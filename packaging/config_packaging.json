@@ -30,7 +30,7 @@
     "anonymous_input_source": "input/匿名範本/排班輸入_匿名_2026-08.json",
     "sample_input_filename": "排班輸入_2026-08.json",
     "readme_source": "packaging/windows/resources/README.txt",
-    "third_party_notices_source": "packaging/windows/resources/THIRD_PARTY_NOTICES.txt"
+    "licenses_source": "licenses"
   },
   "font": {
     "family": "Noto Sans TC",

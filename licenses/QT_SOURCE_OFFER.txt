@@ -1,0 +1,27 @@
+Qt / PySide6 corresponding source and replacement information
+==============================================================
+
+This release uses the Qt for Python Community Edition under LGPLv3:
+
+- PySide6 Essentials 6.8.3
+- Shiboken6 6.8.3
+- Qt 6.8.3 Core, GUI, Widgets, Network, and SVG modules
+
+Corresponding upstream source archives are available from Qt's official
+download service:
+
+PySide6 / Shiboken6 6.8.3 source:
+https://download.qt.io/official_releases/QtForPython/pyside6/PySide6-6.8.3-src/pyside-setup-everywhere-src-6.8.3.zip
+
+Qt 6.8.3 complete source:
+https://download.qt.io/official_releases/qt/6.8/6.8.3/single/qt-everywhere-src-6.8.3.zip
+
+The Windows onedir distribution keeps PySide6, Shiboken6, and Qt DLL/PYD
+files separate under _internal. Recipients may replace those LGPL-covered
+files with compatible modified builds for the purpose of debugging those
+modifications. The application license must not prohibit reverse engineering
+when required to exercise those LGPL rights.
+
+The application itself is independent code and is not offered as part of the
+Qt or PySide6 source archives. See GNU-LGPL-3.0.txt and GNU-GPL-3.0.txt for
+the controlling terms.

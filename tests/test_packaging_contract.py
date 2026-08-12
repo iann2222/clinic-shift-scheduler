@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import tomllib
 import unittest
 from pathlib import Path
@@ -107,6 +108,11 @@ class PackagingContractTests(unittest.TestCase):
             "packaging/windows/smoke-test.ps1",
             "packaging/windows/hooks/hook-ortools.py",
             "packaging/windows/resources/README.txt",
+            "packaging/windows/sync_licenses.py",
+            "licenses/THIRD_PARTY_NOTICES.txt",
+            "licenses/PYTHON_PACKAGE_LICENSES.txt",
+            "licenses/QT_SOURCE_OFFER.txt",
+            "licenses/manifest.json",
         ):
             self.assertTrue((REPOSITORY_ROOT / relative).is_file(), relative)
 
@@ -118,6 +124,34 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn('packaging_config["editor"]', source)
         self.assertIn('"gui/styles/*.qss"', source)
         self.assertIn("editor_exe", source)
+        self.assertIn('"pytest"', source)
+        self.assertIn("excludes=packaging_only_excludes", source)
+
+    def test_root_license_bundle_is_the_only_release_license_source(self) -> None:
+        content = self.config["release_content"]
+        self.assertEqual(content["licenses_source"], "licenses")
+        self.assertNotIn("third_party_notices_source", content)
+        self.assertFalse(
+            (
+                REPOSITORY_ROOT
+                / "packaging/windows/resources/THIRD_PARTY_NOTICES.txt"
+            ).exists()
+        )
+
+    def test_license_manifest_covers_every_committed_license_file(self) -> None:
+        directory = REPOSITORY_ROOT / "licenses"
+        manifest = json.loads(
+            (directory / "manifest.json").read_text(encoding="utf-8")
+        )
+        expected = {
+            path.name
+            for path in directory.iterdir()
+            if path.is_file() and path.name != "manifest.json"
+        }
+        self.assertEqual(set(manifest["files"]), expected)
+        for filename, expected_hash in manifest["files"].items():
+            actual = hashlib.sha256((directory / filename).read_bytes()).hexdigest()
+            self.assertEqual(actual.upper(), expected_hash)
 
     def test_release_uses_separate_staging_and_versioned_delivery_directories(self) -> None:
         build = self.config["build"]

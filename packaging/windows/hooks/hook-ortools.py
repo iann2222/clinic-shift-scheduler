@@ -8,5 +8,8 @@ from PyInstaller.utils.hooks import (
 
 
 binaries = collect_dynamic_libs("ortools")
-hiddenimports = collect_submodules("ortools.sat.python")
+hiddenimports = collect_submodules(
+    "ortools.sat.python",
+    filter=lambda name: not name.endswith("_test"),
+)
 datas = copy_metadata("ortools")

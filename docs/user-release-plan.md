@@ -39,9 +39,16 @@ ClinicShiftScheduler/
 ├─ output/
 ├─ runtime/
 ├─ README.txt
+├─ licenses/
+│  ├─ THIRD_PARTY_NOTICES.txt
+│  ├─ manifest.json
+│  └─ 第三方授權全文與 Qt LGPL 原始碼資訊
 └─ _internal/
    └─ PyInstaller 封裝的 Python、套件與原生程式庫
 ```
+
+根目錄受版本控制的 `licenses/` 是唯一授權來源；Windows 封裝只驗證並完整複製它，
+不在發布暫存目錄另產生第二套聲明。依賴升級時必須同步更新並審查授權 manifest。
 
 - `config.json`、`input/` 與 `output/` 是使用者會直接操作的項目。
 - `runtime/` 是程式管理的中間資料，不應要求使用者手動維護。

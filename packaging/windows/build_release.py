@@ -188,12 +188,41 @@ def _prepare_fonts(config: dict[str, Any], asset_directory: Path) -> Path:
     return license_path
 
 
+def _validated_license_directory(config: dict[str, Any], font_license: Path) -> Path:
+    """Validate the committed license bundle before it enters a release."""
+
+    source = _repository_path(config["release_content"]["licenses_source"])
+    manifest_path = source / "manifest.json"
+    if not source.is_dir() or not manifest_path.is_file():
+        raise PackagingError("root licenses bundle or manifest.json is missing")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("license_bundle_version") != "1":
+        raise PackagingError("unsupported licenses manifest version")
+    file_hashes = manifest.get("files")
+    if not isinstance(file_hashes, dict) or not file_hashes:
+        raise PackagingError("licenses manifest must contain file hashes")
+    actual_files = {
+        path.name
+        for path in source.iterdir()
+        if path.is_file() and path.name != manifest_path.name
+    }
+    if actual_files != set(file_hashes):
+        raise PackagingError("licenses manifest does not match root license files")
+    for filename, expected in file_hashes.items():
+        path = source / filename
+        if not isinstance(expected, str) or _sha256(path) != expected.upper():
+            raise PackagingError(f"license checksum mismatch: {filename}")
+    if _sha256(source / "NOTO-OFL-1.1.txt") != _sha256(font_license):
+        raise PackagingError("committed Noto license differs from font source license")
+    return source
+
+
 def _stage_release(
     config: dict[str, Any],
     pyinstaller_output: Path,
     staging_root: Path,
     artifact_stem: str,
-    license_path: Path,
+    license_directory: Path,
 ) -> Path:
     content = config["release_content"]
     release_directory = staging_root / artifact_stem
@@ -225,13 +254,7 @@ def _stage_release(
         readme.replace("{{VERSION}}", version),
         encoding="utf-8-sig",
     )
-    shutil.copy2(
-        _repository_path(content["third_party_notices_source"]),
-        release_directory / "THIRD_PARTY_NOTICES.txt",
-    )
-    licenses = release_directory / "licenses"
-    licenses.mkdir(exist_ok=True)
-    shutil.copy2(license_path, licenses / "Noto-OFL.txt")
+    shutil.copytree(license_directory, release_directory / "licenses")
     (release_directory / "VERSION.txt").write_text(
         version + "\n",
         encoding="utf-8",
@@ -558,7 +581,8 @@ def main(arguments: list[str] | None = None) -> int:
         _remove_tree(directory)
         directory.mkdir(parents=True, exist_ok=True)
 
-    license_path = _prepare_fonts(config, asset_directory)
+    font_license = _prepare_fonts(config, asset_directory)
+    license_directory = _validated_license_directory(config, font_license)
     spec_path = REPOSITORY_ROOT / "packaging" / "windows" / "ClinicShiftScheduler.spec"
     pyinstaller_environment = os.environ.copy()
     conda_library_bin = Path(sys.prefix) / "Library" / "bin"
@@ -601,7 +625,7 @@ def main(arguments: list[str] | None = None) -> int:
         pyinstaller_output,
         staging_root,
         artifact_stem,
-        license_path,
+        license_directory,
     )
 
     smoke_status = "SKIPPED"

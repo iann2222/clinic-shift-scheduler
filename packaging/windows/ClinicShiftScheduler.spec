@@ -15,6 +15,16 @@ packaging_config = json.loads(
 application = packaging_config["application"]
 asset_directory = repository_root / packaging_config["build"]["asset_directory"]
 font_directory = asset_directory / "fonts"
+packaging_only_excludes = [
+    "colorama",
+    "iniconfig",
+    "packaging",
+    "pluggy",
+    "pygments",
+    "pytest",
+    "setuptools",
+    "wheel",
+]
 
 datas = collect_data_files(
     "clinic_shift_scheduler",
@@ -40,7 +50,7 @@ scheduler_analysis = Analysis(
     hookspath=[str(repository_root / "packaging" / "windows" / "hooks")],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=packaging_only_excludes,
     noarchive=False,
     optimize=0,
 )
@@ -74,7 +84,7 @@ editor_analysis = Analysis(
     hookspath=[str(repository_root / "packaging" / "windows" / "hooks")],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=packaging_only_excludes,
     noarchive=False,
     optimize=0,
 )
