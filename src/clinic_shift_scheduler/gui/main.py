@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Sequence
+from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QTimer
 from PySide6.QtWidgets import QApplication
 
+from ..application_paths import application_root
 from .main_window import MainWindow
 from .styles.loader import load_application_stylesheet
 
@@ -33,7 +35,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     smoke_test = "--smoke-test" in arguments
     qt_arguments = [item for item in arguments if item != "--smoke-test"]
     app = create_application(qt_arguments)
-    window = MainWindow()
+    entry_file = Path(__file__).resolve().parents[2] / "run_gui.py"
+    root = application_root(entry_file)
+    window = MainWindow(input_directory=root / "input")
     window.show()
     if smoke_test:
         QTimer.singleShot(0, app.quit)

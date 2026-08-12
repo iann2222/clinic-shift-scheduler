@@ -7,6 +7,8 @@
 - `src/clinic_shift_scheduler/models.py`：不可變的輸入與正規化型別。
 - `src/clinic_shift_scheduler/authoring_models.py`：使用者維護的 weekly-v1 不可變 typed document。
 - `src/clinic_shift_scheduler/authoring.py`：weekly-v1 的驗證、讀寫與 canonical v1 逐日需求展開。
+- `src/clinic_shift_scheduler/authoring_application.py`：不載入求解器的月份建立、開啟、複製、驗證及原子儲存服務。
+- `src/clinic_shift_scheduler/gui/`：PySide6 輸入編輯器；以 draft／presenter 轉接正式 weekly-v1 document，不直接依賴 solver。
 - `src/clinic_shift_scheduler/input_contracts.py`：JSON Schema 與 runtime parser 共用的輕量欄位契約。
 - `src/clinic_shift_scheduler/json_io.py`：使用者 JSON 文件的 UTF-8 讀取與原子替換。
 - `src/clinic_shift_scheduler/events.py`：前端／CLI 共用的結構化診斷、進度事件與取消介面。
@@ -100,13 +102,16 @@ conda activate clinic_shift_scheduler
 
 ### 桌面輸入編輯器
 
-PySide6 桌面前端目前先建立獨立、低耦合的輸入編輯器骨架：
+PySide6 桌面前端目前已接上 weekly-v1 文件生命週期，可建立月份、從上月建立、
+開啟、正式驗證、安全儲存／另存及保護未儲存變更；「月份與診所設定」與
+「每週人力需求」及「特定日期調整」頁已可實際編輯，其餘資料頁會沿用相同
+draft／presenter 架構逐步完成：
 
 ```powershell
 python src/run_gui.py
 ```
 
-第一個 GUI milestone 只負責輸入、驗證與儲存。完整資料頁尚未接上以前，正式排班
+第一個 GUI milestone 只負責輸入、驗證與儲存，不會呼叫 solver。完整資料頁尚未接上以前，正式排班
 仍使用下方既有入口；GUI 不會載入 OR-Tools、輸出器或更動排班規則。
 
 ### 完整執行一次排班

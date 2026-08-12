@@ -17,6 +17,7 @@ class InputPage(QWidget):
         title: str,
         description: str,
         *,
+        show_empty_state: bool = True,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -36,13 +37,14 @@ class InputPage(QWidget):
         description_label.setWordWrap(True)
         layout.addWidget(description_label)
 
-        surface = QFrame()
-        surface.setObjectName("pageSurface")
-        surface_layout = QVBoxLayout(surface)
-        surface_layout.setContentsMargins(24, 24, 24, 24)
-        empty_state = QLabel("輸入功能將在後續小步提交中接上正式資料模型。")
-        empty_state.setObjectName("mutedText")
-        empty_state.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_state.setWordWrap(True)
-        surface_layout.addWidget(empty_state, 1)
-        layout.addWidget(surface, 1)
+        self.surface = QFrame()
+        self.surface.setObjectName("pageSurface")
+        self.surface_layout = QVBoxLayout(self.surface)
+        self.surface_layout.setContentsMargins(24, 24, 24, 24)
+        if show_empty_state:
+            empty_state = QLabel("輸入功能將在後續小步提交中接上正式資料模型。")
+            empty_state.setObjectName("mutedText")
+            empty_state.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            empty_state.setWordWrap(True)
+            self.surface_layout.addWidget(empty_state, 1)
+        layout.addWidget(self.surface, 1)

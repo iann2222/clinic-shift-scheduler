@@ -13,6 +13,13 @@ from .app_config import (
     DEFAULT_PROGRESS_UPDATE_SECONDS,
     SchedulerAppConfig,
 )
+from .authoring_application import (
+    AuthoringApplication,
+    AuthoringFileExistsError,
+    AuthoringSession,
+    AuthoringValidationResult,
+    default_month_filename,
+)
 from .application_contracts import (
     DEFAULT_INTERMEDIATE_DIRECTORY,
     CandidateExportConfig,

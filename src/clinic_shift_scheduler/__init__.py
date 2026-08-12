@@ -21,6 +21,7 @@ _exports("app_config", "APP_CONFIG_VERSION", "CandidateDiagnosticSettings", "Dia
 _exports("authoring", "WEEKLY_AUTHORING_VERSION", "expand_weekly_template", "load_weekly_authoring_document", "parse_weekly_authoring", "validate_and_normalize_weekly", "write_weekly_authoring_document")
 _exports("authoring_models", "AuthoringAvailableSlot", "AuthoringEmployee", "AuthoringLeaveRequest", "AuthoringUnavailableSlot", "DateOverrideRule", "StaffingPlan", "WeeklyAuthoringDocument", "WeeklyDemandRule", "WeeklyPeriod")
 _exports("application", "ScheduleApplicationCallbacks", "ScheduleApplicationError", "ScheduleApplicationFailureKind", "ScheduleApplicationRequest", "request_from_app_config", "run_schedule_application")
+_exports("authoring_application", "AuthoringApplication", "AuthoringFileExistsError", "AuthoringSession", "AuthoringValidationResult", "default_month_filename")
 _exports("application_contracts", "CandidateExportConfig")
 _exports("class_preferences", "CLASS_PREFERENCES", "ClassPreferenceDefinition", "ClassPreferenceMetric", "PreferenceDirection", "PreferenceRank", "class_opportunity_days")
 _exports("errors", "InputValidationError", "ValidationIssue")
@@ -42,10 +43,14 @@ _exports("validation", "validate_and_normalize")
 __all__ = [
     "APP_CONFIG_VERSION",
     "Assignment",
+    "AuthoringApplication",
     "AuthoringAvailableSlot",
     "AuthoringEmployee",
     "AuthoringLeaveRequest",
     "AuthoringUnavailableSlot",
+    "AuthoringFileExistsError",
+    "AuthoringSession",
+    "AuthoringValidationResult",
     "CandidateDiagnosticSettings",
     "CandidateExportConfig",
     "CandidateScheduleExport",
@@ -132,6 +137,7 @@ __all__ = [
     "build_optimization_model",
     "build_output_paths",
     "diagnose_equivalent_solutions",
+    "default_month_filename",
     "build_result_document",
     "build_workbook",
     "expand_weekly_template",
