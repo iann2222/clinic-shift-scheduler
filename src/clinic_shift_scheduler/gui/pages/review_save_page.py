@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
 
 from ...events import DiagnosticIssue
 from ..navigation import NAVIGATION_ITEMS, PageId
+from ..validation_presentation import format_validation_issue
 from .base import InputPage
 
 
@@ -82,9 +83,12 @@ class ReviewSavePage(InputPage):
             self.status_label.setText(f"發現 {len(issues)} 項需要修正的問題。")
             self.status_label.setObjectName("documentStatusDirty")
             for index, issue in enumerate(issues):
-                item = QListWidgetItem(f"{issue.path}　{issue.message}")
+                item = QListWidgetItem(format_validation_issue(issue))
                 item.setData(Qt.ItemDataRole.UserRole, index)
-                item.setToolTip(f"{issue.code} / {issue.phase.value}")
+                item.setToolTip(
+                    f"{issue.code} / {issue.phase.value}\n"
+                    f"{issue.path}\n{issue.message}"
+                )
                 self.issue_list.addItem(item)
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)

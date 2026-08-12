@@ -404,3 +404,10 @@ packaging/windows/
 ## 17. 後續延展
 
 第二階段可直接在既有主視窗加入「執行排班」流程，透過 `ScheduleApplicationRequest`、typed progress events 與 background worker 呼叫 application service；第三階段再加入結果摘要與開啟輸出功能。既有輸入 drafts、presenters、pages 與文件 lifecycle 不需重寫。
+
+## 18. 實作進度
+
+目前輸入編輯器已完成文件生命週期，以及月份、每週需求、特定日期、員工、休假與
+可排、正式驗證與儲存頁面的主要功能。第一個 milestone 剩餘工作以 Windows 實機
+操作檢查、High DPI、鍵盤操作與獨立 GUI `onedir` smoke test 為主；solver 執行按鈕、
+背景工作與結果顯示仍明確保留在後續階段。

@@ -104,15 +104,17 @@ conda activate clinic_shift_scheduler
 
 PySide6 桌面前端目前已接上 weekly-v1 文件生命週期，可建立月份、從上月建立、
 開啟、正式驗證、安全儲存／另存及保護未儲存變更；「月份與診所設定」與
-「每週人力需求」及「特定日期調整」頁已可實際編輯，其餘資料頁會沿用相同
-draft／presenter 架構逐步完成：
+「每週人力需求」、「特定日期調整」、「員工資料」及「休假與可排」頁均已接上
+正式 draft。員工 ID 由前端建立後保持不變；正職以預設可排方式編輯休假／不可排，
+兼職則只保存明確可排時段。所有輸入最後仍由正式 weekly-v1 parser 驗證：
 
 ```powershell
 python src/run_gui.py
 ```
 
-第一個 GUI milestone 只負責輸入、驗證與儲存，不會呼叫 solver。完整資料頁尚未接上以前，正式排班
-仍使用下方既有入口；GUI 不會載入 OR-Tools、輸出器或更動排班規則。
+第一個 GUI milestone 只負責輸入、驗證與儲存，不會呼叫 solver。正式排班仍使用
+下方既有入口；GUI 不會載入 OR-Tools、輸出器或更動排班規則。後續加入執行按鈕時，
+也只會透過既有 application service 串接，命令列入口仍可獨立使用。
 
 ### 完整執行一次排班
 

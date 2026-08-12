@@ -13,6 +13,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .localized_dialogs import localize_dialog_buttons
+
 
 class SettingsDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -28,6 +30,7 @@ class SettingsDialog(QDialog):
         layout.addWidget(self.tabs, 1)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        localize_dialog_buttons(buttons)
         buttons.rejected.connect(self.reject)
         layout.addWidget(buttons)
 

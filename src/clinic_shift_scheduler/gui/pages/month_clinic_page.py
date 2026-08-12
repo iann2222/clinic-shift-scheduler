@@ -13,12 +13,12 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QListWidget,
-    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from ..dialogs import ask_yes_no, show_warning
 from ..drafts import RoleMutationError, ScheduleDraft
 from ..navigation import NAVIGATION_ITEMS, PageId
 from .base import InputPage
@@ -187,7 +187,7 @@ class MonthClinicPage(InputPage):
         try:
             self._draft.rename_role(old, item.text())
         except RoleMutationError as error:
-            QMessageBox.warning(self, "無法修改職務", str(error))
+            show_warning(self, "無法修改職務", str(error))
             self._refresh()
             return
         self._refresh()
@@ -197,17 +197,16 @@ class MonthClinicPage(InputPage):
         if self._draft is None or self.role_list.currentItem() is None:
             return
         role = self.role_list.currentItem().text()
-        answer = QMessageBox.question(
+        if not ask_yes_no(
             self,
             "刪除職務",
             f"確定要刪除「{role}」並同步移除所有參照嗎？",
-        )
-        if answer != QMessageBox.StandardButton.Yes:
+        ):
             return
         try:
             self._draft.delete_role(role)
         except RoleMutationError as error:
-            QMessageBox.warning(self, "無法刪除職務", str(error))
+            show_warning(self, "無法刪除職務", str(error))
             return
         self._refresh()
         self.draft_changed.emit()

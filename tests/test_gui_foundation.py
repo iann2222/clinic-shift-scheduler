@@ -9,9 +9,13 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QTableWidget
+from PySide6.QtWidgets import QDialogButtonBox, QMessageBox, QTableWidget
 
-from clinic_shift_scheduler.gui.dialogs import SettingsDialog
+from clinic_shift_scheduler.gui.dialogs import (
+    MonthDialog,
+    SettingsDialog,
+    build_message_box,
+)
 from clinic_shift_scheduler.gui.main import create_application
 from clinic_shift_scheduler.gui.main_window import MainWindow
 from clinic_shift_scheduler.gui.navigation import NAVIGATION_ITEMS, PageId
@@ -88,6 +92,55 @@ class GuiFoundationTests(unittest.TestCase):
         self.assertEqual(dialog.tabs.tabText(0), "一般設定")
         self.assertEqual(dialog.tabs.tabText(1), "進階設定")
         self.assertNotIn("設定", {item.title for item in NAVIGATION_ITEMS})
+
+    def test_standard_dialog_buttons_are_always_chinese(self) -> None:
+        month_dialog = MonthDialog("建立月份", "選擇月份")
+        settings_dialog = SettingsDialog()
+        self.addCleanup(month_dialog.close)
+        self.addCleanup(settings_dialog.close)
+
+        month_buttons = month_dialog.findChild(QDialogButtonBox)
+        settings_buttons = settings_dialog.findChild(QDialogButtonBox)
+        assert month_buttons is not None and settings_buttons is not None
+        self.assertEqual(
+            month_buttons.button(QDialogButtonBox.StandardButton.Ok).text(),
+            "確定",
+        )
+        self.assertEqual(
+            month_buttons.button(QDialogButtonBox.StandardButton.Cancel).text(),
+            "取消",
+        )
+        self.assertEqual(
+            settings_buttons.button(QDialogButtonBox.StandardButton.Close).text(),
+            "關閉",
+        )
+
+    def test_message_box_choices_are_always_chinese(self) -> None:
+        message = build_message_box(
+            None,
+            QMessageBox.Icon.Warning,
+            "尚未儲存",
+            "要先儲存嗎？",
+            buttons=(
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel
+            ),
+        )
+        self.addCleanup(message.close)
+
+        self.assertEqual(
+            message.button(QMessageBox.StandardButton.Save).text(),
+            "儲存",
+        )
+        self.assertEqual(
+            message.button(QMessageBox.StandardButton.Discard).text(),
+            "不要儲存",
+        )
+        self.assertEqual(
+            message.button(QMessageBox.StandardButton.Cancel).text(),
+            "取消",
+        )
 
     def test_stylesheet_substitutes_every_palette_token(self) -> None:
         stylesheet = load_application_stylesheet()

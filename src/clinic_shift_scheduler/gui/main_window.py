@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from PySide6.QtGui import QCloseEvent
@@ -23,7 +24,16 @@ from ..authoring_application import (
 )
 from ..errors import InputValidationError
 from ..events import DiagnosticIssue
-from .dialogs import MonthDialog, SettingsDialog
+from .dialogs import (
+    MonthDialog,
+    SettingsDialog,
+    ask_yes_no,
+    build_message_box,
+    show_critical,
+    show_information,
+    show_warning,
+)
+
 from .navigation import NAVIGATION_ITEMS, PageId
 from .pages import (
     AvailabilityPage,
@@ -108,6 +118,8 @@ class MainWindow(QMainWindow):
         self.month_clinic_page.draft_changed.connect(self._structure_changed)
         self.weekly_demand_page.draft_changed.connect(self._draft_changed)
         self.date_override_page.draft_changed.connect(self._draft_changed)
+        self.employee_page.draft_changed.connect(self._employees_changed)
+        self.availability_page.draft_changed.connect(self._draft_changed)
         self.review_save_page.validate_requested.connect(self.validate_document)
         self.review_save_page.save_requested.connect(self.save_document)
         self.review_save_page.save_as_requested.connect(self.save_document_as)
@@ -147,7 +159,7 @@ class MainWindow(QMainWindow):
 
     def validate_document(self) -> AuthoringValidationResult | None:
         if self.session is None:
-            QMessageBox.information(self, "尚未開啟文件", "請先建立或開啟月份。")
+            show_information(self, "尚未開啟文件", "請先建立或開啟月份。")
             return None
         result = self.authoring_application.validate(self.session.draft)
         self.review_save_page.show_validation(
@@ -159,7 +171,7 @@ class MainWindow(QMainWindow):
 
     def save_document(self) -> bool:
         if self.session is None:
-            QMessageBox.information(self, "尚未開啟文件", "請先建立或開啟月份。")
+            show_information(self, "尚未開啟文件", "請先建立或開啟月份。")
             return False
         if self.session.path is None:
             return self.save_document_as()
@@ -167,7 +179,7 @@ class MainWindow(QMainWindow):
 
     def save_document_as(self) -> bool:
         if self.session is None:
-            QMessageBox.information(self, "尚未開啟文件", "請先建立或開啟月份。")
+            show_information(self, "尚未開啟文件", "請先建立或開啟月份。")
             return False
         self.input_directory.mkdir(parents=True, exist_ok=True)
         suggested = self.input_directory / default_month_filename(
@@ -202,6 +214,31 @@ class MainWindow(QMainWindow):
         else:
             page_id = PageId.MONTH_CLINIC
         self.navigation.select_page(page_id)
+        employee_match = re.match(r"\$\.employees\[(\d+)\]", path)
+        if employee_match:
+            employee_index = int(employee_match.group(1))
+            if page_id is PageId.EMPLOYEE:
+                self.employee_page.focus_employee(employee_index)
+            else:
+                self.availability_page.focus_employee(employee_index)
+            slot_match = re.match(
+                r"\$\.employees\[\d+\]\.available_slots\[(\d+)\]",
+                path,
+            )
+            if slot_match:
+                self.availability_page.focus_available_slot(
+                    employee_index,
+                    int(slot_match.group(1)),
+                )
+        record_match = re.match(
+            r"\$\.(leave_requests|unavailable_slots)\[(\d+)\]",
+            path,
+        )
+        if record_match:
+            self.availability_page.focus_record(
+                record_match.group(1),
+                int(record_match.group(2)),
+            )
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._allow_document_replacement():
@@ -220,6 +257,12 @@ class MainWindow(QMainWindow):
         self.date_override_page.bind_draft(
             None if session is None else session.draft
         )
+        self.employee_page.bind_draft(
+            None if session is None else session.draft
+        )
+        self.availability_page.bind_draft(
+            None if session is None else session.draft
+        )
         self.review_save_page.clear_validation()
         self._refresh_document_header()
 
@@ -231,6 +274,12 @@ class MainWindow(QMainWindow):
         if self.session is not None:
             self.weekly_demand_page.bind_draft(self.session.draft)
             self.date_override_page.bind_draft(self.session.draft)
+            self.employee_page.bind_draft(self.session.draft)
+        self._draft_changed()
+
+    def _employees_changed(self) -> None:
+        if self.session is not None:
+            self.availability_page.bind_draft(self.session.draft)
         self._draft_changed()
 
     def _refresh_document_header(self) -> None:
@@ -266,14 +315,14 @@ class MainWindow(QMainWindow):
                 issues=tuple(error.issues),
             )
             self.navigate_to(PageId.REVIEW_SAVE)
-            QMessageBox.warning(
+            show_warning(
                 self,
                 "無法儲存",
                 "輸入資料仍有問題，請依清單修正後再儲存。",
             )
             return False
         except OSError as error:
-            QMessageBox.critical(self, "儲存失敗", str(error))
+            show_critical(self, "儲存失敗", str(error))
             return False
         self.review_save_page.show_validation(is_valid=True, issues=())
         self._refresh_document_header()
@@ -310,7 +359,7 @@ class MainWindow(QMainWindow):
             try:
                 self.create_from_previous(source, *dialog.year_month)
             except (InputValidationError, OSError, ValueError) as error:
-                QMessageBox.warning(self, "無法建立月份", str(error))
+                show_warning(self, "無法建立月份", str(error))
 
     def _open_dialog(self) -> None:
         if not self._allow_document_replacement():
@@ -326,20 +375,22 @@ class MainWindow(QMainWindow):
         try:
             self.open_document_path(path)
         except (InputValidationError, OSError, ValueError) as error:
-            QMessageBox.warning(self, "無法開啟文件", str(error))
+            show_warning(self, "無法開啟文件", str(error))
 
     def _allow_document_replacement(self) -> bool:
         if self.session is None or not self.session.is_dirty:
             return True
-        message = QMessageBox(self)
-        message.setIcon(QMessageBox.Icon.Warning)
-        message.setWindowTitle("尚未儲存的修改")
-        message.setText("目前文件仍有尚未儲存的修改。")
-        message.setInformativeText("要先儲存後再繼續嗎？")
-        message.setStandardButtons(
-            QMessageBox.StandardButton.Save
-            | QMessageBox.StandardButton.Discard
-            | QMessageBox.StandardButton.Cancel
+        message = build_message_box(
+            self,
+            QMessageBox.Icon.Warning,
+            "尚未儲存的修改",
+            "目前文件仍有尚未儲存的修改。",
+            informative_text="要先儲存後再繼續嗎？",
+            buttons=(
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel
+            ),
         )
         answer = message.exec()
         if answer == QMessageBox.StandardButton.Save:
@@ -347,9 +398,8 @@ class MainWindow(QMainWindow):
         return answer == QMessageBox.StandardButton.Discard
 
     def _confirm_overwrite(self, target: Path) -> bool:
-        answer = QMessageBox.question(
+        return ask_yes_no(
             self,
             "覆寫既有檔案",
             f"檔案已存在，確定要覆寫嗎？\n{target}",
         )
-        return answer == QMessageBox.StandardButton.Yes

@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QMessageBox
 from clinic_shift_scheduler.gui.main import create_application
 from clinic_shift_scheduler.gui.main_window import MainWindow
 from clinic_shift_scheduler.gui.navigation import PageId
+from clinic_shift_scheduler.enums import Period
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -107,6 +108,78 @@ class GuiDocumentLifecycleTests(unittest.TestCase):
             self.assertEqual(
                 window.page_stack.currentWidget().page_id,
                 PageId.EMPLOYEE,
+            )
+            self.assertEqual(
+                window.employee_page.table.currentIndex().row(),
+                0,
+            )
+
+    def test_employee_and_availability_edits_save_and_reopen_equivalently(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "edited.json"
+            window = self.make_window(Path(directory))
+            window.open_document_path(WEEKLY_EXAMPLE)
+            assert window.session is not None
+            employee = window.session.draft.employees[0]
+
+            window.employee_page.name_edit.setText("修改姓名")
+            window.employee_page.name_edit.editingFinished.emit()
+            window.session.draft.set_period_availability(
+                employee.employee_id,
+                date(2026, 8, 3),
+                Period.MORNING,
+                "unavailable",
+            )
+            window.availability_page.draft_changed.emit()
+
+            self.assertTrue(window.session.is_dirty)
+            self.assertTrue(window._save_to(target, overwrite=False))
+            reopened = window.authoring_application.open_document(target)
+
+            self.assertEqual(reopened.draft.employees[0].name, "修改姓名")
+            self.assertEqual(
+                reopened.draft.availability_state(
+                    reopened.draft.employees[0],
+                    date(2026, 8, 3),
+                    Period.MORNING,
+                ),
+                "unavailable",
+            )
+            self.assertFalse(window.session.is_dirty)
+
+    def test_available_slot_issue_focuses_employee_date_and_period(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            window = self.make_window(Path(directory))
+            window.open_document_path(WEEKLY_EXAMPLE)
+            assert window.session is not None
+            employee = window.session.draft.employees[4]
+            assert employee.available_slots is not None
+            employee.available_slots[0].roles = ["missing-role"]
+
+            result = window.validate_document()
+            assert result is not None
+            issue = next(
+                item
+                for item in result.issues
+                if ".available_slots[0].roles" in item.path
+            )
+            window.navigate_to_issue(issue)
+
+            self.assertEqual(
+                window.page_stack.currentWidget().page_id,
+                PageId.AVAILABILITY,
+            )
+            self.assertEqual(
+                window.availability_page.employee_combo.currentData(),
+                employee.employee_id,
+            )
+            self.assertEqual(
+                window.availability_page.table.currentIndex().row(),
+                1,
+            )
+            self.assertEqual(
+                window.availability_page.table.currentIndex().column(),
+                3,
             )
 
     def test_close_is_cancelled_when_dirty_changes_are_not_resolved(self) -> None:

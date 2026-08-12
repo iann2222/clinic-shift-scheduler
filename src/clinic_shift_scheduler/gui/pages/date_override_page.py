@@ -9,13 +9,13 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
-    QMessageBox,
     QPushButton,
     QTableView,
     QVBoxLayout,
     QWidget,
 )
 
+from ..dialogs import show_information, show_warning
 from ..drafts import ScheduleDraft
 from ..models import DateOverrideTableModel
 from ..navigation import NAVIGATION_ITEMS, PageId
@@ -122,14 +122,14 @@ class DateOverridePage(InputPage):
         try:
             self.model.add_override(value, is_open=is_open)
         except ValueError as error:
-            QMessageBox.warning(self, "無法新增日期", str(error))
+            show_warning(self, "無法新增日期", str(error))
 
     def _remove_selected(self) -> None:
         indexes = self.table.selectionModel().selectedRows()
         if not indexes:
-            QMessageBox.information(self, "尚未選擇", "請先選擇要移除的日期。")
+            show_information(self, "尚未選擇", "請先選擇要移除的日期。")
             return
         try:
             self.model.remove_override_at(indexes[0].row())
         except ValueError as error:
-            QMessageBox.warning(self, "無法移除日期", str(error))
+            show_warning(self, "無法移除日期", str(error))
