@@ -25,7 +25,10 @@ from pathlib import Path
 from time import perf_counter
 from typing import Any, TypeVar
 
-from .app_config import SUPPORTED_CANDIDATE_EXPORT_FORMATS
+from .application_contracts import (
+    DEFAULT_INTERMEDIATE_DIRECTORY,
+    CandidateExportConfig,
+)
 from .authoring import WEEKLY_AUTHORING_VERSION, expand_weekly_template
 from .exporters import (
     DEFAULT_OUTPUT_DIRECTORY,
@@ -33,7 +36,15 @@ from .exporters import (
     export_result_json,
     export_schedule_pdf_from_excel,
 )
-from .feasibility import Assignment, FeasibilityStatus
+from .events import (
+    CancellationToken,
+    DiagnosticIssue,
+    ExecutionPhase,
+    OperationCancelledError,
+    ProgressCallback,
+    ProgressEvent,
+    ProgressEventKind,
+)
 from .json_io import read_json_object
 from .models import NormalizedScheduleInput
 from .output import ExecutionTiming, FormalScheduleOutput, finalize_schedule_output
@@ -42,15 +53,13 @@ from .validation import validate_and_normalize
 from .optimization import (
     EquivalentSolutionDiagnosticConfig,
     EquivalentSolutionDiagnosticResult,
-    LexicographicResult,
     diagnose_equivalent_solutions,
     solve_lexicographic,
 )
+from .solver_contracts import Assignment, FeasibilityStatus, LexicographicResult
 from .time_formatting import format_seconds, format_seconds_with_minutes
 
 
-ProgressCallback = Callable[[str], None]
-DEFAULT_INTERMEDIATE_DIRECTORY = Path("runtime/expanded-input")
 CANDIDATE_OUTPUT_DIRECTORY_NAME = "候選班表"
 T = TypeVar("T")
 
@@ -58,32 +67,16 @@ T = TypeVar("T")
 class ScheduleRunError(RuntimeError):
     """Raised when a complete run cannot produce a formal schedule."""
 
-
-@dataclass(frozen=True, slots=True)
-class CandidateExportConfig:
-    """How many diagnosed candidates to persist and in which media."""
-
-    max_candidates: int = 0
-    formats: tuple[str, ...] = ("json",)
-
-    def __post_init__(self) -> None:
-        if (
-            isinstance(self.max_candidates, bool)
-            or not isinstance(self.max_candidates, int)
-            or self.max_candidates < 0
-        ):
-            raise ValueError("candidate export count must be a non-negative integer")
-        if len(set(self.formats)) != len(self.formats):
-            raise ValueError("candidate export formats cannot contain duplicates")
-        unsupported = sorted(
-            set(self.formats) - SUPPORTED_CANDIDATE_EXPORT_FORMATS
-        )
-        if unsupported:
-            raise ValueError(
-                "unsupported candidate export formats: " + ", ".join(unsupported)
-            )
-        if self.max_candidates and not self.formats:
-            raise ValueError("candidate export formats cannot be empty")
+    def __init__(
+        self,
+        message: str,
+        *,
+        issues: tuple[DiagnosticIssue, ...] = (),
+        cancelled: bool = False,
+    ) -> None:
+        super().__init__(message)
+        self.issues = issues
+        self.cancelled = cancelled
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,9 +109,27 @@ class ScheduleRunResult:
     total_execution_seconds: float
 
 
-def _notify(callback: ProgressCallback | None, message: str) -> None:
+def _notify(
+    callback: ProgressCallback | None,
+    message: str,
+    *,
+    phase: ExecutionPhase = ExecutionPhase.APPLICATION,
+    kind: ProgressEventKind = ProgressEventKind.INFORMATION,
+    elapsed_seconds: float | None = None,
+    current: int | None = None,
+    total: int | None = None,
+) -> None:
     if callback is not None:
-        callback(message)
+        callback(
+            ProgressEvent(
+                phase=phase,
+                kind=kind,
+                message=message,
+                elapsed_seconds=elapsed_seconds,
+                current=current,
+                total=total,
+            )
+        )
 
 
 def _resolve_diagnostic_config(
@@ -141,6 +152,7 @@ def _run_with_elapsed_heartbeat(
     progress: ProgressCallback | None,
     *,
     interval_seconds: float = 5.0,
+    cancellation: CancellationToken | None = None,
 ) -> tuple[T, float]:
     """Run a blocking operation while periodically reporting elapsed time."""
 
@@ -158,6 +170,9 @@ def _run_with_elapsed_heartbeat(
                     progress,
                     "嚴格分階段最佳化進行中："
                     f"已耗時 {elapsed:.0f} 秒",
+                    phase=ExecutionPhase.OPTIMIZATION,
+                    kind=ProgressEventKind.HEARTBEAT,
+                    elapsed_seconds=elapsed,
                 )
 
         heartbeat = threading.Thread(
@@ -168,6 +183,8 @@ def _run_with_elapsed_heartbeat(
         heartbeat.start()
 
     try:
+        if cancellation is not None:
+            cancellation.raise_if_cancelled()
         result = operation()
     finally:
         stop.set()
@@ -178,6 +195,9 @@ def _run_with_elapsed_heartbeat(
     _notify(
         progress,
         f"嚴格分階段最佳化完成：共耗時 {format_seconds(elapsed)}",
+        phase=ExecutionPhase.OPTIMIZATION,
+        kind=ProgressEventKind.STEP_COMPLETED,
+        elapsed_seconds=elapsed,
     )
     return result, elapsed
 
@@ -327,6 +347,7 @@ def run_schedule_file(
     progress_interval_seconds: float = 5.0,
     progress: ProgressCallback | None = None,
     diagnostic_progress: ProgressCallback | None = None,
+    cancellation: CancellationToken | None = None,
 ) -> ScheduleRunResult:
     """Run input loading through validated JSON, Excel, and PDF exports."""
 
@@ -348,12 +369,42 @@ def run_schedule_file(
     started = perf_counter()
     source = Path(input_path)
 
-    _notify(progress, f"讀取輸入：{source}")
+    def check_cancelled() -> None:
+        if cancellation is not None:
+            try:
+                cancellation.raise_if_cancelled()
+            except OperationCancelledError as error:
+                raise ScheduleRunError(
+                    "scheduling cancelled",
+                    cancelled=True,
+                    issues=(
+                        DiagnosticIssue(
+                            code="operation_cancelled",
+                            path="$",
+                            message="Scheduling was cancelled by the user.",
+                            phase=ExecutionPhase.APPLICATION,
+                        ),
+                    ),
+                ) from error
+
+    check_cancelled()
+    _notify(
+        progress,
+        f"讀取輸入：{source}",
+        phase=ExecutionPhase.INPUT,
+        kind=ProgressEventKind.STEP_STARTED,
+    )
     step_started = perf_counter()
     payload = _load_payload(source)
     input_loading_seconds = perf_counter() - step_started
 
-    _notify(progress, "展開、驗證並正規化輸入")
+    check_cancelled()
+    _notify(
+        progress,
+        "展開、驗證並正規化輸入",
+        phase=ExecutionPhase.NORMALIZATION,
+        kind=ProgressEventKind.STEP_STARTED,
+    )
     step_started = perf_counter()
     if payload.get("authoring_version") == WEEKLY_AUTHORING_VERSION:
         canonical_payload = expand_weekly_template(payload)
@@ -366,25 +417,58 @@ def run_schedule_file(
         intermediate_directory,
         month,
     )
-    _notify(progress, f"逐日中間輸入：{intermediate_input_path}")
+    _notify(
+        progress,
+        f"逐日中間輸入：{intermediate_input_path}",
+        phase=ExecutionPhase.NORMALIZATION,
+    )
     validation_normalization_seconds = perf_counter() - step_started
 
-    _notify(progress, "執行前置可行性檢查")
+    check_cancelled()
+    _notify(
+        progress,
+        "執行前置可行性檢查",
+        phase=ExecutionPhase.PRECHECK,
+        kind=ProgressEventKind.STEP_STARTED,
+    )
     step_started = perf_counter()
     precheck = run_prechecks(data)
     precheck_seconds = perf_counter() - step_started
     if precheck.is_infeasible:
-        details = "; ".join(item.message for item in precheck.diagnostics)
-        raise ScheduleRunError(f"{precheck.status.value}: {details}")
+        issues = tuple(item.to_issue() for item in precheck.diagnostics)
+        raise ScheduleRunError(
+            f"{precheck.status.value}: precheck found {len(issues)} issue(s)",
+            issues=issues,
+        )
 
-    _notify(progress, "執行嚴格分階段最佳化")
-    solver_result, optimization_seconds = _run_with_elapsed_heartbeat(
-        lambda: solve_lexicographic(data, precheck_result=precheck),
+    _notify(
         progress,
-        interval_seconds=progress_interval_seconds,
+        "執行嚴格分階段最佳化",
+        phase=ExecutionPhase.OPTIMIZATION,
+        kind=ProgressEventKind.STEP_STARTED,
     )
+    try:
+        solver_result, optimization_seconds = _run_with_elapsed_heartbeat(
+            lambda: solve_lexicographic(
+                data,
+                precheck_result=precheck,
+                cancellation=cancellation,
+            ),
+            progress,
+            interval_seconds=progress_interval_seconds,
+            cancellation=cancellation,
+        )
+    except OperationCancelledError:
+        check_cancelled()
+        raise
+    check_cancelled()
 
-    _notify(progress, "執行獨立結果驗證並建立正式結果")
+    _notify(
+        progress,
+        "執行獨立結果驗證並建立正式結果",
+        phase=ExecutionPhase.VALIDATION,
+        kind=ProgressEventKind.STEP_STARTED,
+    )
     step_started = perf_counter()
     output = finalize_schedule_output(data, solver_result)
     result_validation_and_build_seconds = perf_counter() - step_started
@@ -417,6 +501,8 @@ def run_schedule_file(
         progress,
         "輸出正式檔案：JSON 保存完整結果，Excel 供查看與使用，"
         "PDF 由 Excel 月班表產生",
+        phase=ExecutionPhase.OUTPUT,
+        kind=ProgressEventKind.STEP_STARTED,
     )
     step_started = perf_counter()
     json_path = export_result_json(
@@ -479,6 +565,8 @@ def run_schedule_file(
                 f"  {pdf_path}",
             )
         ),
+        phase=ExecutionPhase.OUTPUT,
+        kind=ProgressEventKind.STEP_COMPLETED,
     )
 
     equivalent_solution_diagnostic = None
@@ -497,8 +585,10 @@ def run_schedule_file(
         _notify(
             candidate_progress,
             "開始搜尋同品質候選班表"
-            f"（時間上限 {format_seconds(resolved_diagnostic_config.max_time_seconds)}），"
+            f"（搜尋時間上限為 {format_seconds(resolved_diagnostic_config.max_time_seconds)}），"
             "按 Ctrl+C 可只中止此診斷",
+            phase=ExecutionPhase.CANDIDATE_SEARCH,
+            kind=ProgressEventKind.STEP_STARTED,
         )
         step_started = perf_counter()
         captured_candidates: list[tuple[int, tuple[Assignment, ...]]] = []
@@ -507,6 +597,10 @@ def run_schedule_file(
             _notify(
                 candidate_progress,
                 f"已找到 {count} 份同品質候選班表",
+                phase=ExecutionPhase.CANDIDATE_SEARCH,
+                kind=ProgressEventKind.CANDIDATE_COUNT,
+                current=count,
+                total=resolved_diagnostic_config.max_alternatives,
             )
 
         def capture_candidate(
@@ -528,6 +622,8 @@ def run_schedule_file(
             _notify(
                 candidate_progress,
                 f"輸出 {len(captured_candidates)} 份同品質候選班表",
+                phase=ExecutionPhase.OUTPUT,
+                kind=ProgressEventKind.STEP_STARTED,
             )
             step_started = perf_counter()
             candidate_exports = _export_candidate_schedules(
@@ -542,6 +638,8 @@ def run_schedule_file(
             _notify(
                 candidate_progress,
                 f"候選班表輸出完成：{candidate_output_directory}",
+                phase=ExecutionPhase.OUTPUT,
+                kind=ProgressEventKind.STEP_COMPLETED,
             )
 
     return ScheduleRunResult(

@@ -19,15 +19,15 @@ from .class_preferences import (
 )
 from .daily_patterns import DailyPattern, PATTERN_PERIODS
 from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period
-from .feasibility import Assignment, DemandKey, PersonDayKey, PersonPeriodKey
-from .models import NormalizedScheduleInput
-from .optimization import (
+from .models import DemandKey, NormalizedScheduleInput
+from .optimization_contracts import (
     COMMON_GROUP_FAIRNESS_WEIGHTS,
     FairnessMetric,
     OptimizationStage,
     PreferenceBenchmarkResult,
 )
 from .ratio_fairness import ratio_basis_points
+from .solver_contracts import Assignment, PersonDayKey, PersonPeriodKey
 
 
 _PATTERN_BY_PERIODS = {

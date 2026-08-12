@@ -14,12 +14,17 @@ from openpyxl import load_workbook
 from clinic_shift_scheduler import (
     CandidateDiagnosticSettings,
     CandidateExportConfig,
+    CancellationToken,
     DiagnosticTimeSettings,
     EquivalentSolutionDiagnosticConfig,
     EquivalentSolutionDiagnosticStatus,
+    ExecutionPhase,
     FeasibilityStatus,
+    ProgressEvent,
+    ProgressEventKind,
     RESULT_CONTRACT_VERSION,
     SchedulerAppConfig,
+    ScheduleRunError,
     run_schedule_file,
 )
 import clinic_shift_scheduler.cli as cli_module
@@ -32,7 +37,31 @@ import run_scheduler
 from tests.fixtures import minimal_valid_input, synthetic_schedule_input
 
 
+def progress_event(
+    message: str,
+    kind: ProgressEventKind = ProgressEventKind.INFORMATION,
+) -> ProgressEvent:
+    return ProgressEvent(
+        phase=ExecutionPhase.APPLICATION,
+        kind=kind,
+        message=message,
+    )
+
+
 class ScheduleRunnerTests(unittest.TestCase):
+    def test_cancelled_request_stops_before_reading_input(self) -> None:
+        cancellation = CancellationToken()
+        cancellation.cancel()
+
+        with self.assertRaises(ScheduleRunError) as raised:
+            run_schedule_file("missing.json", cancellation=cancellation)
+
+        self.assertTrue(raised.exception.cancelled)
+        self.assertEqual(
+            raised.exception.issues[0].code,
+            "operation_cancelled",
+        )
+
     def test_interactive_console_overwrites_heartbeat_line(self) -> None:
         class InteractiveBuffer(StringIO):
             def isatty(self) -> bool:
@@ -41,13 +70,13 @@ class ScheduleRunnerTests(unittest.TestCase):
         stream = InteractiveBuffer()
         printer = console_module.ConsoleProgressPrinter("[排班]", stream)
 
-        printer("嚴格分階段最佳化進行中：已耗時 5 秒")
-        printer("嚴格分階段最佳化進行中：已耗時 10 秒")
+        printer(progress_event("嚴格分階段最佳化進行中：已耗時 5 秒", ProgressEventKind.HEARTBEAT))
+        printer(progress_event("嚴格分階段最佳化進行中：已耗時 10 秒", ProgressEventKind.HEARTBEAT))
         heartbeat_output = stream.getvalue()
         self.assertNotIn("\n", heartbeat_output)
         self.assertEqual(heartbeat_output.count("\r"), 2)
 
-        printer("嚴格分階段最佳化完成：共耗時 20.1 秒")
+        printer(progress_event("嚴格分階段最佳化完成：共耗時 20.1 秒"))
         final_output = stream.getvalue()
         self.assertIn("\r", final_output)
         self.assertTrue(final_output.endswith("20.1 秒\n"))
@@ -56,8 +85,8 @@ class ScheduleRunnerTests(unittest.TestCase):
         stream = StringIO()
         printer = console_module.ConsoleProgressPrinter("[排班]", stream)
 
-        printer("嚴格分階段最佳化進行中：已耗時 5 秒")
-        printer("嚴格分階段最佳化進行中：已耗時 10 秒")
+        printer(progress_event("嚴格分階段最佳化進行中：已耗時 5 秒", ProgressEventKind.HEARTBEAT))
+        printer(progress_event("嚴格分階段最佳化進行中：已耗時 10 秒", ProgressEventKind.HEARTBEAT))
 
         self.assertEqual(stream.getvalue().count("\n"), 2)
         self.assertNotIn("\r", stream.getvalue())
@@ -70,8 +99,8 @@ class ScheduleRunnerTests(unittest.TestCase):
         stream = InteractiveBuffer()
         printer = console_module.ConsoleProgressPrinter("[候選處理]", stream)
 
-        printer("已找到 1 份同品質候選班表")
-        printer("已找到 2 份同品質候選班表")
+        printer(progress_event("已找到 1 份同品質候選班表", ProgressEventKind.CANDIDATE_COUNT))
+        printer(progress_event("已找到 2 份同品質候選班表", ProgressEventKind.CANDIDATE_COUNT))
 
         self.assertNotIn("\n", stream.getvalue())
         self.assertEqual(stream.getvalue().count("\r"), 2)
@@ -80,8 +109,8 @@ class ScheduleRunnerTests(unittest.TestCase):
         stream = StringIO()
         printer = console_module.ConsoleProgressPrinter("[候選處理]", stream)
 
-        printer("已找到 1 份同品質候選班表")
-        printer("已找到 2 份同品質候選班表")
+        printer(progress_event("已找到 1 份同品質候選班表", ProgressEventKind.CANDIDATE_COUNT))
+        printer(progress_event("已找到 2 份同品質候選班表", ProgressEventKind.CANDIDATE_COUNT))
 
         self.assertEqual(stream.getvalue().count("\n"), 2)
         self.assertNotIn("\r", stream.getvalue())
@@ -112,7 +141,7 @@ class ScheduleRunnerTests(unittest.TestCase):
         )
 
     def test_elapsed_heartbeat_reports_progress_and_completion(self) -> None:
-        messages: list[str] = []
+        events: list[ProgressEvent] = []
 
         def operation() -> str:
             sleep(0.035)
@@ -120,14 +149,14 @@ class ScheduleRunnerTests(unittest.TestCase):
 
         result, elapsed = runner_module._run_with_elapsed_heartbeat(
             operation,
-            messages.append,
+            events.append,
             interval_seconds=0.01,
         )
 
         self.assertEqual(result, "done")
         self.assertGreaterEqual(elapsed, 0.03)
-        self.assertTrue(any("進行中" in message for message in messages))
-        self.assertIn("最佳化完成", messages[-1])
+        self.assertTrue(any(event.kind is ProgressEventKind.HEARTBEAT for event in events))
+        self.assertIn("最佳化完成", events[-1].message)
 
     def test_total_elapsed_format_includes_minutes_without_sixty_seconds(self) -> None:
         self.assertEqual(
@@ -265,7 +294,7 @@ class ScheduleRunnerTests(unittest.TestCase):
                 json.dumps(payload, ensure_ascii=False),
                 encoding="utf-8",
             )
-            messages: list[str] = []
+            events: list[ProgressEvent] = []
             intermediate_directory = root / "runtime" / "expanded-input"
             intermediate_directory.mkdir(parents=True)
             (intermediate_directory / "obsolete.json").write_text(
@@ -283,7 +312,7 @@ class ScheduleRunnerTests(unittest.TestCase):
                         max_time_seconds=30,
                     )
                 ),
-                progress=messages.append,
+                progress=events.append,
             )
 
             self.assertIs(result.output.status, FeasibilityStatus.OPTIMAL)
@@ -318,6 +347,7 @@ class ScheduleRunnerTests(unittest.TestCase):
                 0,
             )
             self.assertEqual(result.candidate_exports, ())
+            messages = [event.message for event in events]
             self.assertTrue(any("最佳化" in message for message in messages))
             self.assertTrue(any("最佳化完成" in message for message in messages))
             self.assertTrue(
@@ -467,14 +497,16 @@ class ScheduleRunnerTests(unittest.TestCase):
                 assert callbacks.progress is not None
                 assert callbacks.diagnostic_progress is not None
                 callbacks.progress(
-                    "完成：OPTIMAL + validation PASS\n"
-                    "  CP-SAT 最佳化：1.0 秒\n"
-                    "[排班耗時] 完整排班時間（從讀檔到正式輸出）："
-                    "2 秒（約 0 分 2 秒）\n"
-                    "  輸出檔案：output/result.json"
+                    progress_event(
+                        "完成：OPTIMAL + validation PASS\n"
+                        "  CP-SAT 最佳化：1.0 秒\n"
+                        "[排班耗時] 完整排班時間（從讀檔到正式輸出）："
+                        "2 秒（約 0 分 2 秒）\n"
+                        "  輸出檔案：output/result.json"
+                    )
                 )
                 callbacks.diagnostic_progress(
-                    "開始搜尋同品質候選班表"
+                    progress_event("開始搜尋同品質候選班表")
                 )
                 return result
 

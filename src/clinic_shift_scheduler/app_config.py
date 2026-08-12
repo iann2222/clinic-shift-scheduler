@@ -13,6 +13,8 @@ from .input_contracts import (
     CONFIG_ROOT_FIELDS,
     CONFIG_SETTINGS_FIELDS,
 )
+from .errors import InputValidationError, ValidationIssue
+from .events import ExecutionPhase
 from .json_io import read_json_object, write_json_object_atomic
 
 
@@ -262,7 +264,82 @@ class SchedulerConfigDocument:
         return root_annotations
 
 
-def parse_scheduler_config(payload: Mapping[str, Any]) -> SchedulerAppConfig:
+def _collect_config_structure_issues(
+    payload: Mapping[str, Any],
+) -> tuple[ValidationIssue, ...]:
+    issues: list[ValidationIssue] = []
+
+    def add(code: str, path: str, message: str) -> None:
+        issues.append(
+            ValidationIssue(
+                code=code,
+                path=path,
+                message=message,
+                phase=ExecutionPhase.CONFIG,
+            )
+        )
+
+    unknown_root = sorted(
+        key
+        for key in set(payload) - CONFIG_ROOT_FIELDS
+        if not (key.startswith("__") and key.endswith("__"))
+    )
+    for key in unknown_root:
+        add("unknown_field", f"$.{key}", "config 含有未知欄位")
+    for section_name in ("使用者設定", "預設設定"):
+        section = payload.get(section_name)
+        path = f"$.{section_name}"
+        if section is None:
+            add("missing_field", path, "此欄位為必填")
+            continue
+        if not isinstance(section, Mapping):
+            add("invalid_type", path, "必須是 JSON object")
+            continue
+        unknown_settings = sorted(
+            key
+            for key in set(section) - CONFIG_SETTINGS_FIELDS
+            if not (key.startswith("__") and key.endswith("__"))
+        )
+        for key in unknown_settings:
+            add("unknown_field", f"{path}.{key}", "設定含有未知欄位")
+        if "輸入檔名" not in section:
+            add("missing_field", f"{path}.輸入檔名", "此欄位為必填")
+        candidate = section.get("候選診斷")
+        if candidate is not None and not isinstance(candidate, Mapping):
+            add("invalid_type", f"{path}.候選診斷", "必須是 JSON object")
+        elif isinstance(candidate, Mapping):
+            for key in sorted(
+                key
+                for key in set(candidate) - CONFIG_CANDIDATE_FIELDS
+                if not (key.startswith("__") and key.endswith("__"))
+            ):
+                add(
+                    "unknown_field",
+                    f"{path}.候選診斷.{key}",
+                    "候選診斷含有未知欄位",
+                )
+            timing = candidate.get("診斷時間上限")
+            if timing is not None and not isinstance(timing, Mapping):
+                add(
+                    "invalid_type",
+                    f"{path}.候選診斷.診斷時間上限",
+                    "必須是 JSON object",
+                )
+            elif isinstance(timing, Mapping):
+                for key in sorted(
+                    key
+                    for key in set(timing) - CONFIG_DIAGNOSTIC_TIME_FIELDS
+                    if not (key.startswith("__") and key.endswith("__"))
+                ):
+                    add(
+                        "unknown_field",
+                        f"{path}.候選診斷.診斷時間上限.{key}",
+                        "診斷時間上限含有未知欄位",
+                    )
+    return tuple(issues)
+
+
+def _parse_scheduler_config(payload: Mapping[str, Any]) -> SchedulerAppConfig:
     """Validate and normalize a user-facing configuration object."""
 
     _reject_unknown_fields(
@@ -360,6 +437,29 @@ def parse_scheduler_config(payload: Mapping[str, Any]) -> SchedulerAppConfig:
         ),
         candidate_diagnostic=diagnostic,
     )
+
+
+def parse_scheduler_config(payload: Mapping[str, Any]) -> SchedulerAppConfig:
+    """Validate config and expose failures through the shared issue contract."""
+
+    issues = _collect_config_structure_issues(payload)
+    if issues:
+        raise InputValidationError(issues)
+    try:
+        return _parse_scheduler_config(payload)
+    except InputValidationError:
+        raise
+    except (TypeError, ValueError) as error:
+        raise InputValidationError(
+            (
+                ValidationIssue(
+                    code="invalid_config_value",
+                    path="$",
+                    message=str(error),
+                    phase=ExecutionPhase.CONFIG,
+                ),
+            )
+        ) from error
 
 
 def parse_scheduler_config_document(

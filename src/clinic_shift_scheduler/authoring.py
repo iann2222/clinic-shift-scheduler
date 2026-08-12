@@ -34,6 +34,7 @@ from .enums import (
     Weekday,
 )
 from .errors import InputValidationError, ValidationIssue
+from .events import ExecutionPhase
 from .json_io import read_json_object, write_json_object_atomic
 from .input_contracts import (
     DATE_OVERRIDE_FIELDS,
@@ -406,11 +407,73 @@ def parse_weekly_authoring(
 ) -> WeeklyAuthoringDocument:
     """Validate one weekly-v1 mapping and return its typed document."""
 
+    issues = _collect_weekly_structure_issues(payload)
+    if issues:
+        raise InputValidationError(issues)
     canonical = _expand_weekly_mapping(payload)
     from .validation import validate_and_normalize
 
     validate_and_normalize(canonical)
     return _document_from_validated_mapping(payload)
+
+
+def _collect_weekly_structure_issues(
+    payload: Mapping[str, Any],
+) -> tuple[ValidationIssue, ...]:
+    """Collect independent document-shape errors before semantic expansion."""
+
+    issues: list[ValidationIssue] = []
+
+    def add(code: str, path: str, message: str) -> None:
+        issues.append(
+            ValidationIssue(
+                code=code,
+                path=path,
+                message=message,
+                phase=ExecutionPhase.INPUT,
+            )
+        )
+
+    for key in sorted(set(payload) - WEEKLY_TOP_LEVEL_FIELDS):
+        add("unknown_field", f"$.{key}", "weekly-v1 不接受此欄位")
+    if payload.get("authoring_version") != WEEKLY_AUTHORING_VERSION:
+        add(
+            "unsupported_authoring_version",
+            "$.authoring_version",
+            f"必須是 {WEEKLY_AUTHORING_VERSION}",
+        )
+    period = payload.get("period")
+    if not isinstance(period, Mapping):
+        add("invalid_type", "$.period", "必須是 JSON object")
+    else:
+        for key in sorted(set(period) - WEEKLY_PERIOD_FIELDS):
+            add("unknown_field", f"$.period.{key}", "period 不接受此欄位")
+        for key in ("start_date", "end_date"):
+            if key not in period:
+                add("missing_field", f"$.period.{key}", "此欄位為必填")
+    roles = payload.get("roles")
+    if not isinstance(roles, Sequence) or isinstance(roles, (str, bytes, bytearray)):
+        add("invalid_type", "$.roles", "必須是 array")
+    weekly = payload.get("weekly_demands")
+    if not isinstance(weekly, Sequence) or isinstance(weekly, (str, bytes, bytearray)):
+        add("invalid_type", "$.weekly_demands", "必須是 array")
+    else:
+        for index, item in enumerate(weekly):
+            path = f"$.weekly_demands[{index}]"
+            if not isinstance(item, Mapping):
+                add("invalid_type", path, "必須是 JSON object")
+                continue
+            for key in sorted(set(item) - WEEKLY_DEMAND_FIELDS):
+                add("unknown_field", f"{path}.{key}", "週間需求不接受此欄位")
+            for key in ("weekdays", "is_open"):
+                if key not in item:
+                    add("missing_field", f"{path}.{key}", "此欄位為必填")
+    employees = payload.get("employees")
+    if not isinstance(employees, Sequence) or isinstance(
+        employees, (str, bytes, bytearray)
+    ):
+        add("invalid_type", "$.employees", "必須是 array")
+    return tuple(issues)
 
 
 def expand_weekly_template(

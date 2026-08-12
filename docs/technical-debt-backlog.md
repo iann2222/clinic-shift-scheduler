@@ -7,32 +7,7 @@
 - 每完成並驗證一項，就直接從本文件刪除該項，不保留已完成清單。
 - 重構不得改變既有 v1 排班規則、正式最佳化順序或輸出結果契約，除非另有明確的規格決策。
 - 涉及 solver、metrics 與 validator 的調整，必須維持三者重算結果一致，並執行完整測試。
-- 不必為了開始前端而先清除所有低優先項目，但「前端開發前置項目」應先完成。
-
-## 前端開發前置項目
-
-### 統一結構化錯誤與進度事件
-
-目前 canonical validation、weekly authoring、config、precheck、runner 與 CLI 使用不同的錯誤形式；進度回呼則是純文字，CLI 依文字前綴判斷是否覆寫同一行。
-
-預計處理：
-
-- 統一欄位路徑、錯誤代碼、訊息、階段與嚴重程度等結構。
-- weekly input 與 config validation 應能一次回報多項欄位錯誤。
-- runner 不應把結構化 precheck 診斷壓平成單一字串。
-- 將進度改為 typed events，再由 CLI／GUI 各自決定呈現方式。
-- 評估正式最佳化的取消介面，避免 GUI 只能強制終止程序。
-
-### 降低套件入口的 eager import 與原生依賴耦合
-
-目前 package `__init__.py` 會一次匯入 solver、exporter、runner、OR-Tools、openpyxl 與 ReportLab；metrics、validator 與 output contract 也直接依賴 `optimization.py` 的型別。
-
-預計處理：
-
-- 縮小 package root 的公開 API，避免匯入設定功能時載入全部重型 dependencies。
-- 將 objective stage、fairness metric、result records 等契約型別移到輕量模組。
-- 讓純輸入編輯與驗證畫面不必先載入 OR-Tools native runtime。
-- 視需要採明確子模組 import 或 lazy import。
+- 其餘項目可依風險與開發節奏處理，不必為了開始前端先全部清除。
 
 ## 高優先技術債
 
@@ -143,12 +118,3 @@ TARGET 絕對偏差目前包含針對 OR-Tools 9.12 `AddAbsEquality` 的已知�
 - 保留針對性 regression test。
 - 在未來升級 OR-Tools 時重新驗證是否仍需要 workaround。
 - 將 VS Code／封裝入口特例限制在 adapter 層，不進入 application service 或 domain core。
-
-## 進入使用者前端的條件
-
-開始製作實際畫面前，至少應完成：
-
-1. 結構化 validation、precheck、執行錯誤與 progress events。
-2. 輕量 package import 邊界，避免設定畫面啟動時強制載入 solver 與 exporters。
-
-完成以上項目後，前端可直接維護使用者輸入 JSON 與 `config.json`，並呼叫同一套正式排班流程；原本手動編輯 JSON／config 的方式繼續保留。

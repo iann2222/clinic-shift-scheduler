@@ -15,8 +15,8 @@ from .app_config import (
     DEFAULT_PROGRESS_UPDATE_SECONDS,
 )
 from .console_app import run_schedule_request_with_console
-from .optimization import EquivalentSolutionDiagnosticConfig
-from .runner import CandidateExportConfig
+from .optimization_contracts import EquivalentSolutionDiagnosticConfig
+from .application_contracts import CandidateExportConfig
 
 
 def _parser() -> argparse.ArgumentParser:

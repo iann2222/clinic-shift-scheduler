@@ -9,6 +9,10 @@
 - `src/clinic_shift_scheduler/authoring.py`：weekly-v1 的驗證、讀寫與 canonical v1 逐日需求展開。
 - `src/clinic_shift_scheduler/input_contracts.py`：JSON Schema 與 runtime parser 共用的輕量欄位契約。
 - `src/clinic_shift_scheduler/json_io.py`：使用者 JSON 文件的 UTF-8 讀取與原子替換。
+- `src/clinic_shift_scheduler/events.py`：前端／CLI 共用的結構化診斷、進度事件與取消介面。
+- `src/clinic_shift_scheduler/application_contracts.py`：不載入求解器的執行請求與候選輸出設定。
+- `src/clinic_shift_scheduler/optimization_contracts.py`：不依賴 CP-SAT 的正式目標與公平性契約。
+- `src/clinic_shift_scheduler/solver_contracts.py`：不依賴 CP-SAT 的 assignment 與求解結果契約。
 - `src/clinic_shift_scheduler/schemas/`：版本化 JSON Schema。
 - `src/clinic_shift_scheduler/validation.py`：結構與語意驗證，失敗統一回報 `INPUT_INVALID`。
 - `src/clinic_shift_scheduler/normalization.py`：日期、休診、可用性、請假及需求的正規化。

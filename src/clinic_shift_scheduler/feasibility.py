@@ -9,7 +9,6 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import date
-from enum import StrEnum
 from types import MappingProxyType
 from typing import Mapping
 
@@ -24,41 +23,16 @@ from .daily_patterns import (
 from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period, ShiftMode
 from .models import AssignmentKey, DemandKey, NormalizedScheduleInput
 from .precheck import PrecheckResult, PrecheckStatus, run_prechecks
+from .solver_contracts import (
+    Assignment,
+    FeasibilityResult,
+    FeasibilitySolverConfig,
+    FeasibilityStatus,
+    PersonDayKey,
+    PersonPeriodKey,
+)
 
 
-class FeasibilityStatus(StrEnum):
-    PRECHECK_INFEASIBLE = "PRECHECK_INFEASIBLE"
-    FEASIBLE = "FEASIBLE"
-    OPTIMAL = "OPTIMAL"
-    INFEASIBLE = "INFEASIBLE"
-    UNKNOWN = "UNKNOWN"
-    VALIDATION_FAILED = "VALIDATION_FAILED"
-
-
-@dataclass(frozen=True, slots=True)
-class Assignment:
-    employee_id: str
-    date: date
-    period: Period
-    role: str
-
-
-@dataclass(frozen=True, slots=True)
-class FeasibilitySolverConfig:
-    max_time_seconds: float | None = None
-    num_search_workers: int = 1
-    random_seed: int = 0
-    enable_precheck: bool = True
-
-    def __post_init__(self) -> None:
-        if self.max_time_seconds is not None and self.max_time_seconds <= 0:
-            raise ValueError("max_time_seconds must be greater than 0")
-        if self.num_search_workers <= 0:
-            raise ValueError("num_search_workers must be greater than 0")
-
-
-PersonDayKey = tuple[str, date]
-PersonPeriodKey = tuple[str, date, Period]
 PatternKey = tuple[str, date, DailyPattern]
 
 
@@ -69,23 +43,6 @@ class FeasibilityModel:
     slot_work: Mapping[PersonPeriodKey, cp_model.IntVar]
     daily_patterns: Mapping[PatternKey, cp_model.IntVar]
     employee_shift_counts: Mapping[str, cp_model.IntVar]
-
-
-@dataclass(frozen=True, slots=True)
-class FeasibilityResult:
-    status: FeasibilityStatus
-    assignments: tuple[Assignment, ...]
-    daily_patterns: Mapping[PersonDayKey, DailyPattern]
-    raw_solver_status: str
-    wall_time_seconds: float
-    precheck: PrecheckResult | None
-
-    @property
-    def is_feasible(self) -> bool:
-        return self.status in (
-            FeasibilityStatus.FEASIBLE,
-            FeasibilityStatus.OPTIMAL,
-        )
 
 
 def _var_name(prefix: str, *parts: object) -> str:

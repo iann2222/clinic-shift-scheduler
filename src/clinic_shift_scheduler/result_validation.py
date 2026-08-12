@@ -20,9 +20,8 @@ from .class_preferences import (
     class_opportunity_days,
 )
 from .enums import EmploymentType, FullTimeClass, ShiftMode
-from .feasibility import Assignment
 from .models import NormalizedScheduleInput
-from .optimization import (
+from .optimization_contracts import (
     ClassPatternLockResult,
     FairnessMetric,
     OptimizationStage,
@@ -31,6 +30,7 @@ from .optimization import (
     PreferenceBenchmarkResult,
 )
 from .result_metrics import RecomputedScheduleMetrics, recompute_schedule_metrics
+from .solver_contracts import Assignment
 
 
 class ResultValidationStatus(StrEnum):

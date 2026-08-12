@@ -15,6 +15,7 @@ from typing import Mapping
 
 from .daily_patterns import PATTERN_PERIODS, allowed_daily_patterns
 from .enums import PERIODS_V1, Period
+from .events import DiagnosticIssue, ExecutionPhase
 from .models import Employee, NormalizedScheduleInput
 from .shift_bounds import hard_maximum_within_capacity, hard_minimum_shifts
 
@@ -48,6 +49,38 @@ class PrecheckDiagnostic:
     employee_id: str | None = None
     related_roles: tuple[str, ...] = ()
     eligible_employee_ids: tuple[str, ...] = ()
+
+    def to_issue(self) -> DiagnosticIssue:
+        """Expose the diagnosis without flattening its structured context."""
+
+        path = "$"
+        if self.employee_id is not None:
+            path = f"$.employees[{self.employee_id}]"
+        elif self.date is not None:
+            path = f"$.demands[{self.date.isoformat()}]"
+            if self.period is not None:
+                path += f".{self.period.value}"
+            if self.role is not None:
+                path += f".{self.role}"
+        return DiagnosticIssue(
+            code=self.code.value,
+            path=path,
+            message=self.message,
+            phase=ExecutionPhase.PRECHECK,
+            details=MappingProxyType(
+                {
+                    "required": self.required,
+                    "available": self.available,
+                    "shortage": self.shortage,
+                    "date": self.date.isoformat() if self.date else None,
+                    "period": self.period.value if self.period else None,
+                    "role": self.role,
+                    "employee_id": self.employee_id,
+                    "related_roles": self.related_roles,
+                    "eligible_employee_ids": self.eligible_employee_ids,
+                }
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)

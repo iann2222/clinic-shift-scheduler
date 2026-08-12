@@ -6,23 +6,28 @@ import json
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .app_config import (
     DEFAULT_DIAGNOSTIC_TIME_RATIO,
     DEFAULT_PROGRESS_UPDATE_SECONDS,
     SchedulerAppConfig,
 )
-from .errors import InputValidationError
-from .exporters import FormalExportError
-from .optimization import EquivalentSolutionDiagnosticConfig
-from .runner import (
+from .application_contracts import (
     DEFAULT_INTERMEDIATE_DIRECTORY,
     CandidateExportConfig,
-    ProgressCallback,
-    ScheduleRunError,
-    ScheduleRunResult,
-    run_schedule_file,
 )
+from .errors import InputValidationError
+from .events import (
+    CancellationToken,
+    DiagnosticIssue,
+    ExecutionPhase,
+    ProgressCallback,
+)
+from .optimization_contracts import EquivalentSolutionDiagnosticConfig
+
+if TYPE_CHECKING:
+    from .runner import ScheduleRunResult
 
 
 class ScheduleApplicationFailureKind(StrEnum):
@@ -31,6 +36,7 @@ class ScheduleApplicationFailureKind(StrEnum):
     FILE_ERROR = "FILE_ERROR"
     OUTPUT_FAILED = "OUTPUT_FAILED"
     SCHEDULE_FAILED = "SCHEDULE_FAILED"
+    CANCELLED = "CANCELLED"
 
 
 class ScheduleApplicationError(RuntimeError):
@@ -42,10 +48,12 @@ class ScheduleApplicationError(RuntimeError):
         message: str,
         *,
         cause: Exception,
+        issues: tuple[DiagnosticIssue, ...] = (),
     ) -> None:
         super().__init__(message)
         self.kind = kind
         self.cause = cause
+        self.issues = issues
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,6 +77,7 @@ class ScheduleApplicationCallbacks:
 
     progress: ProgressCallback | None = None
     diagnostic_progress: ProgressCallback | None = None
+    cancellation: CancellationToken | None = None
 
 
 def request_from_app_config(
@@ -112,6 +121,9 @@ def run_schedule_application(
 ) -> ScheduleRunResult:
     """Execute the shared scheduling workflow without presentation concerns."""
 
+    from .exporters import FormalExportError
+    from .runner import ScheduleRunError, run_schedule_file
+
     callbacks = callbacks or ScheduleApplicationCallbacks()
     try:
         return run_schedule_file(
@@ -124,38 +136,93 @@ def run_schedule_application(
             progress_interval_seconds=request.progress_interval_seconds,
             progress=callbacks.progress,
             diagnostic_progress=callbacks.diagnostic_progress,
+            cancellation=callbacks.cancellation,
         )
     except (
         InputValidationError,
         json.JSONDecodeError,
         UnicodeDecodeError,
     ) as error:
+        issues = (
+            error.issues
+            if isinstance(error, InputValidationError)
+            else (
+                DiagnosticIssue(
+                    code="invalid_input_file",
+                    path=str(request.input_path),
+                    message=str(error),
+                    phase=ExecutionPhase.INPUT,
+                ),
+            )
+        )
         raise ScheduleApplicationError(
             ScheduleApplicationFailureKind.INPUT_INVALID,
             str(error),
             cause=error,
+            issues=tuple(issues),
         ) from error
     except ScheduleRunError as error:
+        issues = error.issues or (
+            DiagnosticIssue(
+                code=(
+                    "operation_cancelled"
+                    if error.cancelled
+                    else "schedule_failed"
+                ),
+                path="$",
+                message=str(error),
+                phase=ExecutionPhase.APPLICATION,
+            ),
+        )
         raise ScheduleApplicationError(
-            ScheduleApplicationFailureKind.SCHEDULE_FAILED,
+            (
+                ScheduleApplicationFailureKind.CANCELLED
+                if error.cancelled
+                else ScheduleApplicationFailureKind.SCHEDULE_FAILED
+            ),
             str(error),
             cause=error,
+            issues=issues,
         ) from error
     except FormalExportError as error:
         raise ScheduleApplicationError(
             ScheduleApplicationFailureKind.OUTPUT_FAILED,
             str(error),
             cause=error,
+            issues=(
+                DiagnosticIssue(
+                    code="formal_output_failed",
+                    path="$",
+                    message=str(error),
+                    phase=ExecutionPhase.OUTPUT,
+                ),
+            ),
         ) from error
     except OSError as error:
         raise ScheduleApplicationError(
             ScheduleApplicationFailureKind.FILE_ERROR,
             str(error),
             cause=error,
+            issues=(
+                DiagnosticIssue(
+                    code="file_error",
+                    path="$",
+                    message=str(error),
+                    phase=ExecutionPhase.APPLICATION,
+                ),
+            ),
         ) from error
     except ValueError as error:
         raise ScheduleApplicationError(
             ScheduleApplicationFailureKind.REQUEST_INVALID,
             str(error),
             cause=error,
+            issues=(
+                DiagnosticIssue(
+                    code="invalid_request",
+                    path="$",
+                    message=str(error),
+                    phase=ExecutionPhase.APPLICATION,
+                ),
+            ),
         ) from error

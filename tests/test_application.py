@@ -18,6 +18,11 @@ from clinic_shift_scheduler.application import (
     request_from_app_config,
     run_schedule_application,
 )
+from clinic_shift_scheduler.events import (
+    DiagnosticIssue,
+    ExecutionPhase,
+)
+from clinic_shift_scheduler.runner import ScheduleRunError
 
 
 class ScheduleApplicationTests(unittest.TestCase):
@@ -83,12 +88,12 @@ class ScheduleApplicationTests(unittest.TestCase):
         callbacks = ScheduleApplicationCallbacks(
             progress=progress,
             diagnostic_progress=diagnostic_progress,
+            cancellation=None,
         )
         expected = Mock()
 
-        with patch.object(
-            application,
-            "run_schedule_file",
+        with patch(
+            "clinic_shift_scheduler.runner.run_schedule_file",
             return_value=expected,
         ) as run_file:
             actual = run_schedule_application(request, callbacks)
@@ -104,14 +109,14 @@ class ScheduleApplicationTests(unittest.TestCase):
             progress_interval_seconds=request.progress_interval_seconds,
             progress=progress,
             diagnostic_progress=diagnostic_progress,
+            cancellation=None,
         )
 
     def test_application_service_categorizes_lower_level_failures(self) -> None:
         request = ScheduleApplicationRequest(input_path=Path("missing.json"))
 
-        with patch.object(
-            application,
-            "run_schedule_file",
+        with patch(
+            "clinic_shift_scheduler.runner.run_schedule_file",
             side_effect=OSError("file unavailable"),
         ), self.assertRaises(ScheduleApplicationError) as raised:
             run_schedule_application(request)
@@ -122,6 +127,43 @@ class ScheduleApplicationTests(unittest.TestCase):
         )
         self.assertIsInstance(raised.exception.cause, OSError)
         self.assertEqual(str(raised.exception), "file unavailable")
+
+    def test_application_preserves_structured_runner_diagnostics(self) -> None:
+        request = ScheduleApplicationRequest(input_path=Path("input.json"))
+        issue = DiagnosticIssue(
+            code="TOTAL_CAPACITY_SHORTAGE",
+            path="$.demands",
+            message="capacity is insufficient",
+            phase=ExecutionPhase.PRECHECK,
+        )
+        failure = ScheduleRunError("precheck failed", issues=(issue,))
+
+        with patch(
+            "clinic_shift_scheduler.runner.run_schedule_file",
+            side_effect=failure,
+        ), self.assertRaises(ScheduleApplicationError) as raised:
+            run_schedule_application(request)
+
+        self.assertEqual(raised.exception.issues, (issue,))
+        self.assertIs(
+            raised.exception.kind,
+            ScheduleApplicationFailureKind.SCHEDULE_FAILED,
+        )
+
+    def test_application_reports_cooperative_cancellation(self) -> None:
+        request = ScheduleApplicationRequest(input_path=Path("input.json"))
+        failure = ScheduleRunError("cancelled", cancelled=True)
+
+        with patch(
+            "clinic_shift_scheduler.runner.run_schedule_file",
+            side_effect=failure,
+        ), self.assertRaises(ScheduleApplicationError) as raised:
+            run_schedule_application(request)
+
+        self.assertIs(
+            raised.exception.kind,
+            ScheduleApplicationFailureKind.CANCELLED,
+        )
 
 
 if __name__ == "__main__":

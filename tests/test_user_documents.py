@@ -7,6 +7,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from clinic_shift_scheduler import (
+    ExecutionPhase,
     InputValidationError,
     SchedulerConfigDocument,
     WeeklyAuthoringDocument,
@@ -27,6 +28,38 @@ WEEKLY_EXAMPLE = (
 
 
 class UserDocumentTests(unittest.TestCase):
+    def test_weekly_document_reports_multiple_structural_issues(self) -> None:
+        payload = json.loads(WEEKLY_EXAMPLE.read_text(encoding="utf-8"))
+        payload["unknown_root"] = True
+        payload["period"]["unknown_period"] = True
+        payload["weekly_demands"][0]["unknown_rule"] = True
+
+        with self.assertRaises(InputValidationError) as raised:
+            WeeklyAuthoringDocument.from_dict(payload)
+
+        self.assertEqual(len(raised.exception.issues), 3)
+        self.assertEqual(
+            {issue.phase for issue in raised.exception.issues},
+            {ExecutionPhase.INPUT},
+        )
+
+    def test_config_document_reports_multiple_structural_issues(self) -> None:
+        payload = json.loads(
+            (REPOSITORY_ROOT / "config.json").read_text(encoding="utf-8")
+        )
+        payload["unknown_root"] = True
+        payload["使用者設定"].pop("輸入檔名")
+        payload["預設設定"]["unknown_default"] = True
+
+        with self.assertRaises(InputValidationError) as raised:
+            SchedulerConfigDocument.from_dict(payload)
+
+        self.assertEqual(len(raised.exception.issues), 3)
+        self.assertEqual(
+            {issue.phase for issue in raised.exception.issues},
+            {ExecutionPhase.CONFIG},
+        )
+
     def test_weekly_document_round_trip_preserves_all_user_fields(self) -> None:
         payload = json.loads(WEEKLY_EXAMPLE.read_text(encoding="utf-8"))
 

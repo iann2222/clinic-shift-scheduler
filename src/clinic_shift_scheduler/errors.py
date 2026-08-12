@@ -2,17 +2,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Iterable
 
+from .events import DiagnosticIssue
 
-@dataclass(frozen=True, slots=True)
-class ValidationIssue:
-    """One actionable validation failure."""
 
-    code: str
-    path: str
-    message: str
+# Backward-compatible public name for the unified diagnostic contract.
+ValidationIssue = DiagnosticIssue
 
 
 class InputValidationError(ValueError):
@@ -28,4 +24,3 @@ class InputValidationError(ValueError):
             f"{issue.path}: {issue.message}" for issue in self.issues
         )
         super().__init__(f"{self.status}: {summary}")
-

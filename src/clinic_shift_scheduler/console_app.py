@@ -14,15 +14,12 @@ from .application import (
     ScheduleApplicationRequest,
     run_schedule_application,
 )
-from .optimization import (
+from .events import ProgressEvent, ProgressEventKind
+from .optimization_contracts import (
     EquivalentSolutionDiagnosticResult,
     EquivalentSolutionDiagnosticStatus,
 )
 from .time_formatting import format_seconds, format_seconds_with_minutes
-
-
-_OPTIMIZATION_HEARTBEAT_PREFIX = "嚴格分階段最佳化進行中："
-_CANDIDATE_COUNT_PROGRESS_PREFIX = "已找到 "
 
 
 def _terminal_width(text: str) -> int:
@@ -47,11 +44,12 @@ class ConsoleProgressPrinter:
             self._stream.write("\r" + " " * self._active_width + "\r")
             self._active_width = 0
 
-    def __call__(self, message: str) -> None:
-        rendered = f"{self._label} {message}"
-        is_heartbeat = message.startswith(
-            (_OPTIMIZATION_HEARTBEAT_PREFIX, _CANDIDATE_COUNT_PROGRESS_PREFIX)
-        )
+    def __call__(self, event: ProgressEvent) -> None:
+        rendered = f"{self._label} {event.message}"
+        is_heartbeat = event.kind in {
+            ProgressEventKind.HEARTBEAT,
+            ProgressEventKind.CANDIDATE_COUNT,
+        }
         with self._lock:
             if self._interactive and is_heartbeat:
                 width = _terminal_width(rendered)
@@ -114,6 +112,12 @@ def run_schedule_request_with_console(
         schedule_progress.finish()
         diagnostic_progress.finish()
         print(f"[排班] 執行失敗：{error}", file=sys.stderr)
+        for issue in error.issues:
+            print(
+                f"[排班] {issue.phase.value}/{issue.code} "
+                f"{issue.path}：{issue.message}",
+                file=sys.stderr,
+            )
         print(
             "[排班] 失敗前總執行時間："
             f"{format_seconds(perf_counter() - command_started)}",

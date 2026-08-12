@@ -15,12 +15,10 @@ from .class_preferences import (
     PreferenceRank,
 )
 from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period, Weekday
-from .feasibility import Assignment, FeasibilityStatus
 from .models import NormalizedScheduleInput
-from .optimization import (
+from .optimization_contracts import (
     ClassPatternLockResult,
     FairnessMetric,
-    LexicographicResult,
     OptimizationStage,
     OptimizationStageResult,
     OptimizationStageStatus,
@@ -36,6 +34,7 @@ from .result_validation import (
     ValidationReport,
     validate_schedule_result,
 )
+from .solver_contracts import Assignment, FeasibilityStatus, LexicographicResult
 
 
 class ScheduleCellKind(StrEnum):
