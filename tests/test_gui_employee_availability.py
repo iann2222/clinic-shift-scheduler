@@ -13,8 +13,13 @@ from PySide6.QtCore import Qt
 from clinic_shift_scheduler.authoring_application import AuthoringApplication
 from clinic_shift_scheduler.enums import EmploymentType, Period, ShiftMode
 from clinic_shift_scheduler.gui.main import create_application
+from clinic_shift_scheduler.gui.pages import EmployeePage
 from clinic_shift_scheduler.gui.drafts import UnavailableSlotDraft
-from clinic_shift_scheduler.gui.models import AvailabilityTableModel, EmployeeTableModel
+from clinic_shift_scheduler.gui.models import (
+    AvailabilityFilterProxyModel,
+    AvailabilityTableModel,
+    EmployeeTableModel,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -238,6 +243,68 @@ class EmployeeAvailabilityModelTests(unittest.TestCase):
         flags = model.flags(model.index(row, 3))
         self.assertFalse(flags & Qt.ItemFlag.ItemIsEnabled)
         self.assertFalse(flags & Qt.ItemFlag.ItemIsEditable)
+
+    def test_employee_page_shows_immediate_basic_validation(self) -> None:
+        page = EmployeePage()
+        self.addCleanup(page.close)
+        page.bind_draft(self.session.draft)
+
+        page.name_edit.setText("")
+        page.name_edit.editingFinished.emit()
+
+        self.assertFalse(page.inline_validation_label.isHidden())
+        self.assertIn("姓名不可留空", page.inline_validation_label.text())
+
+    def test_batch_period_state_updates_multiple_cells_once(self) -> None:
+        employee = self.session.draft.employees[0]
+        model = AvailabilityTableModel()
+        model.set_context(self.session.draft, employee.employee_id)
+        row = (date(2026, 8, 3) - self.session.draft.start_date).days
+        emissions: list[bool] = []
+        model.draft_changed.connect(lambda: emissions.append(True))
+
+        changed, skipped = model.apply_period_state(
+            {(row, 3), (row, 4)},
+            "unavailable",
+        )
+
+        self.assertEqual((changed, skipped), (2, 0))
+        self.assertEqual(emissions, [True])
+        self.assertEqual(
+            self.session.draft.availability_state(
+                employee,
+                date(2026, 8, 3),
+                Period.MORNING,
+            ),
+            "unavailable",
+        )
+        self.assertEqual(
+            self.session.draft.availability_state(
+                employee,
+                date(2026, 8, 3),
+                Period.AFTERNOON,
+            ),
+            "unavailable",
+        )
+
+    def test_batch_all_day_leave_and_filters_use_source_dates(self) -> None:
+        employee = self.session.draft.employees[0]
+        model = AvailabilityTableModel()
+        model.set_context(self.session.draft, employee.employee_id)
+        proxy = AvailabilityFilterProxyModel()
+        proxy.setSourceModel(model)
+        monday_row = (date(2026, 8, 3) - self.session.draft.start_date).days
+
+        self.assertEqual(model.apply_all_day_leave({monday_row}, True), 1)
+        proxy.set_weekday_filter(0)
+        self.assertEqual(proxy.rowCount(), 5)
+        proxy.set_state_filter("leave")
+        self.assertGreaterEqual(proxy.rowCount(), 1)
+        visible_dates = {
+            model.date_at(proxy.mapToSource(proxy.index(row, 0)).row())
+            for row in range(proxy.rowCount())
+        }
+        self.assertIn(date(2026, 8, 3), visible_dates)
 
 
 if __name__ == "__main__":

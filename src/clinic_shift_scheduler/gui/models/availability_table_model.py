@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from PySide6.QtCore import (
+    QAbstractTableModel,
+    QModelIndex,
+    QSortFilterProxyModel,
+    Qt,
+    Signal,
+)
 
 from ...enums import PERIODS_V1, EmploymentType, Period
 from ..drafts import EmployeeDraft, ScheduleDraft
@@ -58,6 +64,62 @@ class AvailabilityTableModel(QAbstractTableModel):
 
     def period_at(self, column: int) -> Period | None:
         return PERIODS_V1[column - 3] if 3 <= column < 6 else None
+
+    def apply_period_state(
+        self,
+        cells: set[tuple[int, int]],
+        state: str,
+    ) -> tuple[int, int]:
+        if self._draft is None or self._employee is None:
+            return 0, len(cells)
+        changed = 0
+        skipped = 0
+        changed_rows: set[int] = set()
+        for row, column in sorted(cells):
+            day = self.date_at(row)
+            period = self.period_at(column)
+            if day is None or period is None or self._all_day_leave(day):
+                skipped += 1
+                continue
+            current = self._draft.availability_state(self._employee, day, period)
+            if current == state:
+                continue
+            self._draft.set_period_availability(
+                self._employee.employee_id,
+                day,
+                period,
+                state,
+            )
+            changed += 1
+            changed_rows.add(row)
+        for row in changed_rows:
+            self.dataChanged.emit(self.index(row, 3), self.index(row, 5))
+        if changed:
+            self.draft_changed.emit()
+        return changed, skipped
+
+    def apply_all_day_leave(
+        self,
+        rows: set[int],
+        enabled: bool,
+    ) -> int:
+        if self._draft is None or self._employee is None:
+            return 0
+        changed = 0
+        for row in sorted(rows):
+            day = self.date_at(row)
+            if day is None or self._all_day_leave(day) == enabled:
+                continue
+            self._draft.set_all_day_leave(
+                self._employee.employee_id,
+                day,
+                enabled,
+            )
+            self.dataChanged.emit(self.index(row, 2), self.index(row, 5))
+            changed += 1
+        if changed:
+            self.draft_changed.emit()
+        return changed
 
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         return 0 if parent.isValid() or self._employee is None else len(self._dates)
@@ -200,3 +262,44 @@ def _date_range(start: date, end: date) -> tuple[date, ...]:
         start + timedelta(days=offset)
         for offset in range((end - start).days + 1)
     )
+
+
+class AvailabilityFilterProxyModel(QSortFilterProxyModel):
+    def __init__(self) -> None:
+        super().__init__()
+        self._weekday: int | None = None
+        self._state: str | None = None
+
+    def set_weekday_filter(self, weekday: int | None) -> None:
+        self._weekday = weekday
+        self.invalidateFilter()
+
+    def set_state_filter(self, state: str | None) -> None:
+        self._state = state
+        self.invalidateFilter()
+
+    def filterAcceptsRow(
+        self,
+        source_row: int,
+        source_parent: QModelIndex,
+    ) -> bool:
+        source = self.sourceModel()
+        if not isinstance(source, AvailabilityTableModel):
+            return True
+        day = source.date_at(source_row)
+        if day is None:
+            return False
+        if self._weekday is not None and day.weekday() != self._weekday:
+            return False
+        if self._state is None:
+            return True
+        if self._state == "leave" and source._all_day_leave(day):
+            return True
+        return any(
+            source.data(
+                source.index(source_row, column, source_parent),
+                Qt.ItemDataRole.EditRole,
+            )
+            == self._state
+            for column in range(3, 6)
+        )

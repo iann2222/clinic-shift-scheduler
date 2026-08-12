@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -35,6 +35,7 @@ from .dialogs import (
 )
 
 from .navigation import NAVIGATION_ITEMS, PageId
+from .field_location import resolve_field_location
 from .pages import (
     AvailabilityPage,
     DateOverridePage,
@@ -124,6 +125,7 @@ class MainWindow(QMainWindow):
         self.review_save_page.save_requested.connect(self.save_document)
         self.review_save_page.save_as_requested.connect(self.save_document_as)
         self.review_save_page.issue_activated.connect(self.navigate_to_issue)
+        self._install_shortcuts()
         self._bind_session(None)
         self.navigate_to(PageId.MONTH_CLINIC)
 
@@ -136,6 +138,23 @@ class MainWindow(QMainWindow):
 
     def open_settings(self) -> None:
         SettingsDialog(self).exec()
+
+    def _install_shortcuts(self) -> None:
+        shortcuts = (
+            ("建立月份", QKeySequence.StandardKey.New, self._create_month_dialog),
+            ("開啟", QKeySequence.StandardKey.Open, self._open_dialog),
+            ("儲存", QKeySequence.StandardKey.Save, self.save_document),
+            ("另存", QKeySequence.StandardKey.SaveAs, self.save_document_as),
+            ("檢查輸入資料", QKeySequence("Ctrl+Shift+V"), self.validate_document),
+        )
+        self.document_actions: dict[str, QAction] = {}
+        for label, shortcut, callback in shortcuts:
+            action = QAction(label, self)
+            action.setShortcut(shortcut)
+            action.setShortcutContext(Qt.ShortcutContext.WindowShortcut)
+            action.triggered.connect(lambda _checked=False, fn=callback: fn())
+            self.addAction(action)
+            self.document_actions[label] = action
 
     def create_new_month(self, year: int, month: int) -> None:
         self._bind_session(self.authoring_application.create_month(year, month))
@@ -200,45 +219,29 @@ class MainWindow(QMainWindow):
         return self._save_to(target, overwrite=True)
 
     def navigate_to_issue(self, issue: DiagnosticIssue) -> None:
-        path = issue.path
-        if "available_slots" in path or path.startswith(
-            ("$.leave_requests", "$.unavailable_slots")
-        ):
-            page_id = PageId.AVAILABILITY
-        elif path.startswith("$.employees"):
-            page_id = PageId.EMPLOYEE
-        elif path.startswith("$.weekly_demands"):
-            page_id = PageId.WEEKLY_DEMAND
-        elif path.startswith("$.date_overrides"):
-            page_id = PageId.DATE_OVERRIDE
-        else:
-            page_id = PageId.MONTH_CLINIC
-        self.navigation.select_page(page_id)
-        employee_match = re.match(r"\$\.employees\[(\d+)\]", path)
-        if employee_match:
-            employee_index = int(employee_match.group(1))
-            if page_id is PageId.EMPLOYEE:
-                self.employee_page.focus_employee(employee_index)
-            else:
-                self.availability_page.focus_employee(employee_index)
-            slot_match = re.match(
-                r"\$\.employees\[\d+\]\.available_slots\[(\d+)\]",
-                path,
-            )
-            if slot_match:
+        location = resolve_field_location(issue.path)
+        self.navigation.select_page(location.page_id)
+        if location.page_id is PageId.EMPLOYEE:
+            self.employee_page.focus_location(location)
+        elif location.page_id is PageId.AVAILABILITY:
+            if location.available_slot_index is not None:
                 self.availability_page.focus_available_slot(
-                    employee_index,
-                    int(slot_match.group(1)),
+                    location.employee_index or 0,
+                    location.available_slot_index,
                 )
-        record_match = re.match(
-            r"\$\.(leave_requests|unavailable_slots)\[(\d+)\]",
-            path,
-        )
-        if record_match:
-            self.availability_page.focus_record(
-                record_match.group(1),
-                int(record_match.group(2)),
-            )
+            elif location.record_type is not None and location.record_index is not None:
+                self.availability_page.focus_record(
+                    location.record_type,
+                    location.record_index,
+                )
+            elif location.employee_index is not None:
+                self.availability_page.focus_employee(location.employee_index)
+        elif location.page_id is PageId.WEEKLY_DEMAND:
+            self.weekly_demand_page.focus_location(location)
+        elif location.page_id is PageId.DATE_OVERRIDE:
+            self.date_override_page.focus_location(location)
+        else:
+            self.month_clinic_page.focus_location(location)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._allow_document_replacement():

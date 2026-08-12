@@ -57,6 +57,7 @@ class ReviewSavePage(InputPage):
         layout.addWidget(hint)
         actions = QHBoxLayout()
         validate_button = QPushButton("檢查輸入資料")
+        validate_button.setToolTip("檢查輸入資料（Ctrl+Shift+V）")
         save_button = QPushButton("儲存")
         save_as_button = QPushButton("另存")
         validate_button.clicked.connect(self.validate_requested.emit)

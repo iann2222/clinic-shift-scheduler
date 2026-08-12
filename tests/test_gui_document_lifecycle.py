@@ -17,6 +17,7 @@ from clinic_shift_scheduler.gui.main import create_application
 from clinic_shift_scheduler.gui.main_window import MainWindow
 from clinic_shift_scheduler.gui.navigation import PageId
 from clinic_shift_scheduler.enums import Period
+from clinic_shift_scheduler.events import DiagnosticIssue
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -180,6 +181,42 @@ class GuiDocumentLifecycleTests(unittest.TestCase):
             self.assertEqual(
                 window.availability_page.table.currentIndex().column(),
                 3,
+            )
+
+    def test_weekly_and_employee_issues_focus_exact_controls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            window = self.make_window(Path(directory))
+            window.open_document_path(WEEKLY_EXAMPLE)
+
+            window.navigate_to_issue(
+                DiagnosticIssue(
+                    code="invalid_value",
+                    path="$.weekly_demands[2].staffing.evening.nursing",
+                    message="invalid",
+                )
+            )
+            self.assertEqual(
+                window.page_stack.currentWidget().page_id,
+                PageId.WEEKLY_DEMAND,
+            )
+            self.assertEqual(
+                (
+                    window.weekly_demand_page.table.currentIndex().row(),
+                    window.weekly_demand_page.table.currentIndex().column(),
+                ),
+                (8, 4),
+            )
+
+            window.navigate_to_issue(
+                DiagnosticIssue(
+                    code="invalid_shift_fields",
+                    path="$.employees[1].target_shifts",
+                    message="invalid",
+                )
+            )
+            self.assertEqual(
+                window.employee_page.table.currentIndex().row(),
+                1,
             )
 
     def test_close_is_cancelled_when_dirty_changes_are_not_resolved(self) -> None:

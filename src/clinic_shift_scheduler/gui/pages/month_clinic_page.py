@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from ..dialogs import ask_yes_no, show_warning
 from ..drafts import RoleMutationError, ScheduleDraft
+from ..field_location import FieldLocation
 from ..navigation import NAVIGATION_ITEMS, PageId
 from .base import InputPage
 
@@ -100,6 +101,14 @@ class MonthClinicPage(InputPage):
     def bind_draft(self, draft: ScheduleDraft | None) -> None:
         self._draft = draft
         self._refresh()
+
+    def focus_location(self, location: FieldLocation) -> None:
+        if location.field == "holidays":
+            self.holiday_date.setFocus()
+        elif location.field == "roles":
+            self.role_list.setFocus()
+        else:
+            self.period_label.setFocus()
 
     def _refresh(self) -> None:
         draft = self._draft

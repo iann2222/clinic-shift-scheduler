@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 from ...enums import EmploymentType, FullTimeClass, ShiftMode
 from ..dialogs import ask_yes_no, show_warning
 from ..drafts import EmployeeDraft, ScheduleDraft
+from ..field_location import FieldLocation
 from ..models import EmployeeTableModel
 from ..navigation import NAVIGATION_ITEMS, PageId
 from .base import InputPage
@@ -65,6 +66,10 @@ class EmployeePage(InputPage):
         actions.addWidget(self.delete_button)
         actions.addStretch(1)
         layout.addLayout(actions)
+        self.inline_validation_label = QLabel()
+        self.inline_validation_label.setObjectName("documentStatusDirty")
+        self.inline_validation_label.setWordWrap(True)
+        layout.addWidget(self.inline_validation_label)
 
         splitter = QSplitter(Qt.Orientation.Vertical)
         self.table = QTableView()
@@ -160,11 +165,41 @@ class EmployeePage(InputPage):
         else:
             self._load_employee(None)
         self.add_button.setEnabled(draft is not None)
+        self._refresh_inline_validation()
 
     def focus_employee(self, employee_index: int) -> None:
         if 0 <= employee_index < self.model.rowCount():
             self.table.selectRow(employee_index)
             self.table.scrollTo(self.model.index(employee_index, 0))
+
+    def focus_location(self, location: FieldLocation) -> None:
+        if location.employee_index is not None:
+            self.focus_employee(location.employee_index)
+        widget_by_field = {
+            "employee_id": self.table,
+            "name": self.name_edit,
+            "employment_type": self.type_combo,
+            "full_time_class": self.class_combo,
+            "roles": self.role_checks[0] if self.role_checks else self.table,
+            "fairness_group": self.fairness_edit,
+            "shift_mode": self.mode_combo,
+            "required_shifts": self.required_spin,
+            "target_shifts": self.target_spin,
+            "min_shifts": self.min_spin,
+            "max_shifts": self.max_spin,
+            "notes": self.notes_edit,
+        }
+        target = widget_by_field.get(location.field, self.table)
+        if not target.isEnabled() and location.field in {
+            "required_shifts",
+            "target_shifts",
+            "min_shifts",
+            "max_shifts",
+        }:
+            target = self.mode_combo
+        target.setFocus()
+        if isinstance(target, QLineEdit):
+            target.selectAll()
 
     def _rebuild_role_checks(self) -> None:
         while self.roles_layout.count():
@@ -233,6 +268,7 @@ class EmployeePage(InputPage):
             self.notes_edit.setPlainText(employee.notes or "")
         self._loading = False
         self._update_conditional_fields()
+        self._refresh_inline_validation()
 
     def _add_employee(self) -> None:
         if self._draft is None:
@@ -358,7 +394,45 @@ class EmployeePage(InputPage):
 
     def _changed(self) -> None:
         self.model.refresh()
+        self._refresh_inline_validation()
         self.draft_changed.emit()
+
+    def _refresh_inline_validation(self) -> None:
+        draft = self._draft
+        employee = self._employee
+        messages: list[str] = []
+        if draft is not None and not draft.employees:
+            messages.append("至少需要新增一位員工。")
+        if employee is not None:
+            if not employee.name.strip():
+                messages.append("姓名不可留空。")
+            if not employee.fairness_group.strip():
+                messages.append("公平分組不可留空。")
+            if not employee.roles:
+                messages.append("至少選擇一項職務資格。")
+            if (
+                employee.min_shifts is not None
+                and employee.max_shifts is not None
+                and employee.min_shifts > employee.max_shifts
+            ):
+                messages.append("最低班次不可大於最高班次。")
+            if employee.shift_mode is ShiftMode.TARGET:
+                target = employee.target_shifts or 0
+                if employee.min_shifts is not None and employee.min_shifts > target:
+                    messages.append("最低班次不可大於目標班次。")
+                if employee.max_shifts is not None and target > employee.max_shifts:
+                    messages.append("目標班次不可大於最高班次。")
+            if draft is not None:
+                signature = (employee.employment_type, employee.full_time_class)
+                if any(
+                    item.employee_id != employee.employee_id
+                    and item.fairness_group == employee.fairness_group
+                    and (item.employment_type, item.full_time_class) != signature
+                    for item in draft.employees
+                ):
+                    messages.append("此公平分組已被不同聘用類別或 A／B 類別使用。")
+        self.inline_validation_label.setText("　".join(messages))
+        self.inline_validation_label.setVisible(bool(messages))
 
 
 def _combo(options: tuple[tuple[str, object], ...]) -> QComboBox:

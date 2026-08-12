@@ -54,14 +54,16 @@ class DocumentHeader(QFrame):
         self.status_label.setObjectName("documentStatusDirty")
         outer.addWidget(self.status_label)
 
-        for text, signal in (
-            ("建立月份", self.create_requested),
-            ("從上月建立", self.copy_previous_requested),
-            ("開啟", self.open_requested),
-            ("儲存", self.save_requested),
-            ("另存", self.save_as_requested),
+        for text, shortcut, signal in (
+            ("建立月份", "Ctrl+N", self.create_requested),
+            ("從上月建立", None, self.copy_previous_requested),
+            ("開啟", "Ctrl+O", self.open_requested),
+            ("儲存", "Ctrl+S", self.save_requested),
+            ("另存", "Ctrl+Shift+S", self.save_as_requested),
         ):
             button = QPushButton(text)
+            if shortcut is not None:
+                button.setToolTip(f"{text}（{shortcut}）")
             button.clicked.connect(signal.emit)
             outer.addWidget(button)
 

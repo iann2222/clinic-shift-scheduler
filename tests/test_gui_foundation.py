@@ -84,6 +84,20 @@ class GuiFoundationTests(unittest.TestCase):
         )
         self.assertEqual(window.document_header.status_label.text(), "尚未儲存")
 
+    def test_document_workflow_has_standard_keyboard_shortcuts(self) -> None:
+        window = MainWindow()
+        self.addCleanup(window.close)
+
+        shortcuts = {
+            label: action.shortcut().toString()
+            for label, action in window.document_actions.items()
+        }
+        self.assertEqual(shortcuts["建立月份"], "Ctrl+N")
+        self.assertEqual(shortcuts["開啟"], "Ctrl+O")
+        self.assertEqual(shortcuts["儲存"], "Ctrl+S")
+        self.assertEqual(shortcuts["另存"], "Ctrl+Shift+S")
+        self.assertEqual(shortcuts["檢查輸入資料"], "Ctrl+Shift+V")
+
     def test_settings_are_separate_from_required_navigation(self) -> None:
         dialog = SettingsDialog()
         self.addCleanup(dialog.close)

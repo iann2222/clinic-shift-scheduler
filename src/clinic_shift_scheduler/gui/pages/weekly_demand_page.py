@@ -10,7 +10,9 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...enums import Period
 from ..drafts import ScheduleDraft
+from ..field_location import FieldLocation
 from ..models import WeeklyDemandTableModel
 from ..navigation import NAVIGATION_ITEMS, PageId
 from .base import InputPage
@@ -20,6 +22,7 @@ class WeeklyDemandPage(InputPage):
     draft_changed = Signal()
 
     def __init__(self, parent: QWidget | None = None) -> None:
+        self._draft: ScheduleDraft | None = None
         item = next(
             item
             for item in NAVIGATION_ITEMS
@@ -63,4 +66,24 @@ class WeeklyDemandPage(InputPage):
         layout.addWidget(self.table, 1)
 
     def bind_draft(self, draft: ScheduleDraft | None) -> None:
+        self._draft = draft
         self.model.set_draft(draft)
+
+    def focus_location(self, location: FieldLocation) -> None:
+        if location.weekly_index is None:
+            self.table.setFocus()
+            return
+        period_index = 0
+        if location.period is not None:
+            period_index = list(Period).index(Period(location.period))
+        column = 1 if location.field == "is_open" else 0
+        if location.role is not None and self._draft is not None:
+            try:
+                column = 3 + self._draft.roles.index(location.role)
+            except ValueError:
+                column = 3
+        index = self.model.index(location.weekly_index * 3 + period_index, column)
+        if index.isValid():
+            self.table.setCurrentIndex(index)
+            self.table.scrollTo(index)
+            self.table.setFocus()

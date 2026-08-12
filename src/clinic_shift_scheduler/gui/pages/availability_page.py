@@ -21,9 +21,9 @@ from PySide6.QtWidgets import (
 )
 
 from ...enums import EmploymentType, Period
-from ..dialogs import localize_dialog_buttons, show_warning
+from ..dialogs import localize_dialog_buttons, show_information, show_warning
 from ..drafts import EmployeeDraft, LeaveRequestDraft, ScheduleDraft
-from ..models import AvailabilityTableModel
+from ..models import AvailabilityFilterProxyModel, AvailabilityTableModel
 from ..navigation import NAVIGATION_ITEMS, PageId
 from ..widgets import AvailabilityDelegate
 from .base import InputPage
@@ -58,6 +58,19 @@ class AvailabilityPage(InputPage):
         self.type_hint.setObjectName("mutedText")
         controls.addWidget(self.type_hint)
         controls.addStretch(1)
+        controls.addWidget(QLabel("星期："))
+        self.weekday_filter = QComboBox()
+        self.weekday_filter.addItem("全部", None)
+        for index, label in enumerate(("一", "二", "三", "四", "五", "六", "日")):
+            self.weekday_filter.addItem(f"星期{label}", index)
+        controls.addWidget(self.weekday_filter)
+        controls.addWidget(QLabel("狀態："))
+        self.state_filter = QComboBox()
+        self.state_filter.addItem("全部", None)
+        self.state_filter.addItem("含可排", "available")
+        self.state_filter.addItem("含不可排", "unavailable")
+        self.state_filter.addItem("含請假", "leave")
+        controls.addWidget(self.state_filter)
         layout.addLayout(controls)
 
         self.explanation = QLabel()
@@ -65,11 +78,27 @@ class AvailabilityPage(InputPage):
         self.explanation.setWordWrap(True)
         layout.addWidget(self.explanation)
 
+        batch = QHBoxLayout()
+        batch.addWidget(QLabel("批次套用至所選時段："))
+        self.batch_state_combo = QComboBox()
+        self.batch_state_combo.addItem("可排", "available")
+        self.batch_state_combo.addItem("不可排", "unavailable")
+        self.batch_state_combo.addItem("請假", "leave")
+        batch.addWidget(self.batch_state_combo)
+        self.batch_apply_button = QPushButton("套用狀態")
+        self.all_day_leave_button = QPushButton("所選日期設為整日請假")
+        self.clear_all_day_button = QPushButton("取消所選日期整日請假")
+        batch.addWidget(self.batch_apply_button)
+        batch.addStretch(1)
+        batch.addWidget(self.all_day_leave_button)
+        batch.addWidget(self.clear_all_day_button)
+        layout.addLayout(batch)
+
         self.table = QTableView()
         self.table.setAccessibleName("休假與可排日期矩陣")
         self.table.setAlternatingRowColors(True)
         self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectItems)
-        self.table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(
             QAbstractItemView.EditTrigger.DoubleClicked
             | QAbstractItemView.EditTrigger.SelectedClicked
@@ -77,7 +106,9 @@ class AvailabilityPage(InputPage):
         )
         self.model = AvailabilityTableModel()
         self.model.draft_changed.connect(self._model_changed)
-        self.table.setModel(self.model)
+        self.proxy_model = AvailabilityFilterProxyModel()
+        self.proxy_model.setSourceModel(self.model)
+        self.table.setModel(self.proxy_model)
         delegate = AvailabilityDelegate(self.table)
         for column in range(3, 6):
             self.table.setItemDelegateForColumn(column, delegate)
@@ -102,7 +133,16 @@ class AvailabilityPage(InputPage):
         layout.addLayout(detail)
 
         self.employee_combo.currentIndexChanged.connect(self._employee_changed)
+        self.weekday_filter.currentIndexChanged.connect(self._filter_changed)
+        self.state_filter.currentIndexChanged.connect(self._filter_changed)
         self.table.selectionModel().currentChanged.connect(self._current_changed)
+        self.batch_apply_button.clicked.connect(self._apply_batch_state)
+        self.all_day_leave_button.clicked.connect(
+            lambda: self._apply_batch_all_day(True)
+        )
+        self.clear_all_day_button.clicked.connect(
+            lambda: self._apply_batch_all_day(False)
+        )
         self.note_button.clicked.connect(self._apply_note)
         self.role_button.clicked.connect(self._edit_available_roles)
         self.bind_draft(None)
@@ -149,6 +189,7 @@ class AvailabilityPage(InputPage):
         if not 0 <= index < len(records):
             return
         record = records[index]
+        self._reset_filters()
         employee_index = next(
             (
                 position
@@ -160,7 +201,7 @@ class AvailabilityPage(InputPage):
         self.focus_employee(employee_index)
         row = (record.date - self._draft.start_date).days
         column = 2 if getattr(record, "all_day", False) else 3 + list(Period).index(record.period)
-        cell = self.model.index(row, column)
+        cell = self.proxy_model.mapFromSource(self.model.index(row, column))
         self.table.setCurrentIndex(cell)
         self.table.scrollTo(cell)
 
@@ -172,9 +213,10 @@ class AvailabilityPage(InputPage):
             return
         self.focus_employee(employee_index)
         slot = employee.available_slots[slot_index]
+        self._reset_filters()
         row = (slot.date - self._draft.start_date).days
         column = 3 + list(Period).index(slot.period)
-        cell = self.model.index(row, column)
+        cell = self.proxy_model.mapFromSource(self.model.index(row, column))
         self.table.setCurrentIndex(cell)
         self.table.scrollTo(cell)
 
@@ -197,6 +239,10 @@ class AvailabilityPage(InputPage):
             )
         self._update_context_actions(QModelIndex())
 
+    def _filter_changed(self) -> None:
+        self.proxy_model.set_weekday_filter(self.weekday_filter.currentData())
+        self.proxy_model.set_state_filter(self.state_filter.currentData())
+
     def _model_changed(self) -> None:
         self._update_context_actions(self.table.currentIndex())
         self.draft_changed.emit()
@@ -205,6 +251,7 @@ class AvailabilityPage(InputPage):
         self._update_context_actions(current)
 
     def _update_context_actions(self, index: QModelIndex) -> None:
+        index = self.proxy_model.mapToSource(index) if index.isValid() else index
         employee = self.model.employee
         day = self.model.date_at(index.row()) if index.isValid() else None
         period = self.model.period_at(index.column()) if index.isValid() else None
@@ -245,7 +292,7 @@ class AvailabilityPage(InputPage):
         )
 
     def _apply_note(self) -> None:
-        index = self.table.currentIndex()
+        index = self._current_source_index()
         employee = self.model.employee
         day = self.model.date_at(index.row())
         period = self.model.period_at(index.column())
@@ -264,7 +311,7 @@ class AvailabilityPage(InputPage):
         self.draft_changed.emit()
 
     def _edit_available_roles(self) -> None:
-        index = self.table.currentIndex()
+        index = self._current_source_index()
         employee = self.model.employee
         day = self.model.date_at(index.row())
         period = self.model.period_at(index.column())
@@ -288,6 +335,48 @@ class AvailabilityPage(InputPage):
             return
         self.model.dataChanged.emit(index, index)
         self.draft_changed.emit()
+
+    def _apply_batch_state(self) -> None:
+        cells = {
+            (source.row(), source.column())
+            for index in self.table.selectionModel().selectedIndexes()
+            if (source := self.proxy_model.mapToSource(index)).column() >= 3
+        }
+        if not cells:
+            show_information(
+                self,
+                "尚未選擇時段",
+                "請先選擇一個或多個早、午、晚時段儲存格。",
+            )
+            return
+        changed, skipped = self.model.apply_period_state(
+            cells,
+            self.batch_state_combo.currentData(),
+        )
+        if not changed and skipped:
+            show_information(
+                self,
+                "未套用變更",
+                "所選時段皆為整日請假；請先取消整日請假。",
+            )
+
+    def _apply_batch_all_day(self, enabled: bool) -> None:
+        rows = {
+            self.proxy_model.mapToSource(index).row()
+            for index in self.table.selectionModel().selectedIndexes()
+        }
+        if not rows:
+            show_information(self, "尚未選擇日期", "請先選擇一個或多個日期。")
+            return
+        self.model.apply_all_day_leave(rows, enabled)
+
+    def _current_source_index(self) -> QModelIndex:
+        current = self.table.currentIndex()
+        return self.proxy_model.mapToSource(current) if current.isValid() else current
+
+    def _reset_filters(self) -> None:
+        self.weekday_filter.setCurrentIndex(0)
+        self.state_filter.setCurrentIndex(0)
 
 
 class RoleRestrictionDialog(QDialog):

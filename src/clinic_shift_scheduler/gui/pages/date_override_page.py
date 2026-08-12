@@ -15,8 +15,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from ...enums import Period
 from ..dialogs import show_information, show_warning
 from ..drafts import ScheduleDraft
+from ..field_location import FieldLocation
 from ..models import DateOverrideTableModel
 from ..navigation import NAVIGATION_ITEMS, PageId
 from .base import InputPage
@@ -115,6 +117,25 @@ class DateOverridePage(InputPage):
             )
             self.date_edit.setDateRange(minimum, maximum)
             self.date_edit.setDate(minimum)
+
+    def focus_location(self, location: FieldLocation) -> None:
+        if location.override_index is None:
+            self.date_edit.setFocus()
+            return
+        period_index = 0
+        if location.period is not None:
+            period_index = list(Period).index(Period(location.period))
+        column = 1 if location.field == "is_open" else 0
+        if location.role is not None and self._draft is not None:
+            try:
+                column = 3 + self._draft.roles.index(location.role)
+            except ValueError:
+                column = 3
+        index = self.model.index(location.override_index * 3 + period_index, column)
+        if index.isValid():
+            self.table.setCurrentIndex(index)
+            self.table.scrollTo(index)
+            self.table.setFocus()
 
     def _add(self, is_open: bool) -> None:
         selected = self.date_edit.date()
