@@ -2,7 +2,14 @@
 
 from __future__ import annotations
 
-from PySide6.QtWidgets import QDialogButtonBox, QMessageBox, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (
+    QDialogButtonBox,
+    QMessageBox,
+    QProxyStyle,
+    QStyle,
+    QWidget,
+)
 
 
 _DIALOG_BUTTON_TEXT = {
@@ -25,11 +32,36 @@ _MESSAGE_BUTTON_TEXT = {
 }
 
 
+class _DialogButtonStyle(QProxyStyle):
+    """Keep action buttons right-aligned with reject left of accept."""
+
+    def styleHint(
+        self,
+        hint: QStyle.StyleHint,
+        option: object = None,
+        widget: QWidget | None = None,
+        return_data: object = None,
+    ) -> int:
+        if hint == QStyle.StyleHint.SH_DialogButtonLayout:
+            return int(QDialogButtonBox.ButtonLayout.MacLayout.value)
+        return super().styleHint(hint, option, widget, return_data)
+
+
+def _position_dialog_buttons(buttons: QDialogButtonBox) -> None:
+    style = _DialogButtonStyle()
+    style.setParent(buttons)
+    buttons.setStyle(style)
+    buttons.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+    # Keep the Python wrapper alive together with its parent widget.
+    buttons._dialog_button_style = style
+
+
 def localize_dialog_buttons(buttons: QDialogButtonBox) -> QDialogButtonBox:
     for standard_button, text in _DIALOG_BUTTON_TEXT.items():
         button = buttons.button(standard_button)
         if button is not None:
             button.setText(text)
+    _position_dialog_buttons(buttons)
     return buttons
 
 
@@ -53,6 +85,9 @@ def build_message_box(
         button = message.button(standard_button)
         if button is not None:
             button.setText(label)
+    button_box = message.findChild(QDialogButtonBox)
+    if button_box is not None:
+        _position_dialog_buttons(button_box)
     return message
 
 

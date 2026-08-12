@@ -11,7 +11,8 @@ class PageId(StrEnum):
     WEEKLY_DEMAND = "weekly_demand"
     DATE_OVERRIDE = "date_override"
     EMPLOYEE = "employee"
-    AVAILABILITY = "availability"
+    FULL_TIME_UNAVAILABLE = "full_time_unavailable"
+    PART_TIME_AVAILABLE = "part_time_available"
     REVIEW_SAVE = "review_save"
 
 
@@ -26,7 +27,7 @@ NAVIGATION_ITEMS: tuple[NavigationItem, ...] = (
     NavigationItem(
         PageId.MONTH_CLINIC,
         "月份與診所設定",
-        "設定排班月份、假日、固定時段與診所職務。",
+        "建立、開啟月份並確認本月使用的固定設定。",
     ),
     NavigationItem(
         PageId.WEEKLY_DEMAND,
@@ -35,18 +36,23 @@ NAVIGATION_ITEMS: tuple[NavigationItem, ...] = (
     ),
     NavigationItem(
         PageId.DATE_OVERRIDE,
-        "特定日期調整",
-        "處理臨時休診、加診或與週間模板不同的日期。",
+        "特殊日期設定",
+        "設定與一般日期所沿用之每週人力需求不同的調整。",
     ),
     NavigationItem(
         PageId.EMPLOYEE,
         "員工資料",
-        "維護人員類別、職務資格、公平分組與班次需求。",
+        "查看員工資料；雙擊員工姓名即可開啟編輯。",
     ),
     NavigationItem(
-        PageId.AVAILABILITY,
-        "休假與可排",
-        "設定正職休假與不可排，以及兼職明確可排時段。",
+        PageId.FULL_TIME_UNAVAILABLE,
+        "正職不可排",
+        "集中設定所有正職人員不能排班的日期與時段。",
+    ),
+    NavigationItem(
+        PageId.PART_TIME_AVAILABLE,
+        "兼職可排",
+        "集中設定所有兼職人員明確可以排班的日期與時段。",
     ),
     NavigationItem(
         PageId.REVIEW_SAVE,

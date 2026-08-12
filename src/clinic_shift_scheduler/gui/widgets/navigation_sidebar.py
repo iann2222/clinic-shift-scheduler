@@ -47,6 +47,20 @@ class NavigationSidebar(QFrame):
         layout.addWidget(self.list_widget, 1)
         self.list_widget.setCurrentRow(0)
 
+    def set_document_available(self, available: bool) -> None:
+        """Lock all workflow steps until a month document exists."""
+        self.list_widget.blockSignals(True)
+        if available and self.list_widget.currentRow() < 0:
+            self.list_widget.setCurrentRow(0)
+        elif not available:
+            self.list_widget.setCurrentRow(-1)
+            self.list_widget.clearSelection()
+        self.list_widget.setEnabled(available)
+        self.list_widget.blockSignals(False)
+        self.list_widget.setToolTip(
+            "" if available else "請先使用上方的「建立月份」或「開啟」功能。"
+        )
+
     def _emit_page(self, row: int) -> None:
         if row < 0:
             return
@@ -54,6 +68,8 @@ class NavigationSidebar(QFrame):
         self.page_selected.emit(PageId(value))
 
     def select_page(self, page_id: PageId) -> None:
+        if not self.list_widget.isEnabled():
+            return
         row = next(
             index
             for index, item in enumerate(NAVIGATION_ITEMS)

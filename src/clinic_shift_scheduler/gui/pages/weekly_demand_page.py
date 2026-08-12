@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QModelIndex, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QHeaderView,
@@ -38,32 +38,33 @@ class WeeklyDemandPage(InputPage):
         layout = QVBoxLayout()
         self.surface_layout.addLayout(layout, 1)
         hint = QLabel(
-            "勾選開診後，填寫早、午、晚各職務需要的人數；0 表示明確不需要。"
+            "每個時段可獨立開啟或休診；單擊人數即可在 1、2、3 之間輪替。"
         )
         hint.setObjectName("mutedText")
         hint.setWordWrap(True)
         layout.addWidget(hint)
         self.table = QTableView()
         self.table.setAccessibleName("每週人力需求")
-        self.table.setAlternatingRowColors(True)
+        self.table.setAlternatingRowColors(False)
         self.table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectItems
         )
-        self.table.setEditTriggers(
-            QAbstractItemView.EditTrigger.DoubleClicked
-            | QAbstractItemView.EditTrigger.SelectedClicked
-            | QAbstractItemView.EditTrigger.EditKeyPressed
-        )
+        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.model = WeeklyDemandTableModel()
         self.model.draft_changed.connect(self.draft_changed.emit)
         self.table.setModel(self.model)
+        self.table.clicked.connect(self._cycle_staffing_count)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        for column, width in ((0, 65), (1, 130), (2, 110)):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
+            self.table.setColumnWidth(column, width)
         self.table.verticalHeader().setVisible(False)
         layout.addWidget(self.table, 1)
+
+    def _cycle_staffing_count(self, index: QModelIndex) -> None:
+        if index.column() >= 3:
+            self.model.cycle_count(index)
 
     def bind_draft(self, draft: ScheduleDraft | None) -> None:
         self._draft = draft
@@ -76,7 +77,7 @@ class WeeklyDemandPage(InputPage):
         period_index = 0
         if location.period is not None:
             period_index = list(Period).index(Period(location.period))
-        column = 1 if location.field == "is_open" else 0
+        column = 0 if location.field == "is_open" else 1
         if location.role is not None and self._draft is not None:
             try:
                 column = 3 + self._draft.roles.index(location.role)

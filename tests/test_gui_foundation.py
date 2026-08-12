@@ -6,15 +6,26 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from datetime import date
 from pathlib import Path
 from unittest.mock import patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QDialog, QDialogButtonBox, QMessageBox, QTableWidget
+from PySide6.QtCore import QDate, Qt
+from PySide6.QtWidgets import (
+    QApplication,
+    QCalendarWidget,
+    QDialog,
+    QDialogButtonBox,
+    QMessageBox,
+    QPushButton,
+    QTableWidget,
+)
 
 from clinic_shift_scheduler.gui.dialogs import (
+    DatePickerDialog,
     MonthDialog,
     SettingsDialog,
     build_message_box,
@@ -35,7 +46,7 @@ class GuiFoundationTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = create_application(["gui-foundation-test"])
 
-    def test_navigation_contract_has_the_six_input_pages_in_order(self) -> None:
+    def test_navigation_contract_has_the_seven_input_pages_in_order(self) -> None:
         self.assertEqual(
             tuple(item.page_id for item in NAVIGATION_ITEMS),
             (
@@ -43,7 +54,8 @@ class GuiFoundationTests(unittest.TestCase):
                 PageId.WEEKLY_DEMAND,
                 PageId.DATE_OVERRIDE,
                 PageId.EMPLOYEE,
-                PageId.AVAILABILITY,
+                PageId.FULL_TIME_UNAVAILABLE,
+                PageId.PART_TIME_AVAILABLE,
                 PageId.REVIEW_SAVE,
             ),
         )
@@ -56,22 +68,37 @@ class GuiFoundationTests(unittest.TestCase):
             window.page_ids,
             tuple(item.page_id for item in NAVIGATION_ITEMS),
         )
-        self.assertEqual(window.page_stack.count(), 6)
+        self.assertEqual(window.page_stack.count(), 7)
         self.assertEqual(
             window.page_stack.currentWidget().page_id,
             PageId.MONTH_CLINIC,
         )
         self.assertEqual(window.findChildren(QTableWidget), [])
+        self.assertFalse(window.navigation.list_widget.isEnabled())
+        self.assertEqual(window.navigation.list_widget.currentRow(), -1)
 
         window.navigation.select_page(PageId.EMPLOYEE)
         self.assertEqual(
             window.page_stack.currentWidget().page_id,
-            PageId.EMPLOYEE,
+            PageId.MONTH_CLINIC,
         )
+        window.create_new_month(2027, 1)
+        self.assertTrue(window.navigation.list_widget.isEnabled())
+        window.navigation.select_page(PageId.EMPLOYEE)
+        self.assertEqual(window.page_stack.currentWidget().page_id, PageId.EMPLOYEE)
+        assert window.session is not None
+        window.session.mark_clean(Path("test.json"))
 
     def test_document_header_exposes_clear_clean_and_dirty_states(self) -> None:
         window = MainWindow()
         self.addCleanup(window.close)
+
+        self.assertTrue(
+            all(
+                not button.isEnabled()
+                for button in window.document_header.document_action_buttons
+            )
+        )
 
         window.document_header.set_document(
             month="2026-08",
@@ -80,6 +107,12 @@ class GuiFoundationTests(unittest.TestCase):
         )
         self.assertEqual(window.document_header.month_label.text(), "2026-08")
         self.assertEqual(window.document_header.status_label.text(), "已儲存")
+        self.assertTrue(
+            all(
+                button.isEnabled()
+                for button in window.document_header.document_action_buttons
+            )
+        )
 
         window.document_header.set_document(
             month="2026-08",
@@ -87,6 +120,22 @@ class GuiFoundationTests(unittest.TestCase):
             state=DocumentState.DIRTY,
         )
         self.assertEqual(window.document_header.status_label.text(), "尚未儲存")
+
+        header_buttons = {
+            button.text()
+            for button in window.document_header.findChildren(QPushButton)
+        }
+        self.assertFalse(
+            {"建立月份", "從上月建立", "開啟"} & header_buttons
+        )
+        month_page_buttons = {
+            button.text()
+            for button in window.month_clinic_page.findChildren(QPushButton)
+        }
+        self.assertTrue(
+            {"建立新月份", "從上月建立", "開啟既有月份"}
+            <= month_page_buttons
+        )
 
     def test_document_workflow_has_standard_keyboard_shortcuts(self) -> None:
         window = MainWindow()
@@ -136,6 +185,59 @@ class GuiFoundationTests(unittest.TestCase):
             settings_buttons.button(QDialogButtonBox.StandardButton.Cancel).text(),
             "取消",
         )
+        self.assertEqual(
+            month_buttons.layoutDirection(),
+            Qt.LayoutDirection.LeftToRight,
+        )
+        self.assertEqual(
+            settings_buttons.layoutDirection(),
+            Qt.LayoutDirection.LeftToRight,
+        )
+        month_dialog.show()
+        settings_dialog.show()
+        QApplication.processEvents()
+        for dialog, button_box, reject_button, accept_button in (
+            (
+                month_dialog,
+                month_buttons,
+                month_buttons.button(QDialogButtonBox.StandardButton.Cancel),
+                month_buttons.button(QDialogButtonBox.StandardButton.Ok),
+            ),
+            (
+                settings_dialog,
+                settings_buttons,
+                settings_buttons.button(QDialogButtonBox.StandardButton.Cancel),
+                settings_buttons.button(QDialogButtonBox.StandardButton.Save),
+            ),
+        ):
+            self.assertLess(reject_button.x(), accept_button.x())
+            bottom_right = button_box.mapTo(
+                dialog,
+                button_box.rect().bottomRight(),
+            )
+            self.assertLessEqual(dialog.width() - bottom_right.x(), 16)
+            self.assertLessEqual(dialog.height() - bottom_right.y(), 16)
+
+    def test_month_dialog_uses_simple_year_and_month_fields(self) -> None:
+        month_dialog = MonthDialog("建立月份", "選擇月份")
+        self.addCleanup(month_dialog.close)
+
+        expected = QDate.currentDate().addMonths(1)
+        self.assertEqual(month_dialog.year_month, (expected.year(), expected.month()))
+
+        month_dialog.year_edit.setValue(2028)
+        month_dialog.month_edit.setCurrentIndex(10)
+
+        self.assertEqual(month_dialog.year_month, (2028, 11))
+        self.assertEqual(month_dialog.month_edit.maxVisibleItems(), 12)
+        self.assertEqual(
+            month_dialog.month_edit.view().verticalScrollBarPolicy(),
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff,
+        )
+        month_dialog.year_edit.lineEdit().selectAll()
+        month_dialog.year_edit.stepBy(1)
+        QApplication.processEvents()
+        self.assertEqual(month_dialog.year_edit.lineEdit().selectedText(), "")
 
     def test_settings_dialog_loads_effective_config_and_switches_time_mode(
         self,
@@ -211,12 +313,56 @@ class GuiFoundationTests(unittest.TestCase):
             message.button(QMessageBox.StandardButton.Cancel).text(),
             "取消",
         )
+        button_box = message.findChild(QDialogButtonBox)
+        assert button_box is not None
+        self.assertEqual(
+            button_box.layoutDirection(),
+            Qt.LayoutDirection.LeftToRight,
+        )
+
+    def test_date_picker_is_month_bounded_and_uses_bottom_right_actions(self) -> None:
+        dialog = DatePickerDialog(
+            "選擇日期",
+            "請選擇日期",
+            date(2026, 8, 1),
+            date(2026, 8, 31),
+        )
+        self.addCleanup(dialog.close)
+
+        calendar = dialog.findChild(QCalendarWidget)
+        buttons = dialog.findChild(QDialogButtonBox)
+        assert calendar is not None and buttons is not None
+        self.assertEqual(calendar.minimumDate().toString("yyyy-MM-dd"), "2026-08-01")
+        self.assertEqual(calendar.maximumDate().toString("yyyy-MM-dd"), "2026-08-31")
+        self.assertFalse(calendar.isNavigationBarVisible())
+        self.assertEqual(
+            calendar.verticalHeaderFormat(),
+            QCalendarWidget.VerticalHeaderFormat.NoVerticalHeader,
+        )
+        self.assertEqual(dialog.date_picker.year_label.text(), "2026 年")
+        self.assertEqual(dialog.date_picker.month_label.text(), "8 月")
+        self.assertFalse(hasattr(dialog.date_picker, "previous_button"))
+        self.assertFalse(hasattr(dialog.date_picker, "next_button"))
+        self.assertEqual(calendar._fixed_year, 2026)
+        self.assertEqual(calendar._fixed_month, 8)
+        calendar.setSelectedDate(QDate(2026, 8, 15))
+        self.assertEqual(dialog.selected_date, date(2026, 8, 15))
+        self.assertEqual(dialog.selection_label.text(), "已選日期：2026 年 8 月 15 日")
+        self.assertEqual(buttons.layoutDirection(), Qt.LayoutDirection.LeftToRight)
+        self.assertTrue(
+            dialog.layout().itemAt(dialog.layout().count() - 1).alignment()
+            & Qt.AlignmentFlag.AlignRight
+        )
 
     def test_stylesheet_substitutes_every_palette_token(self) -> None:
         stylesheet = load_application_stylesheet()
         self.assertNotIn("$BACKGROUND", stylesheet)
         self.assertNotIn("$PRIMARY", stylesheet)
         self.assertIn("Microsoft JhengHei UI", stylesheet)
+        self.assertIn("QTabBar::tab:selected", stylesheet)
+        self.assertIn("QTabWidget#settingsTabs::pane", stylesheet)
+        self.assertIn("QScrollBar::handle:vertical", stylesheet)
+        self.assertIn("QPushButton:focus", stylesheet)
 
     def test_gui_smoke_entry_exits_without_loading_a_document(self) -> None:
         environment = os.environ.copy()

@@ -1,5 +1,7 @@
 """Dialogs and localized dialog helpers used by the desktop editor."""
 
+from .date_picker_dialog import DatePickerDialog, MonthCalendarWidget
+from .employee_dialog import EmployeeEditDialog, EmployeeEditorValues
 from .localized_dialogs import (
     ask_yes_no,
     build_message_box,
@@ -12,6 +14,10 @@ from .month_dialog import MonthDialog
 from .settings_dialog import SettingsDialog
 
 __all__ = [
+    "DatePickerDialog",
+    "EmployeeEditDialog",
+    "EmployeeEditorValues",
+    "MonthCalendarWidget",
     "MonthDialog",
     "SettingsDialog",
     "ask_yes_no",

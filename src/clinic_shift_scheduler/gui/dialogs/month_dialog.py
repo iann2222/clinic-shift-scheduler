@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QDate
+from PySide6.QtCore import QDate, Qt, QTimer
 from PySide6.QtWidgets import (
-    QDateEdit,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFormLayout,
     QLabel,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
 
 from .localized_dialogs import localize_dialog_buttons
+
+
+class _YearSpinBox(QSpinBox):
+    def stepBy(self, steps: int) -> None:
+        super().stepBy(steps)
+        QTimer.singleShot(0, self.lineEdit().deselect)
 
 
 class MonthDialog(QDialog):
@@ -33,10 +40,35 @@ class MonthDialog(QDialog):
         label.setWordWrap(True)
         layout.addWidget(label)
         form = QFormLayout()
-        self.month_edit = QDateEdit(initial or QDate.currentDate())
-        self.month_edit.setCalendarPopup(True)
-        self.month_edit.setDisplayFormat("yyyy-MM")
-        form.addRow("目標月份：", self.month_edit)
+        selected = initial or QDate.currentDate().addMonths(1)
+        self.year_edit = _YearSpinBox()
+        self.year_edit.setRange(2000, 2100)
+        self.year_edit.setValue(selected.year())
+        self.year_edit.setSuffix(" 年")
+        self.year_edit.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        self.year_edit.setFixedWidth(120)
+        self.month_edit = QComboBox()
+        for month in range(1, 13):
+            self.month_edit.addItem(f"{month} 月", month)
+        self.month_edit.setCurrentIndex(selected.month() - 1)
+        self.month_edit.setFixedWidth(120)
+        self.month_edit.setEditable(True)
+        self.month_edit.lineEdit().setReadOnly(True)
+        self.month_edit.lineEdit().setAlignment(Qt.AlignmentFlag.AlignLeft)
+        for index in range(self.month_edit.count()):
+            self.month_edit.setItemData(
+                index,
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                Qt.ItemDataRole.TextAlignmentRole,
+            )
+        self.month_edit.setMaxVisibleItems(12)
+        self.month_edit.view().setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        row_height = max(self.month_edit.view().sizeHintForRow(0), 20)
+        self.month_edit.view().setMinimumHeight(row_height * 12 + 2)
+        form.addRow("年份：", self.year_edit)
+        form.addRow("月份：", self.month_edit)
         layout.addLayout(form)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -45,9 +77,16 @@ class MonthDialog(QDialog):
         localize_dialog_buttons(buttons)
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        layout.addWidget(buttons, 0, Qt.AlignmentFlag.AlignRight)
+        self._accept_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
+        QTimer.singleShot(0, self._focus_primary_action)
 
     @property
     def year_month(self) -> tuple[int, int]:
-        value = self.month_edit.date()
-        return value.year(), value.month()
+        return self.year_edit.value(), int(self.month_edit.currentData())
+
+    def _focus_primary_action(self) -> None:
+        self.year_edit.lineEdit().deselect()
+        self.month_edit.lineEdit().deselect()
+        self.year_edit.clearFocus()
+        self._accept_button.setFocus()

@@ -30,11 +30,14 @@ def resolve_field_location(path: str) -> FieldLocation:
     if path == "$.date_overrides":
         return FieldLocation(PageId.DATE_OVERRIDE, field="date_overrides")
     if path in {"$.leave_requests", "$.unavailable_slots"}:
-        return FieldLocation(PageId.AVAILABILITY, field=path.removeprefix("$."))
+        return FieldLocation(
+            PageId.FULL_TIME_UNAVAILABLE,
+            field=path.removeprefix("$."),
+        )
     if path.startswith("$.roles"):
         return FieldLocation(PageId.MONTH_CLINIC, field="roles")
     if path.startswith("$.period.holidays"):
-        return FieldLocation(PageId.MONTH_CLINIC, field="holidays")
+        return FieldLocation(PageId.DATE_OVERRIDE, field="holidays")
 
     employee = re.match(r"\$\.employees\[(\d+)\](?:\.([A-Za-z_]+))?", path)
     if employee:
@@ -46,7 +49,7 @@ def resolve_field_location(path: str) -> FieldLocation:
         )
         if slot:
             return FieldLocation(
-                PageId.AVAILABILITY,
+                PageId.PART_TIME_AVAILABLE,
                 field=slot.group(2),
                 employee_index=employee_index,
                 available_slot_index=int(slot.group(1)),
@@ -85,7 +88,7 @@ def resolve_field_location(path: str) -> FieldLocation:
     )
     if record:
         return FieldLocation(
-            PageId.AVAILABILITY,
+            PageId.FULL_TIME_UNAVAILABLE,
             field=record.group(3),
             record_type=record.group(1),
             record_index=int(record.group(2)),

@@ -18,7 +18,7 @@ class GuiFieldLocationTests(unittest.TestCase):
         )
         self.assertEqual(
             resolve_field_location("$.leave_requests").page_id,
-            PageId.AVAILABILITY,
+            PageId.FULL_TIME_UNAVAILABLE,
         )
 
     def test_employee_field_resolves_to_exact_employee_and_field(self) -> None:
@@ -33,7 +33,7 @@ class GuiFieldLocationTests(unittest.TestCase):
             "$.employees[4].available_slots[7].roles"
         )
 
-        self.assertEqual(location.page_id, PageId.AVAILABILITY)
+        self.assertEqual(location.page_id, PageId.PART_TIME_AVAILABLE)
         self.assertEqual(location.employee_index, 4)
         self.assertEqual(location.available_slot_index, 7)
         self.assertEqual(location.field, "roles")
@@ -58,9 +58,15 @@ class GuiFieldLocationTests(unittest.TestCase):
         self.assertEqual(override.override_index, 1)
         self.assertEqual(override.period, "morning")
         self.assertEqual(override.role, "reception")
-        self.assertEqual(leave.page_id, PageId.AVAILABILITY)
+        self.assertEqual(leave.page_id, PageId.FULL_TIME_UNAVAILABLE)
         self.assertEqual(leave.record_type, "leave_requests")
         self.assertEqual(leave.record_index, 8)
+
+    def test_holiday_errors_route_to_specific_date_page(self) -> None:
+        location = resolve_field_location("$.period.holidays[0]")
+
+        self.assertEqual(location.page_id, PageId.DATE_OVERRIDE)
+        self.assertEqual(location.field, "holidays")
 
 
 if __name__ == "__main__":

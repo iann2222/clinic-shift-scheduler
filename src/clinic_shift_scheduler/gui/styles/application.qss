@@ -35,6 +35,54 @@ QFrame#documentHeader, QFrame#pageSurface {
     border-radius: 5px;
 }
 
+QFrame#monthStartPanel {
+    background-color: $PRIMARY_SOFT;
+    border: 1px solid $BORDER;
+    border-radius: 5px;
+}
+
+QFrame#monthActionCard {
+    background-color: $SURFACE;
+    border: 1px solid $BORDER;
+    border-radius: 4px;
+}
+
+QLabel#sectionTitle {
+    color: $PRIMARY;
+    font-size: 12pt;
+    font-weight: 600;
+}
+
+QPushButton#monthActionButton {
+    color: $PRIMARY;
+    font-weight: 600;
+}
+
+QLabel#selectedDateLabel {
+    color: $PRIMARY;
+    font-weight: 600;
+    padding: 5px 0;
+}
+
+QLabel#calendarMonthLabel {
+    color: $PRIMARY;
+    font-size: 12pt;
+    font-weight: 600;
+    padding: 4px 8px;
+}
+
+QGroupBox#employeeReadOnlyDetail {
+    background-color: $BACKGROUND;
+    border: 1px solid $BORDER;
+    border-radius: 4px;
+    padding: 10px;
+}
+
+QPushButton#destructiveButton {
+    color: #9A3D3D;
+    border-color: #CFAAAA;
+}
+
 QPushButton, QToolButton {
     background-color: $SURFACE;
     border: 1px solid $BORDER;
@@ -49,6 +97,11 @@ QPushButton:hover, QToolButton:hover {
 
 QPushButton:pressed, QToolButton:pressed {
     background-color: $PRIMARY_SOFT;
+}
+
+QPushButton:focus, QToolButton:focus {
+    outline: none;
+    border: 2px solid $PRIMARY;
 }
 
 QPushButton:disabled, QToolButton:disabled {
@@ -78,6 +131,16 @@ QListWidget#navigationList::item:hover:!selected {
     background-color: $PRIMARY_SOFT;
 }
 
+QListWidget#navigationList:disabled {
+    background-color: #D8DDE0;
+    color: #8A959B;
+}
+
+QListWidget#navigationList::item:disabled {
+    background-color: #D8DDE0;
+    color: #8A959B;
+}
+
 QLabel#documentStatusClean {
     color: $SUCCESS;
     font-weight: 600;
@@ -90,4 +153,93 @@ QLabel#documentStatusDirty {
 
 QDialog, QTabWidget::pane {
     background-color: $SURFACE;
+}
+
+QTabWidget#settingsTabs::pane {
+    background-color: $SURFACE;
+    border: 1px solid $BORDER;
+    top: -1px;
+}
+
+QTabWidget#settingsTabs QTabBar::tab {
+    background-color: $BACKGROUND;
+    border: 1px solid $BORDER;
+    border-bottom: 1px solid $BORDER;
+    padding: 8px 20px;
+    color: $TEXT_MUTED;
+}
+
+QTabWidget#settingsTabs QTabBar::tab:selected {
+    background-color: $SURFACE;
+    color: $PRIMARY;
+    border-top: 3px solid $PRIMARY;
+    border-bottom-color: $SURFACE;
+    font-weight: 600;
+}
+
+QTabWidget#settingsTabs QTabBar::tab:hover:!selected {
+    background-color: $PRIMARY_SOFT;
+    color: $TEXT;
+}
+
+QGroupBox#frozenSection {
+    background-color: #EEF0F1;
+    color: $TEXT_MUTED;
+    border: 1px solid #D5D9DB;
+}
+
+QScrollBar:vertical {
+    background: $BACKGROUND;
+    width: 12px;
+    margin: 1px;
+    border: none;
+    border-radius: 6px;
+}
+
+QScrollBar::handle:vertical {
+    background: #A8B4B9;
+    min-height: 28px;
+    margin: 2px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:vertical:hover {
+    background: #7D969F;
+}
+
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+    height: 0;
+    background: transparent;
+}
+
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {
+    background: transparent;
+}
+
+QScrollBar:horizontal {
+    background: $BACKGROUND;
+    height: 12px;
+    margin: 1px;
+    border: none;
+    border-radius: 6px;
+}
+
+QScrollBar::handle:horizontal {
+    background: #A8B4B9;
+    min-width: 28px;
+    margin: 2px;
+    border-radius: 4px;
+}
+
+QScrollBar::handle:horizontal:hover {
+    background: #7D969F;
+}
+
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {
+    width: 0;
+    background: transparent;
+}
+
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {
+    background: transparent;
 }

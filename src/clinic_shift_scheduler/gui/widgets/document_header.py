@@ -24,9 +24,6 @@ class DocumentState(StrEnum):
 
 
 class DocumentHeader(QFrame):
-    create_requested = Signal()
-    copy_previous_requested = Signal()
-    open_requested = Signal()
     save_requested = Signal()
     save_as_requested = Signal()
     settings_requested = Signal()
@@ -54,10 +51,8 @@ class DocumentHeader(QFrame):
         self.status_label.setObjectName("documentStatusDirty")
         outer.addWidget(self.status_label)
 
+        self.document_action_buttons: list[QPushButton] = []
         for text, shortcut, signal in (
-            ("建立月份", "Ctrl+N", self.create_requested),
-            ("從上月建立", None, self.copy_previous_requested),
-            ("開啟", "Ctrl+O", self.open_requested),
             ("儲存", "Ctrl+S", self.save_requested),
             ("另存", "Ctrl+Shift+S", self.save_as_requested),
         ):
@@ -65,6 +60,7 @@ class DocumentHeader(QFrame):
             if shortcut is not None:
                 button.setToolTip(f"{text}（{shortcut}）")
             button.clicked.connect(signal.emit)
+            self.document_action_buttons.append(button)
             outer.addWidget(button)
 
         self.settings_button = QToolButton()
@@ -85,6 +81,8 @@ class DocumentHeader(QFrame):
         rendered_path = str(path) if path is not None else "尚未開啟檔案"
         self.path_label.setText(rendered_path)
         self.path_label.setToolTip(rendered_path)
+        for button in self.document_action_buttons:
+            button.setEnabled(month is not None)
         label = {
             DocumentState.NEW: "尚未建立檔案",
             DocumentState.CLEAN: "已儲存",

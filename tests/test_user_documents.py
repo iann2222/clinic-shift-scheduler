@@ -28,6 +28,13 @@ WEEKLY_EXAMPLE = (
 
 
 class UserDocumentTests(unittest.TestCase):
+    def test_anonymous_example_employee_notes_are_empty(self) -> None:
+        payload = json.loads(WEEKLY_EXAMPLE.read_text(encoding="utf-8"))
+
+        self.assertTrue(
+            all(not employee.get("notes") for employee in payload["employees"])
+        )
+
     def test_weekly_document_reports_multiple_structural_issues(self) -> None:
         payload = json.loads(WEEKLY_EXAMPLE.read_text(encoding="utf-8"))
         payload["unknown_root"] = True
@@ -66,7 +73,7 @@ class UserDocumentTests(unittest.TestCase):
         document = WeeklyAuthoringDocument.from_dict(payload)
 
         self.assertEqual(document.to_dict(), payload)
-        self.assertEqual(document.employees[0].notes, payload["employees"][0]["notes"])
+        self.assertIsNone(document.employees[0].notes)
         self.assertEqual(document.roles, ("reception", "nursing"))
         self.assertEqual(document.weekly_demands[0].staffing.to_dict(), payload["weekly_demands"][0]["staffing"])
 

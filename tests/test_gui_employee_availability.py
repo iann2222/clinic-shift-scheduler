@@ -4,6 +4,7 @@ import os
 import unittest
 from datetime import date
 from pathlib import Path
+from unittest.mock import patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -13,13 +14,17 @@ from PySide6.QtCore import Qt
 from clinic_shift_scheduler.authoring_application import AuthoringApplication
 from clinic_shift_scheduler.enums import EmploymentType, Period, ShiftMode
 from clinic_shift_scheduler.gui.main import create_application
+from clinic_shift_scheduler.gui.dialogs import EmployeeEditDialog
 from clinic_shift_scheduler.gui.pages import EmployeePage
+from clinic_shift_scheduler.gui.pages import FullTimeUnavailablePage, PartTimeAvailablePage
 from clinic_shift_scheduler.gui.drafts import UnavailableSlotDraft
 from clinic_shift_scheduler.gui.models import (
     AvailabilityFilterProxyModel,
+    AvailabilitySummaryTableModel,
     AvailabilityTableModel,
     EmployeeTableModel,
 )
+from clinic_shift_scheduler.gui.pages.availability_page import _parse_day_numbers
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -215,6 +220,132 @@ class EmployeeAvailabilityModelTests(unittest.TestCase):
             model.data(model.index(0, 0), Qt.ItemDataRole.UserRole),
             self.session.draft.employees[0].employee_id,
         )
+        self.assertEqual(model.columnCount(), 6)
+        headers = {
+            model.headerData(column, Qt.Orientation.Horizontal)
+            for column in range(model.columnCount())
+        }
+        self.assertIn("職務", headers)
+        self.assertNotIn("公平分組", headers)
+
+    def test_summary_models_show_all_employees_of_their_own_type(self) -> None:
+        full_time = AvailabilitySummaryTableModel(
+            EmploymentType.FULL_TIME,
+            self.session.draft,
+        )
+        part_time = AvailabilitySummaryTableModel(
+            EmploymentType.PART_TIME,
+            self.session.draft,
+        )
+
+        self.assertEqual(full_time.rowCount(), 4)
+        self.assertEqual(part_time.rowCount(), 2)
+        self.assertEqual(full_time.columnCount(), 2)
+        self.assertEqual(part_time.columnCount(), 2)
+        self.assertIn("2 號（早）", part_time.data(part_time.index(0, 1)))
+
+    def test_full_time_summary_replaces_only_selected_employee_periods(self) -> None:
+        model = AvailabilitySummaryTableModel(
+            EmploymentType.FULL_TIME,
+            self.session.draft,
+        )
+        employee = model.employee_at(0)
+        assert employee is not None
+        selected = {
+            (date(2026, 8, 3), Period.MORNING),
+            (date(2026, 8, 3), Period.EVENING),
+        }
+
+        model.replace_selected_periods(employee, selected)
+
+        self.assertEqual(model.selected_periods(employee), selected)
+        self.assertEqual(
+            self.session.draft.availability_state(
+                employee, date(2026, 8, 3), Period.AFTERNOON
+            ),
+            "available",
+        )
+        self.assertTrue(self.application.validate(self.session.draft).is_valid)
+
+    def test_new_full_day_selection_stays_unavailable_not_leave(self) -> None:
+        model = AvailabilitySummaryTableModel(
+            EmploymentType.FULL_TIME,
+            self.session.draft,
+        )
+        employee = model.employee_at(0)
+        assert employee is not None
+        day = date(2026, 8, 5)
+
+        model.replace_selected_periods(
+            employee,
+            {(day, period) for period in self.session.draft.periods},
+        )
+
+        self.assertFalse(
+            any(
+                item.employee_id == employee.employee_id
+                and item.date == day
+                and item.all_day
+                for item in self.session.draft.leave_requests
+            )
+        )
+        self.assertEqual(
+            {
+                item.period
+                for item in self.session.draft.unavailable_slots
+                if item.employee_id == employee.employee_id and item.date == day
+            },
+            set(self.session.draft.periods),
+        )
+
+    def test_part_time_summary_preserves_existing_role_restrictions(self) -> None:
+        model = AvailabilitySummaryTableModel(
+            EmploymentType.PART_TIME,
+            self.session.draft,
+        )
+        employee = model.employee_at(0)
+        assert employee is not None and employee.available_slots
+        original = employee.available_slots[0]
+        original.roles = [employee.roles[0]]
+        selected = model.selected_periods(employee)
+        selected.add((date(2026, 8, 5), Period.AFTERNOON))
+
+        model.replace_selected_periods(employee, selected)
+
+        preserved = self.session.draft.available_slot(
+            employee, original.date, original.period
+        )
+        added = self.session.draft.available_slot(
+            employee, date(2026, 8, 5), Period.AFTERNOON
+        )
+        assert preserved is not None and added is not None
+        self.assertEqual(preserved.roles, [employee.roles[0]])
+        self.assertIsNone(added.roles)
+
+    def test_date_list_parser_accepts_common_separators_and_validates_month(self) -> None:
+        self.assertEqual(_parse_day_numbers("1、 3,5；3", 31), (1, 3, 5))
+        self.assertEqual(_parse_day_numbers("", 31), ())
+        with self.assertRaisesRegex(ValueError, "1 到 28"):
+            _parse_day_numbers("29", 28)
+        with self.assertRaisesRegex(ValueError, "不是有效日號"):
+            _parse_day_numbers("星期一", 31)
+
+    def test_full_time_and_part_time_pages_use_same_fixed_name_width(self) -> None:
+        full_time_page = FullTimeUnavailablePage()
+        part_time_page = PartTimeAvailablePage()
+        self.addCleanup(full_time_page.close)
+        self.addCleanup(part_time_page.close)
+        full_time_page.bind_draft(self.session.draft)
+        part_time_page.bind_draft(self.session.draft)
+
+        self.assertEqual(
+            full_time_page.table.columnWidth(0),
+            part_time_page.table.columnWidth(0),
+        )
+        self.assertGreaterEqual(
+            full_time_page.table.columnWidth(0),
+            full_time_page.table.fontMetrics().horizontalAdvance("中文四字"),
+        )
 
     def test_availability_model_edits_full_time_matrix(self) -> None:
         employee = self.session.draft.employees[0]
@@ -244,16 +375,73 @@ class EmployeeAvailabilityModelTests(unittest.TestCase):
         self.assertFalse(flags & Qt.ItemFlag.ItemIsEnabled)
         self.assertFalse(flags & Qt.ItemFlag.ItemIsEditable)
 
-    def test_employee_page_shows_immediate_basic_validation(self) -> None:
+    def test_employee_page_shows_selected_employee_as_read_only_summary(self) -> None:
         page = EmployeePage()
         self.addCleanup(page.close)
         page.bind_draft(self.session.draft)
 
-        page.name_edit.setText("")
-        page.name_edit.editingFinished.emit()
+        self.assertEqual(page.name_label.text(), self.session.draft.employees[0].name)
+        self.assertTrue(page.edit_button.isEnabled())
+        self.assertFalse(hasattr(page, "name_edit"))
 
-        self.assertFalse(page.inline_validation_label.isHidden())
-        self.assertIn("姓名不可留空", page.inline_validation_label.text())
+    def test_employee_editor_role_checkboxes_use_chinese_labels_and_domain_keys(self) -> None:
+        dialog = EmployeeEditDialog(
+            self.session.draft.roles,
+            employee=self.session.draft.employees[0],
+        )
+        self.addCleanup(dialog.close)
+
+        self.assertEqual(
+            [checkbox.text() for checkbox in dialog.role_checks],
+            ["櫃台", "跟診"],
+        )
+        self.assertEqual(
+            [checkbox.property("role_key") for checkbox in dialog.role_checks],
+            ["reception", "nursing"],
+        )
+        self.assertTrue(any(checkbox.isChecked() for checkbox in dialog.role_checks))
+
+    def test_new_employee_editor_allows_full_time_class_selection(self) -> None:
+        dialog = EmployeeEditDialog(self.session.draft.roles)
+        self.addCleanup(dialog.close)
+
+        self.assertTrue(dialog.class_combo.isEnabled())
+        dialog.class_combo.setCurrentIndex(1)
+        self.assertEqual(dialog.values.full_time_class.value, "B")
+
+    def test_double_clicking_employee_name_opens_editor(self) -> None:
+        page = EmployeePage()
+        self.addCleanup(page.close)
+        page.bind_draft(self.session.draft)
+
+        with patch.object(page, "_edit_employee") as edit_employee:
+            page.table.doubleClicked.emit(page.model.index(0, 0))
+            edit_employee.assert_called_once_with()
+            page.table.doubleClicked.emit(page.model.index(0, 1))
+            edit_employee.assert_called_once_with()
+
+    def test_employee_editor_shows_only_fields_for_selected_shift_mode(self) -> None:
+        dialog = EmployeeEditDialog(self.session.draft.roles)
+        self.addCleanup(dialog.close)
+
+        self.assertTrue(dialog.shift_form.isRowVisible(dialog.required_spin))
+        self.assertFalse(dialog.shift_form.isRowVisible(dialog.target_spin))
+        self.assertFalse(dialog.shift_form.isRowVisible(dialog.minimum_row))
+
+        dialog.mode_combo.setCurrentIndex(dialog.mode_combo.findData(ShiftMode.RANGE))
+        self.assertFalse(dialog.shift_form.isRowVisible(dialog.required_spin))
+        self.assertFalse(dialog.shift_form.isRowVisible(dialog.target_spin))
+        self.assertTrue(dialog.shift_form.isRowVisible(dialog.minimum_row))
+        self.assertTrue(dialog.shift_form.isRowVisible(dialog.maximum_row))
+        self.assertTrue(dialog.min_enabled.isHidden())
+        self.assertTrue(dialog.max_enabled.isHidden())
+
+        dialog.mode_combo.setCurrentIndex(dialog.mode_combo.findData(ShiftMode.TARGET))
+        self.assertFalse(dialog.shift_form.isRowVisible(dialog.required_spin))
+        self.assertTrue(dialog.shift_form.isRowVisible(dialog.target_spin))
+        self.assertTrue(dialog.shift_form.isRowVisible(dialog.minimum_row))
+        self.assertFalse(dialog.min_enabled.isHidden())
+        self.assertFalse(dialog.max_enabled.isHidden())
 
     def test_batch_period_state_updates_multiple_cells_once(self) -> None:
         employee = self.session.draft.employees[0]

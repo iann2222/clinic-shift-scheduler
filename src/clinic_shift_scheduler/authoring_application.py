@@ -76,8 +76,8 @@ class AuthoringApplication:
         rules = [
             WeeklyDemandDraft(
                 weekdays=list(weekdays),
-                is_open=False,
-                staffing=None,
+                is_open=True,
+                staffing=StaffingDraft.filled(role_list, 1),
             )
             for weekdays in (
                 (

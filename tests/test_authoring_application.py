@@ -58,6 +58,14 @@ class AuthoringApplicationTests(unittest.TestCase):
             ["morning", "afternoon", "evening"],
         )
         self.assertEqual(len(session.draft.weekly_demands), 3)
+        self.assertTrue(all(rule.is_open for rule in session.draft.weekly_demands))
+        for rule in session.draft.weekly_demands:
+            assert rule.staffing is not None
+            for period in session.draft.periods:
+                self.assertEqual(
+                    rule.staffing.counts[period],
+                    {role: 1 for role in session.draft.roles},
+                )
         self.assertTrue(session.is_dirty)
         self.assertEqual(default_month_filename(2027, 2), "排班輸入_2027-02.json")
 

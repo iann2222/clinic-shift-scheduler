@@ -5,6 +5,7 @@ from __future__ import annotations
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
 from ...enums import EmploymentType, ShiftMode
+from ..display_labels import role_display_name
 from ..drafts import EmployeeDraft, ScheduleDraft
 
 
@@ -21,8 +22,7 @@ _HEADERS = (
     "姓名",
     "類別",
     "A／B 類",
-    "職務資格",
-    "公平分組",
+    "職務",
     "班次模式",
     "班次條件",
 )
@@ -83,15 +83,14 @@ class EmployeeTableModel(QAbstractTableModel):
                 employee.name,
                 _TYPE_LABELS[employee.employment_type],
                 "—" if employee.full_time_class is None else employee.full_time_class.value,
-                "、".join(employee.roles),
-                employee.fairness_group,
+                "、".join(role_display_name(role) for role in employee.roles),
                 _MODE_LABELS[employee.shift_mode],
                 _shift_summary(employee),
             )
             return values[index.column()]
         if role == Qt.ItemDataRole.UserRole:
             return employee.employee_id
-        if role == Qt.ItemDataRole.TextAlignmentRole and index.column() in (1, 2, 5, 6):
+        if role == Qt.ItemDataRole.TextAlignmentRole and index.column() in (1, 2, 4, 5):
             return Qt.AlignmentFlag.AlignCenter
         return None
 

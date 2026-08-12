@@ -13,6 +13,7 @@ from PySide6.QtCore import (
 )
 
 from ...enums import PERIODS_V1, EmploymentType, Period
+from ..display_labels import role_display_name
 from ..drafts import EmployeeDraft, ScheduleDraft
 
 
@@ -157,7 +158,10 @@ class AvailabilityTableModel(QAbstractTableModel):
             ):
                 slot = self._draft.available_slot(self._employee, value, period)
                 if slot is not None and slot.roles is not None:
-                    return f"{label}（{'、'.join(slot.roles)}）"
+                    return (
+                        f"{label}（"
+                        f"{'、'.join(role_display_name(role) for role in slot.roles)}）"
+                    )
             return label
         if role == Qt.ItemDataRole.EditRole and column >= 3:
             period = self.period_at(column)

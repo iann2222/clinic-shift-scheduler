@@ -79,8 +79,7 @@
       ],
       "fairness_group": "A_GENERAL",
       "shift_mode": "EXACT",
-      "required_shifts": 44,
-      "notes": "只能安排櫃檯班；與乙同屬 A 類並要求班型儘量公平。"
+      "required_shifts": 44
     },
     {
       "employee_id": "FT002",
@@ -93,8 +92,7 @@
       ],
       "fairness_group": "A_GENERAL",
       "shift_mode": "EXACT",
-      "required_shifts": 44,
-      "notes": "護理與櫃檯皆可安排；與甲同屬 A 類並要求班型儘量公平。"
+      "required_shifts": 44
     },
     {
       "employee_id": "FT003",
@@ -107,8 +105,7 @@
       ],
       "fairness_group": "B_GENERAL",
       "shift_mode": "EXACT",
-      "required_shifts": 40,
-      "notes": "與丁同屬 B 類並要求班型儘量公平。"
+      "required_shifts": 40
     },
     {
       "employee_id": "FT004",
@@ -121,8 +118,7 @@
       ],
       "fairness_group": "B_GENERAL",
       "shift_mode": "EXACT",
-      "required_shifts": 25,
-      "notes": "與丙同屬 B 類並要求班型儘量公平。"
+      "required_shifts": 25
     },
     {
       "employee_id": "PT001",
@@ -150,8 +146,7 @@
             "nursing"
           ]
         }
-      ],
-      "notes": "兩個可排時段均計入本月必要人力，因此使用 EXACT 2。"
+      ]
     },
     {
       "employee_id": "PT002",
@@ -221,8 +216,7 @@
             "nursing"
           ]
         }
-      ],
-      "notes": "從八個可排時段中安排六節，因此使用 EXACT 6。"
+      ]
     }
   ],
   "leave_requests": [

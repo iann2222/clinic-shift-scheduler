@@ -26,9 +26,13 @@ class StaffingDraft:
 
     @classmethod
     def zero(cls, roles: list[str]) -> StaffingDraft:
+        return cls.filled(roles, 0)
+
+    @classmethod
+    def filled(cls, roles: list[str], count: int) -> StaffingDraft:
         return cls(
             {
-                period: {role: 0 for role in roles}
+                period: {role: count for role in roles}
                 for period in PERIODS_V1
             }
         )
@@ -194,7 +198,7 @@ class ScheduleDraft:
             DateOverrideDraft(
                 date=value,
                 is_open=is_open,
-                staffing=StaffingDraft.zero(self.roles) if is_open else None,
+                staffing=StaffingDraft.filled(self.roles, 1) if is_open else None,
             )
         )
         self.date_overrides.sort(key=lambda item: item.date)
@@ -472,6 +476,136 @@ class ScheduleDraft:
                 raise ValueError("限制職務時至少必須選擇一項")
         slot.roles = None if roles is None else list(roles)
         self.touch()
+
+    def unavailable_periods_for(
+        self,
+        employee: EmployeeDraft,
+    ) -> set[tuple[date, Period]]:
+        """Return every unavailable/leave period shown by the simplified FT UI."""
+        if employee.employment_type is not EmploymentType.FULL_TIME:
+            return set()
+        return {
+            (day, period)
+            for day in self._month_dates()
+            for period in PERIODS_V1
+            if self.availability_state(employee, day, period) != "available"
+        }
+
+    def replace_full_time_unavailable_periods(
+        self,
+        employee: EmployeeDraft,
+        selected: set[tuple[date, Period]],
+    ) -> None:
+        """Replace one FT employee's simplified unavailable-period selection."""
+        if employee.employment_type is not EmploymentType.FULL_TIME:
+            raise ValueError("只有正職人員可設定正職不可排時段")
+        for day, period in selected:
+            self._assert_employee_date(employee.employee_id, day)
+            if period not in PERIODS_V1:
+                raise ValueError("不支援的時段")
+
+        original_all_day = {
+            item.date: item
+            for item in self.leave_requests
+            if item.employee_id == employee.employee_id and item.all_day
+        }
+        original_period_leave = {
+            (item.date, item.period): item
+            for item in self.leave_requests
+            if item.employee_id == employee.employee_id and not item.all_day
+        }
+        self.leave_requests = [
+            item
+            for item in self.leave_requests
+            if item.employee_id != employee.employee_id
+        ]
+        self.unavailable_slots = [
+            item
+            for item in self.unavailable_slots
+            if item.employee_id != employee.employee_id
+        ]
+        by_date: dict[date, set[Period]] = {}
+        for day, period in selected:
+            by_date.setdefault(day, set()).add(period)
+        for day in sorted(by_date):
+            periods = by_date[day]
+            if periods == set(PERIODS_V1):
+                previous = original_all_day.get(day)
+                if previous is not None:
+                    self.leave_requests.append(
+                        LeaveRequestDraft(
+                            employee.employee_id,
+                            day,
+                            True,
+                            note=previous.note,
+                            note_declared=previous.note_declared,
+                        )
+                    )
+                    continue
+            for period in PERIODS_V1:
+                if period not in periods:
+                    continue
+                previous = original_period_leave.get((day, period))
+                if previous is not None:
+                    self.leave_requests.append(previous)
+                else:
+                    self.unavailable_slots.append(
+                        UnavailableSlotDraft(employee.employee_id, day, period)
+                    )
+        self.leave_requests.sort(
+            key=lambda item: (
+                item.date,
+                item.employee_id,
+                -1 if item.period is None else PERIODS_V1.index(item.period),
+            )
+        )
+        self.unavailable_slots.sort(
+            key=lambda item: (
+                item.date,
+                item.employee_id,
+                PERIODS_V1.index(item.period),
+            )
+        )
+        self.leave_requests_declared = True
+        self.unavailable_slots_declared = True
+        self.touch()
+
+    def replace_part_time_available_periods(
+        self,
+        employee: EmployeeDraft,
+        selected: set[tuple[date, Period]],
+    ) -> None:
+        """Replace one PT employee's available slots while keeping role limits."""
+        if employee.employment_type is not EmploymentType.PART_TIME:
+            raise ValueError("只有兼職人員可設定兼職可排時段")
+        for day, period in selected:
+            self._assert_employee_date(employee.employee_id, day)
+            if period not in PERIODS_V1:
+                raise ValueError("不支援的時段")
+        existing = {
+            (item.date, item.period): item
+            for item in employee.available_slots or []
+        }
+        employee.available_slots = [
+            existing.get(
+                (day, period),
+                AvailableSlotDraft(day, period, None),
+            )
+            for day, period in sorted(
+                selected,
+                key=lambda item: (item[0], PERIODS_V1.index(item[1])),
+            )
+        ]
+        self.touch()
+
+    def _month_dates(self) -> tuple[date, ...]:
+        return tuple(
+            date.fromordinal(value)
+            for value in range(
+                self.start_date.toordinal(),
+                self.end_date.toordinal() + 1,
+            )
+        )
 
     def _new_employee_id(self) -> str:
         existing = {employee.employee_id for employee in self.employees}

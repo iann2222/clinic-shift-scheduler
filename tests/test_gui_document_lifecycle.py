@@ -17,6 +17,7 @@ from clinic_shift_scheduler.gui.main import create_application
 from clinic_shift_scheduler.gui.main_window import MainWindow
 from clinic_shift_scheduler.gui.navigation import PageId
 from clinic_shift_scheduler.enums import Period
+from clinic_shift_scheduler.gui.dialogs import EmployeeEditorValues
 from clinic_shift_scheduler.events import DiagnosticIssue
 
 
@@ -44,7 +45,7 @@ class GuiDocumentLifecycleTests(unittest.TestCase):
         self.addCleanup(cleanup)
         return window
 
-    def test_open_document_binds_month_roles_and_clean_state(self) -> None:
+    def test_open_document_binds_month_and_clean_state(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             window = self.make_window(Path(directory))
             window.open_document_path(WEEKLY_EXAMPLE)
@@ -54,7 +55,15 @@ class GuiDocumentLifecycleTests(unittest.TestCase):
             self.assertFalse(window.session.is_dirty)
             self.assertEqual(window.document_header.month_label.text(), "2026-08")
             self.assertEqual(window.document_header.status_label.text(), "已儲存")
-            self.assertEqual(window.month_clinic_page.role_list.count(), 2)
+            self.assertFalse(hasattr(window.month_clinic_page, "role_list"))
+            self.assertEqual(
+                window.month_clinic_page.fixed_periods_label.text(),
+                "早上、下午、晚上",
+            )
+            self.assertEqual(
+                window.month_clinic_page.period_label.text(),
+                "2026 年 8 月（2026-08-01~2026-08-31）",
+            )
 
     def test_month_page_change_marks_document_dirty_and_invalidates_review(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -72,6 +81,42 @@ class GuiDocumentLifecycleTests(unittest.TestCase):
                 "尚未儲存",
             )
             self.assertIn("重新", window.review_save_page.status_label.text())
+
+    def test_existing_holiday_marks_are_shown_on_specific_date_page(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            window = self.make_window(Path(directory))
+            window.open_document_path(WEEKLY_EXAMPLE)
+            assert window.session is not None
+            window.session.draft.holidays = [date(2026, 8, 8)]
+
+            window.date_override_page.bind_draft(window.session.draft)
+
+            self.assertEqual(window.date_override_page.holiday_list.count(), 1)
+            self.assertEqual(
+                window.date_override_page.holiday_list.item(0).text(),
+                "2026-08-08",
+            )
+            self.assertFalse(window.date_override_page.holiday_group.isEnabled())
+
+    def test_specific_date_remove_requires_a_selected_adjustment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            window = self.make_window(Path(directory))
+            window.open_document_path(WEEKLY_EXAMPLE)
+            page = window.date_override_page
+            assert window.session is not None
+            window.session.draft.date_overrides = []
+            page.bind_draft(window.session.draft)
+
+            self.assertFalse(page.remove_button.isEnabled())
+            page.model.add_override(date(2026, 8, 15), is_open=True)
+            page.table.selectRow(0)
+            self.app.processEvents()
+            self.assertTrue(page.remove_button.isEnabled())
+
+            page._remove_selected()
+
+            self.assertEqual(page.model.rowCount(), 0)
+            self.assertFalse(page.remove_button.isEnabled())
 
     def test_validation_routes_to_review_page_and_reports_success(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -123,15 +168,29 @@ class GuiDocumentLifecycleTests(unittest.TestCase):
             assert window.session is not None
             employee = window.session.draft.employees[0]
 
-            window.employee_page.name_edit.setText("修改姓名")
-            window.employee_page.name_edit.editingFinished.emit()
+            window.employee_page._apply_editor_values(
+                employee,
+                EmployeeEditorValues(
+                    name="修改姓名",
+                    employment_type=employee.employment_type,
+                    full_time_class=employee.full_time_class,
+                    roles=tuple(employee.roles),
+                    shift_mode=employee.shift_mode,
+                    required_shifts=employee.required_shifts,
+                    target_shifts=employee.target_shifts,
+                    min_shifts=employee.min_shifts,
+                    max_shifts=employee.max_shifts,
+                    notes=employee.notes,
+                ),
+            )
+            window.employee_page._changed()
             window.session.draft.set_period_availability(
                 employee.employee_id,
                 date(2026, 8, 3),
                 Period.MORNING,
                 "unavailable",
             )
-            window.availability_page.draft_changed.emit()
+            window.full_time_unavailable_page.draft_changed.emit()
 
             self.assertTrue(window.session.is_dirty)
             self.assertTrue(window._save_to(target, overwrite=False))
@@ -168,19 +227,13 @@ class GuiDocumentLifecycleTests(unittest.TestCase):
 
             self.assertEqual(
                 window.page_stack.currentWidget().page_id,
-                PageId.AVAILABILITY,
+                PageId.PART_TIME_AVAILABLE,
             )
             self.assertEqual(
-                window.availability_page.employee_combo.currentData(),
+                window.part_time_available_page.model.employee_at(
+                    window.part_time_available_page.table.currentIndex().row()
+                ).employee_id,
                 employee.employee_id,
-            )
-            self.assertEqual(
-                window.availability_page.table.currentIndex().row(),
-                1,
-            )
-            self.assertEqual(
-                window.availability_page.table.currentIndex().column(),
-                3,
             )
 
     def test_weekly_and_employee_issues_focus_exact_controls(self) -> None:

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import Qt
@@ -25,6 +26,7 @@ from ..authoring_application import (
 from ..config_application import ConfigApplication
 from ..errors import InputValidationError
 from ..events import DiagnosticIssue
+from ..enums import EmploymentType
 from .dialogs import (
     MonthDialog,
     SettingsDialog,
@@ -38,10 +40,11 @@ from .dialogs import (
 from .navigation import NAVIGATION_ITEMS, PageId
 from .field_location import resolve_field_location
 from .pages import (
-    AvailabilityPage,
     DateOverridePage,
     EmployeePage,
+    FullTimeUnavailablePage,
     MonthClinicPage,
+    PartTimeAvailablePage,
     ReviewSavePage,
     WeeklyDemandPage,
 )
@@ -93,14 +96,16 @@ class MainWindow(QMainWindow):
         self.weekly_demand_page = WeeklyDemandPage()
         self.date_override_page = DateOverridePage()
         self.employee_page = EmployeePage()
-        self.availability_page = AvailabilityPage()
+        self.full_time_unavailable_page = FullTimeUnavailablePage()
+        self.part_time_available_page = PartTimeAvailablePage()
         self.review_save_page = ReviewSavePage()
         page_objects = (
             self.month_clinic_page,
             self.weekly_demand_page,
             self.date_override_page,
             self.employee_page,
-            self.availability_page,
+            self.full_time_unavailable_page,
+            self.part_time_available_page,
             self.review_save_page,
         )
         self._page_indexes: dict[PageId, int] = {}
@@ -113,11 +118,11 @@ class MainWindow(QMainWindow):
             raise RuntimeError("page stack must follow the navigation contract")
 
         self.navigation.page_selected.connect(self.navigate_to)
-        self.document_header.create_requested.connect(self._create_month_dialog)
-        self.document_header.copy_previous_requested.connect(
+        self.month_clinic_page.create_requested.connect(self._create_month_dialog)
+        self.month_clinic_page.copy_previous_requested.connect(
             self._copy_previous_dialog
         )
-        self.document_header.open_requested.connect(self._open_dialog)
+        self.month_clinic_page.open_requested.connect(self._open_dialog)
         self.document_header.save_requested.connect(self.save_document)
         self.document_header.save_as_requested.connect(self.save_document_as)
         self.document_header.settings_requested.connect(self.open_settings)
@@ -125,7 +130,8 @@ class MainWindow(QMainWindow):
         self.weekly_demand_page.draft_changed.connect(self._draft_changed)
         self.date_override_page.draft_changed.connect(self._draft_changed)
         self.employee_page.draft_changed.connect(self._employees_changed)
-        self.availability_page.draft_changed.connect(self._draft_changed)
+        self.full_time_unavailable_page.draft_changed.connect(self._draft_changed)
+        self.part_time_available_page.draft_changed.connect(self._draft_changed)
         self.review_save_page.validate_requested.connect(self.validate_document)
         self.review_save_page.save_requested.connect(self.save_document)
         self.review_save_page.save_as_requested.connect(self.save_document_as)
@@ -261,22 +267,47 @@ class MainWindow(QMainWindow):
 
     def navigate_to_issue(self, issue: DiagnosticIssue) -> None:
         location = resolve_field_location(issue.path)
+        if (
+            self.session is not None
+            and location.record_type is not None
+            and location.record_index is not None
+        ):
+            records = (
+                self.session.draft.leave_requests
+                if location.record_type == "leave_requests"
+                else self.session.draft.unavailable_slots
+            )
+            if 0 <= location.record_index < len(records):
+                employee_id = records[location.record_index].employee_id
+                employee_index = next(
+                    (
+                        index
+                        for index, employee in enumerate(
+                            self.session.draft.employees
+                        )
+                        if employee.employee_id == employee_id
+                    ),
+                    None,
+                )
+                if employee_index is not None:
+                    employee = self.session.draft.employees[employee_index]
+                    location = replace(
+                        location,
+                        page_id=(
+                            PageId.PART_TIME_AVAILABLE
+                            if employee.employment_type
+                            is EmploymentType.PART_TIME
+                            else PageId.FULL_TIME_UNAVAILABLE
+                        ),
+                        employee_index=employee_index,
+                    )
         self.navigation.select_page(location.page_id)
         if location.page_id is PageId.EMPLOYEE:
             self.employee_page.focus_location(location)
-        elif location.page_id is PageId.AVAILABILITY:
-            if location.available_slot_index is not None:
-                self.availability_page.focus_available_slot(
-                    location.employee_index or 0,
-                    location.available_slot_index,
-                )
-            elif location.record_type is not None and location.record_index is not None:
-                self.availability_page.focus_record(
-                    location.record_type,
-                    location.record_index,
-                )
-            elif location.employee_index is not None:
-                self.availability_page.focus_employee(location.employee_index)
+        elif location.page_id is PageId.PART_TIME_AVAILABLE:
+            self.part_time_available_page.focus_location(location)
+        elif location.page_id is PageId.FULL_TIME_UNAVAILABLE:
+            self.full_time_unavailable_page.focus_location(location)
         elif location.page_id is PageId.WEEKLY_DEMAND:
             self.weekly_demand_page.focus_location(location)
         elif location.page_id is PageId.DATE_OVERRIDE:
@@ -292,6 +323,7 @@ class MainWindow(QMainWindow):
 
     def _bind_session(self, session: AuthoringSession | None) -> None:
         self.session = session
+        self.navigation.set_document_available(session is not None)
         self.month_clinic_page.bind_draft(
             None if session is None else session.draft
         )
@@ -304,7 +336,10 @@ class MainWindow(QMainWindow):
         self.employee_page.bind_draft(
             None if session is None else session.draft
         )
-        self.availability_page.bind_draft(
+        self.full_time_unavailable_page.bind_draft(
+            None if session is None else session.draft
+        )
+        self.part_time_available_page.bind_draft(
             None if session is None else session.draft
         )
         self.review_save_page.clear_validation()
@@ -323,7 +358,8 @@ class MainWindow(QMainWindow):
 
     def _employees_changed(self) -> None:
         if self.session is not None:
-            self.availability_page.bind_draft(self.session.draft)
+            self.full_time_unavailable_page.bind_draft(self.session.draft)
+            self.part_time_available_page.bind_draft(self.session.draft)
         self._draft_changed()
 
     def _refresh_document_header(self) -> None:

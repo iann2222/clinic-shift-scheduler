@@ -5,9 +5,11 @@ from __future__ import annotations
 from datetime import date
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt, Signal
+from PySide6.QtGui import QColor
 
 from ...enums import PERIODS_V1, Period
-from ..drafts import ScheduleDraft, StaffingDraft
+from ..display_labels import role_display_name
+from ..drafts import DateOverrideDraft, ScheduleDraft, StaffingDraft
 
 
 _PERIOD_LABELS = {
@@ -50,6 +52,18 @@ class DateOverrideTableModel(QAbstractTableModel):
             self.endResetModel()
         self.draft_changed.emit()
 
+    def remove_override(self, value: date) -> None:
+        if self._draft is None:
+            raise ValueError("請先建立或開啟月份")
+        if not any(item.date == value for item in self._draft.date_overrides):
+            raise ValueError(f"此日期沒有特定調整：{value.isoformat()}")
+        self.beginResetModel()
+        try:
+            self._draft.remove_date_override(value)
+        finally:
+            self.endResetModel()
+        self.draft_changed.emit()
+
     def rowCount(self, parent: QModelIndex = QModelIndex()) -> int:
         if parent.isValid() or self._draft is None:
             return 0
@@ -73,30 +87,37 @@ class DateOverrideTableModel(QAbstractTableModel):
         column = index.column()
         if role == Qt.ItemDataRole.DisplayRole:
             if column == 0:
-                return override.date.isoformat()
+                return "開啟" if self._period_is_open(override, period) else "休診"
             if column == 1:
-                return "開診" if override.is_open else "休診"
+                return override.date.isoformat()
             if column == 2:
                 return _PERIOD_LABELS[period]
-            if not override.is_open or override.staffing is None:
+            if not self._period_is_open(override, period):
                 return "—"
             return override.staffing.counts[period][self._draft.roles[column - 3]]
         if role == Qt.ItemDataRole.EditRole and column >= 3:
-            if override.is_open and override.staffing is not None:
+            if self._period_is_open(override, period):
                 return override.staffing.counts[period][self._draft.roles[column - 3]]
-        if role == Qt.ItemDataRole.CheckStateRole and column == 1:
+        if role == Qt.ItemDataRole.CheckStateRole and column == 0:
             return (
                 Qt.CheckState.Checked
-                if override.is_open
+                if self._period_is_open(override, period)
                 else Qt.CheckState.Unchecked
             )
-        if role == Qt.ItemDataRole.TextAlignmentRole and column >= 1:
+        if role == Qt.ItemDataRole.TextAlignmentRole:
             return Qt.AlignmentFlag.AlignCenter
+        if column >= 3 and not self._period_is_open(override, period):
+            if role == Qt.ItemDataRole.BackgroundRole:
+                return QColor("#D5D8DC")
+            if role == Qt.ItemDataRole.ForegroundRole:
+                return QColor("#6B7280")
         if role == Qt.ItemDataRole.ToolTipRole:
-            if column == 1:
-                return "同一日期的三個時段會一起切換為開診或休診。"
-            if column >= 3 and not override.is_open:
-                return "休診調整不需要填寫人力需求。"
+            if column == 0:
+                return "只切換這一個時段；休診時該時段各職務需求皆為 0。"
+            if column >= 3 and not self._period_is_open(override, period):
+                return "此時段休診；請先開啟時段。"
+            if column >= 3:
+                return "單擊後依序切換 1、2、3 人。"
         return None
 
     def setData(
@@ -109,30 +130,43 @@ class DateOverrideTableModel(QAbstractTableModel):
             return False
         override_index, period_index = divmod(index.row(), len(PERIODS_V1))
         override = self._draft.date_overrides[override_index]
-        if index.column() == 1 and role == Qt.ItemDataRole.CheckStateRole:
+        period = PERIODS_V1[period_index]
+        if index.column() == 0 and role == Qt.ItemDataRole.CheckStateRole:
             is_open = value in (Qt.CheckState.Checked, Qt.CheckState.Checked.value)
-            if override.is_open == is_open:
+            if self._period_is_open(override, period) == is_open:
                 return False
-            override.is_open = is_open
-            override.staffing = (
-                StaffingDraft.zero(self._draft.roles) if is_open else None
-            )
+            if is_open:
+                if override.staffing is None:
+                    override.staffing = StaffingDraft.zero(self._draft.roles)
+                for role_name in self._draft.roles:
+                    override.staffing.counts[period][role_name] = 1
+                override.is_open = True
+            else:
+                assert override.staffing is not None
+                for role_name in self._draft.roles:
+                    override.staffing.counts[period][role_name] = 0
+                if not any(
+                    count > 0
+                    for counts in override.staffing.counts.values()
+                    for count in counts.values()
+                ):
+                    override.is_open = False
+                    override.staffing = None
             self._draft.touch()
-            first = self.index(override_index * 3, 1)
-            last = self.index(override_index * 3 + 2, self.columnCount() - 1)
+            first = self.index(index.row(), 0)
+            last = self.index(index.row(), self.columnCount() - 1)
             self.dataChanged.emit(first, last)
             self.draft_changed.emit()
             return True
         if index.column() >= 3 and role == Qt.ItemDataRole.EditRole:
-            if not override.is_open or override.staffing is None:
+            if not self._period_is_open(override, period):
                 return False
             try:
                 count = int(value)
             except (TypeError, ValueError):
                 return False
-            if count < 0 or isinstance(value, bool):
+            if count < 1 or count > 3 or isinstance(value, bool):
                 return False
-            period = PERIODS_V1[period_index]
             role_name = self._draft.roles[index.column() - 3]
             if override.staffing.counts[period][role_name] == count:
                 return False
@@ -143,17 +177,30 @@ class DateOverrideTableModel(QAbstractTableModel):
             return True
         return False
 
+    def cycle_count(self, index: QModelIndex) -> bool:
+        if not index.isValid() or self._draft is None or index.column() < 3:
+            return False
+        current = self.data(index, Qt.ItemDataRole.EditRole)
+        if not isinstance(current, int):
+            return False
+        return self.setData(
+            index,
+            1 if current >= 3 or current < 1 else current + 1,
+            Qt.ItemDataRole.EditRole,
+        )
+
     def flags(self, index: QModelIndex) -> Qt.ItemFlag:
         if not index.isValid() or self._draft is None:
             return Qt.ItemFlag.NoItemFlags
         base = Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
         override = self._draft.date_overrides[index.row() // len(PERIODS_V1)]
-        if index.column() == 1:
+        period = PERIODS_V1[index.row() % len(PERIODS_V1)]
+        if index.column() == 0:
             return base | Qt.ItemFlag.ItemIsUserCheckable
         if index.column() >= 3:
-            if not override.is_open:
+            if not self._period_is_open(override, period):
                 return Qt.ItemFlag.ItemIsSelectable
-            return base | Qt.ItemFlag.ItemIsEditable
+            return base
         return base
 
     def headerData(
@@ -167,11 +214,19 @@ class DateOverrideTableModel(QAbstractTableModel):
         if orientation == Qt.Orientation.Vertical:
             return section + 1
         if section == 0:
-            return "日期"
+            return "時段開關"
         if section == 1:
-            return "調整"
+            return "日期"
         if section == 2:
             return "時段"
         if self._draft is None:
             return None
-        return self._draft.roles[section - 3]
+        return role_display_name(self._draft.roles[section - 3])
+
+    @staticmethod
+    def _period_is_open(override: DateOverrideDraft, period: Period) -> bool:
+        return bool(
+            override.is_open
+            and override.staffing is not None
+            and any(override.staffing.counts[period].values())
+        )

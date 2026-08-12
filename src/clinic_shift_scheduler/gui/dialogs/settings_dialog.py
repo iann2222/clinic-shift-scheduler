@@ -43,6 +43,7 @@ class SettingsDialog(QDialog):
 
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
+        self.tabs.setObjectName("settingsTabs")
         self.tabs.addTab(self._general_tab(), "一般設定")
         self.tabs.addTab(self._advanced_tab(), "進階設定")
         layout.addWidget(self.tabs, 1)
