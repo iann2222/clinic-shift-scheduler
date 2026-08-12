@@ -22,6 +22,7 @@ _exports("authoring", "WEEKLY_AUTHORING_VERSION", "expand_weekly_template", "loa
 _exports("authoring_models", "AuthoringAvailableSlot", "AuthoringEmployee", "AuthoringLeaveRequest", "AuthoringUnavailableSlot", "DateOverrideRule", "StaffingPlan", "WeeklyAuthoringDocument", "WeeklyDemandRule", "WeeklyPeriod")
 _exports("application", "ScheduleApplicationCallbacks", "ScheduleApplicationError", "ScheduleApplicationFailureKind", "ScheduleApplicationRequest", "request_from_app_config", "run_schedule_application")
 _exports("authoring_application", "AuthoringApplication", "AuthoringFileExistsError", "AuthoringSession", "AuthoringValidationResult", "default_month_filename")
+_exports("config_application", "ConfigApplication", "ConfigSession", "ConfigValidationResult")
 _exports("application_contracts", "CandidateExportConfig")
 _exports("class_preferences", "CLASS_PREFERENCES", "ClassPreferenceDefinition", "ClassPreferenceMetric", "PreferenceDirection", "PreferenceRank", "class_opportunity_days")
 _exports("errors", "InputValidationError", "ValidationIssue")
@@ -62,6 +63,9 @@ __all__ = [
     "ClassPreferenceMetric",
     "ClassPreferenceStatistics",
     "CLASS_PREFERENCES",
+    "ConfigApplication",
+    "ConfigSession",
+    "ConfigValidationResult",
     "DailyPattern",
     "DiagnosticTimeSettings",
     "DiagnosticIssue",

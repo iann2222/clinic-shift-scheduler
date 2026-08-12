@@ -410,5 +410,7 @@ packaging/windows/
 目前輸入編輯器已完成文件生命週期，以及月份、每週需求、特定日期、員工、休假與
 可排、正式驗證與儲存頁面的主要功能。Validation 問題可定位到對應員工、需求格或
 日期時段；休假與可排頁提供星期／狀態篩選及安全批次設定，文件操作亦提供標準鍵盤
-快捷鍵。第一個 milestone 剩餘工作以 Windows 實機 High DPI 操作檢查與獨立 GUI
-`onedir` smoke test 為主；solver 執行按鈕、背景工作與結果顯示仍明確保留在後續階段。
+快捷鍵。右上角設定頁已接入正式 `config.json` 契約，可編輯輸入檔、執行顯示與候選
+處理參數，並保留說明欄位及參考預設值後原子儲存。獨立 GUI `onedir` 與自動 smoke
+test 已完成，第一個 milestone 剩餘工作以 Windows 實機 High DPI 人工操作檢查為主；
+solver 執行按鈕、背景工作與結果顯示仍明確保留在後續階段。

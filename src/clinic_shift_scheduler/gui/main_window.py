@@ -22,6 +22,7 @@ from ..authoring_application import (
     AuthoringValidationResult,
     default_month_filename,
 )
+from ..config_application import ConfigApplication
 from ..errors import InputValidationError
 from ..events import DiagnosticIssue
 from .dialogs import (
@@ -53,11 +54,15 @@ class MainWindow(QMainWindow):
         self,
         *,
         input_directory: str | Path | None = None,
+        config_path: str | Path | None = None,
         authoring_application: AuthoringApplication | None = None,
+        config_application: ConfigApplication | None = None,
     ) -> None:
         super().__init__()
         self.authoring_application = authoring_application or AuthoringApplication()
+        self.config_application = config_application or ConfigApplication()
         self.input_directory = Path(input_directory or Path.cwd() / "input")
+        self.config_path = Path(config_path or Path.cwd() / "config.json")
         self.session: AuthoringSession | None = None
         self.setWindowTitle("診所排班系統－排班資料編輯器")
         self.resize(1180, 760)
@@ -137,7 +142,43 @@ class MainWindow(QMainWindow):
         self.page_stack.setCurrentIndex(self._page_indexes[page_id])
 
     def open_settings(self) -> None:
-        SettingsDialog(self).exec()
+        try:
+            config_session = self.config_application.open_document(
+                self.config_path
+            )
+        except (InputValidationError, OSError, ValueError) as error:
+            show_warning(
+                self,
+                "無法開啟設定",
+                f"請先確認設定檔內容：\n{self.config_path}\n\n{error}",
+            )
+            return
+        dialog = SettingsDialog(
+            config_session.draft,
+            config_path=self.config_path,
+            input_directory=self.input_directory,
+            current_document_path=(
+                None if self.session is None else self.session.path
+            ),
+            parent=self,
+        )
+        def restore_defaults() -> None:
+            config_session.restore_defaults()
+            dialog.reload_from_draft()
+
+        dialog.defaults_restored.connect(restore_defaults)
+        if not dialog.exec():
+            return
+        try:
+            self.config_application.save(config_session)
+        except InputValidationError as error:
+            show_warning(
+                self,
+                "設定內容有誤",
+                "\n".join(issue.message for issue in error.issues),
+            )
+        except OSError as error:
+            show_critical(self, "設定儲存失敗", str(error))
 
     def _install_shortcuts(self) -> None:
         shortcuts = (

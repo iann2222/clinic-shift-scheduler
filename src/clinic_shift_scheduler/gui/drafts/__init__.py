@@ -1,5 +1,7 @@
 """Mutable, Qt-independent state used by the desktop input editor."""
 
+from .config_draft import ConfigDraft
+
 from .schedule_draft import (
     AvailableSlotDraft,
     DateOverrideDraft,
@@ -13,6 +15,7 @@ from .schedule_draft import (
 )
 
 __all__ = [
+    "ConfigDraft",
     "AvailableSlotDraft",
     "DateOverrideDraft",
     "EmployeeDraft",

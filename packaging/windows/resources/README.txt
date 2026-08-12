@@ -3,7 +3,7 @@
 使用方式：
 1. 雙擊 ClinicShiftSchedulerEditor.exe，建立或開啟 input 資料夾內的月份資料。
 2. 在編輯器完成輸入檢查並儲存 JSON；也可以不使用編輯器，直接修改 JSON。
-3. 確認 config.json 的「輸入檔名」與要排班的 input 檔名相同。
+3. 按編輯器右上角「設定」，選擇要排班的輸入檔並調整執行與候選設定；也可以直接修改 config.json。
 4. 雙擊 ClinicShiftScheduler.exe 開始正式排班。
 5. 等待主控台顯示正式狀態與輸出路徑。
 6. 到 output 資料夾取得 JSON、Excel 與 PDF。

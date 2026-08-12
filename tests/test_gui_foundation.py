@@ -7,11 +7,12 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QDialogButtonBox, QMessageBox, QTableWidget
+from PySide6.QtWidgets import QDialog, QDialogButtonBox, QMessageBox, QTableWidget
 
 from clinic_shift_scheduler.gui.dialogs import (
     MonthDialog,
@@ -23,6 +24,7 @@ from clinic_shift_scheduler.gui.main_window import MainWindow
 from clinic_shift_scheduler.gui.navigation import NAVIGATION_ITEMS, PageId
 from clinic_shift_scheduler.gui.styles.loader import load_application_stylesheet
 from clinic_shift_scheduler.gui.widgets.document_header import DocumentState
+from clinic_shift_scheduler.config_application import ConfigApplication
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -101,7 +103,7 @@ class GuiFoundationTests(unittest.TestCase):
         self.assertEqual(shortcuts["檢查輸入資料"], "Ctrl+Shift+V")
 
     def test_settings_are_separate_from_required_navigation(self) -> None:
-        dialog = SettingsDialog()
+        dialog = self._settings_dialog()
         self.addCleanup(dialog.close)
 
         self.assertEqual(dialog.tabs.count(), 2)
@@ -111,7 +113,7 @@ class GuiFoundationTests(unittest.TestCase):
 
     def test_standard_dialog_buttons_are_always_chinese(self) -> None:
         month_dialog = MonthDialog("建立月份", "選擇月份")
-        settings_dialog = SettingsDialog()
+        settings_dialog = self._settings_dialog()
         self.addCleanup(month_dialog.close)
         self.addCleanup(settings_dialog.close)
 
@@ -127,9 +129,61 @@ class GuiFoundationTests(unittest.TestCase):
             "取消",
         )
         self.assertEqual(
-            settings_buttons.button(QDialogButtonBox.StandardButton.Close).text(),
-            "關閉",
+            settings_buttons.button(QDialogButtonBox.StandardButton.Save).text(),
+            "儲存設定",
         )
+        self.assertEqual(
+            settings_buttons.button(QDialogButtonBox.StandardButton.Cancel).text(),
+            "取消",
+        )
+
+    def test_settings_dialog_loads_effective_config_and_switches_time_mode(
+        self,
+    ) -> None:
+        dialog = self._settings_dialog()
+        self.addCleanup(dialog.close)
+
+        self.assertEqual(dialog.input_file.text(), "排班輸入_2026-08.json")
+        self.assertEqual(dialog.time_mode.currentData(), "比例")
+        self.assertTrue(dialog.time_ratio.isEnabled())
+        self.assertFalse(dialog.fixed_seconds.isEnabled())
+
+        dialog.time_mode.setCurrentIndex(dialog.time_mode.findData("定值"))
+        self.assertFalse(dialog.time_ratio.isEnabled())
+        self.assertTrue(dialog.fixed_seconds.isEnabled())
+
+    def test_main_window_settings_save_updates_root_config_contract(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config_path = root / "config.json"
+            config_path.write_bytes(
+                (REPOSITORY_ROOT / "config.json").read_bytes()
+            )
+            input_directory = root / "input"
+            input_directory.mkdir()
+            window = MainWindow(
+                input_directory=input_directory,
+                config_path=config_path,
+            )
+            self.addCleanup(window.close)
+
+            def edit_and_accept(dialog: SettingsDialog) -> int:
+                dialog.input_file.setText("排班輸入_2026-09.json")
+                dialog.progress_seconds.setValue(9.0)
+                dialog.accept()
+                return QDialog.DialogCode.Accepted
+
+            with patch.object(
+                SettingsDialog,
+                "exec",
+                new=edit_and_accept,
+            ):
+                window.open_settings()
+
+            saved = ConfigApplication().open_document(config_path)
+
+        self.assertEqual(saved.draft.input_file, "排班輸入_2026-09.json")
+        self.assertEqual(saved.draft.progress_update_seconds, 9.0)
 
     def test_message_box_choices_are_always_chinese(self) -> None:
         message = build_message_box(
@@ -213,6 +267,20 @@ class GuiFoundationTests(unittest.TestCase):
                 json.loads(output.read_text(encoding="utf-8")),
                 json.loads(source.read_text(encoding="utf-8")),
             )
+
+    @staticmethod
+    def _settings_dialog() -> SettingsDialog:
+        session = ConfigApplication().open_document(
+            REPOSITORY_ROOT / "config.json"
+        )
+        return SettingsDialog(
+            session.draft,
+            config_path=session.path,
+            input_directory=REPOSITORY_ROOT / "input",
+            current_document_path=(
+                REPOSITORY_ROOT / "input" / session.draft.input_file
+            ),
+        )
 
 
 if __name__ == "__main__":

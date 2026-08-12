@@ -39,7 +39,10 @@ def main(argv: Sequence[str] | None = None) -> int:
     app = create_application(qt_arguments)
     entry_file = Path(__file__).resolve().parents[2] / "run_gui.py"
     root = application_root(entry_file)
-    window = MainWindow(input_directory=root / "input")
+    window = MainWindow(
+        input_directory=root / "input",
+        config_path=root / "config.json",
+    )
     window.show()
     if smoke.enabled:
         QTimer.singleShot(

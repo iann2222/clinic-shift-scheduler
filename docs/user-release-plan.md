@@ -20,7 +20,7 @@ Web App 仍可作為未來多人共用、集中管理或跨裝置使用時的選
 ## 3. 預計的使用者操作方式
 
 1. 執行 `ClinicShiftSchedulerEditor.exe` 建立、編輯、驗證並儲存 `input/` 內的月份 JSON；進階使用者仍可直接編輯 JSON。
-2. 確認根目錄 `config.json` 指向要執行的輸入檔。
+2. 在編輯器右上角「設定」選擇輸入檔並調整執行參數；進階使用者仍可直接編輯根目錄 `config.json`。
 3. 執行 `ClinicShiftScheduler.exe`。
 4. 在主控台查看排班進度、耗時與錯誤訊息。
 5. 從 `output/` 取得正式 JSON、Excel、PDF，以及設定要求的候選班表。
