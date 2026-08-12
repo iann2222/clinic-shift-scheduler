@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QApplication
 
 from ..application_paths import application_root
 from .main_window import MainWindow
+from .focus_behavior import install_background_focus_clear
 from .presenters import SchedulePresenter
 from .styles.loader import load_application_stylesheet
 
@@ -24,12 +25,17 @@ APPLICATION_DISPLAY_NAME = "診所排班系統"
 def create_application(argv: Sequence[str] | None = None) -> QApplication:
     existing = QApplication.instance()
     if existing is not None:
+        if not hasattr(existing, "_background_focus_clearer"):
+            existing._background_focus_clearer = install_background_focus_clear(
+                existing
+            )
         return existing
     app = QApplication(list(argv) if argv is not None else sys.argv)
     QCoreApplication.setOrganizationName("ClinicShiftScheduler")
     QCoreApplication.setApplicationName(APPLICATION_NAME)
     app.setApplicationDisplayName(APPLICATION_DISPLAY_NAME)
     app.setStyleSheet(load_application_stylesheet())
+    app._background_focus_clearer = install_background_focus_clear(app)
     return app
 
 

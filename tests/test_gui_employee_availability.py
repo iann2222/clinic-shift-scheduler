@@ -424,21 +424,30 @@ class EmployeeAvailabilityModelTests(unittest.TestCase):
         dialog = EmployeeEditDialog(self.session.draft.roles)
         self.addCleanup(dialog.close)
 
-        self.assertTrue(dialog.shift_form.isRowVisible(dialog.required_spin))
-        self.assertFalse(dialog.shift_form.isRowVisible(dialog.target_spin))
+        for control, field in (
+            (dialog.required_spin, dialog.required_field),
+            (dialog.target_spin, dialog.target_field),
+            (dialog.min_spin, dialog.min_field),
+            (dialog.max_spin, dialog.max_field),
+        ):
+            self.assertEqual(control.suffix(), "")
+            self.assertEqual(field.unit_label.text(), "節")
+
+        self.assertTrue(dialog.shift_form.isRowVisible(dialog.required_field))
+        self.assertFalse(dialog.shift_form.isRowVisible(dialog.target_field))
         self.assertFalse(dialog.shift_form.isRowVisible(dialog.minimum_row))
 
         dialog.mode_combo.setCurrentIndex(dialog.mode_combo.findData(ShiftMode.RANGE))
-        self.assertFalse(dialog.shift_form.isRowVisible(dialog.required_spin))
-        self.assertFalse(dialog.shift_form.isRowVisible(dialog.target_spin))
+        self.assertFalse(dialog.shift_form.isRowVisible(dialog.required_field))
+        self.assertFalse(dialog.shift_form.isRowVisible(dialog.target_field))
         self.assertTrue(dialog.shift_form.isRowVisible(dialog.minimum_row))
         self.assertTrue(dialog.shift_form.isRowVisible(dialog.maximum_row))
         self.assertTrue(dialog.min_enabled.isHidden())
         self.assertTrue(dialog.max_enabled.isHidden())
 
         dialog.mode_combo.setCurrentIndex(dialog.mode_combo.findData(ShiftMode.TARGET))
-        self.assertFalse(dialog.shift_form.isRowVisible(dialog.required_spin))
-        self.assertTrue(dialog.shift_form.isRowVisible(dialog.target_spin))
+        self.assertFalse(dialog.shift_form.isRowVisible(dialog.required_field))
+        self.assertTrue(dialog.shift_form.isRowVisible(dialog.target_field))
         self.assertTrue(dialog.shift_form.isRowVisible(dialog.minimum_row))
         self.assertFalse(dialog.min_enabled.isHidden())
         self.assertFalse(dialog.max_enabled.isHidden())

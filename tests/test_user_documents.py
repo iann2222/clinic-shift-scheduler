@@ -121,7 +121,10 @@ class UserDocumentTests(unittest.TestCase):
         document = SchedulerConfigDocument.from_dict(payload)
 
         self.assertEqual(document.to_dict(), payload)
-        self.assertEqual(document.user_config.input_file, "排班輸入_2026-08.json")
+        self.assertEqual(
+            document.user_config.input_file,
+            payload["使用者設定"]["輸入檔名"],
+        )
         self.assertEqual(document.default_config.candidate_diagnostic.export_count, 3)
 
     def test_config_document_atomic_write_preserves_explanatory_fields(self) -> None:

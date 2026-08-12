@@ -6,12 +6,25 @@ from pathlib import Path
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QFileDialog, QFormLayout, QGroupBox, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
+    QComboBox,
+    QDialog,
+    QDialogButtonBox,
+    QFileDialog,
+    QFormLayout,
+    QFrame,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from ..drafts import ConfigDraft
+from ..widgets import TrimmedDoubleSpinBox, UnitInput, VisibleCheckBox
 
 from .localized_dialogs import localize_dialog_buttons, show_warning
 
@@ -45,7 +58,7 @@ class SettingsDialog(QDialog):
         self.tabs = QTabWidget()
         self.tabs.setObjectName("settingsTabs")
         self.tabs.addTab(self._general_tab(), "一般設定")
-        self.tabs.addTab(self._advanced_tab(), "進階設定")
+        self.tabs.addTab(self._advanced_tab(), "候選班表設定")
         layout.addWidget(self.tabs, 1)
 
         lower = QHBoxLayout()
@@ -91,14 +104,14 @@ class SettingsDialog(QDialog):
         input_row.addWidget(self.current_document_button)
         form.addRow("排班輸入檔：", input_row)
 
-        self.overwrite = QCheckBox("允許正式排班覆寫同名結果檔")
+        self.overwrite = VisibleCheckBox("允許正式排班覆寫同名結果檔")
         form.addRow("輸出行為：", self.overwrite)
-        self.progress_seconds = QDoubleSpinBox()
+        self.progress_seconds = TrimmedDoubleSpinBox()
         self.progress_seconds.setRange(0.1, 3600.0)
         self.progress_seconds.setDecimals(1)
         self.progress_seconds.setSingleStep(1.0)
-        self.progress_seconds.setSuffix(" 秒")
-        form.addRow("進度更新間隔：", self.progress_seconds)
+        self.progress_seconds_field = UnitInput(self.progress_seconds, "秒")
+        form.addRow("進度更新間隔：", self.progress_seconds_field)
         layout.addWidget(group)
         notice = QLabel(
             "這裡只設定正式排班程式下次執行時使用的參數；"
@@ -114,41 +127,49 @@ class SettingsDialog(QDialog):
         page = QWidget()
         layout = QVBoxLayout(page)
         group = QGroupBox("同品質候選班表")
-        form = QFormLayout(group)
-        self.candidate_enabled = QCheckBox("正式班表完成後搜尋同品質候選")
-        form.addRow("候選處理：", self.candidate_enabled)
+        group_layout = QVBoxLayout(group)
+        self.candidate_enabled = VisibleCheckBox(
+            "正式班表完成後搜尋同品質候選"
+        )
+        group_layout.addWidget(self.candidate_enabled)
+        self.candidate_options = QFrame()
+        self.candidate_options.setObjectName("candidateOptions")
+        self.candidate_form = QFormLayout(self.candidate_options)
         self.search_limit = QSpinBox()
         self.search_limit.setRange(1, 100000)
-        self.search_limit.setSuffix(" 份")
-        form.addRow("搜尋數量上限：", self.search_limit)
+        self.search_limit_field = UnitInput(self.search_limit, "份")
+        self.candidate_form.addRow("搜尋數量上限：", self.search_limit_field)
         self.time_mode = QComboBox()
         self.time_mode.addItem("依排班時間比例", "比例")
         self.time_mode.addItem("固定秒數", "定值")
-        form.addRow("診斷時間模式：", self.time_mode)
-        self.time_ratio = QDoubleSpinBox()
+        self.candidate_form.addRow("診斷時間模式：", self.time_mode)
+        self.time_ratio = TrimmedDoubleSpinBox()
         self.time_ratio.setRange(0.01, 100.0)
         self.time_ratio.setDecimals(2)
         self.time_ratio.setSingleStep(0.05)
         self.time_ratio.setToolTip("0.2 表示正式最佳化時間的五分之一")
-        form.addRow("排班時間比例：", self.time_ratio)
-        self.fixed_seconds = QDoubleSpinBox()
+        self.candidate_form.addRow("排班時間比例：", self.time_ratio)
+        self.fixed_seconds = TrimmedDoubleSpinBox()
         self.fixed_seconds.setRange(0.1, 86400.0)
         self.fixed_seconds.setDecimals(1)
-        self.fixed_seconds.setSuffix(" 秒")
-        form.addRow("固定時間上限：", self.fixed_seconds)
+        self.fixed_seconds_field = UnitInput(self.fixed_seconds, "秒")
+        self.candidate_form.addRow("固定時間上限：", self.fixed_seconds_field)
         self.export_count = QSpinBox()
         self.export_count.setRange(0, 100000)
-        self.export_count.setSuffix(" 份")
-        form.addRow("額外輸出份數上限：", self.export_count)
+        self.export_count_field = UnitInput(self.export_count, "份")
+        self.candidate_form.addRow(
+            "額外輸出份數上限：", self.export_count_field
+        )
         formats = QHBoxLayout()
-        self.format_json = QCheckBox("JSON")
-        self.format_excel = QCheckBox("Excel")
-        self.format_pdf = QCheckBox("PDF")
+        self.format_json = VisibleCheckBox("JSON")
+        self.format_excel = VisibleCheckBox("Excel")
+        self.format_pdf = VisibleCheckBox("PDF")
         formats.addWidget(self.format_json)
         formats.addWidget(self.format_excel)
         formats.addWidget(self.format_pdf)
         formats.addStretch(1)
-        form.addRow("候選輸出格式：", formats)
+        self.candidate_form.addRow("候選輸出格式：", formats)
+        group_layout.addWidget(self.candidate_options)
         layout.addWidget(group)
         notice = QLabel(
             "候選處理在正式 JSON、Excel、PDF 已輸出後才開始；"
@@ -258,22 +279,15 @@ class SettingsDialog(QDialog):
 
     def _update_candidate_fields(self) -> None:
         enabled = self.candidate_enabled.isChecked()
-        for widget in (
-            self.search_limit,
-            self.time_mode,
-            self.time_ratio,
-            self.fixed_seconds,
-            self.export_count,
-            self.format_json,
-            self.format_excel,
-            self.format_pdf,
-        ):
-            widget.setEnabled(enabled)
-        if not enabled:
-            self.export_count.setValue(0)
+        self.candidate_options.setEnabled(enabled)
+        self._update_time_fields()
 
     def _update_time_fields(self) -> None:
         enabled = self.candidate_enabled.isChecked()
         proportional = self.time_mode.currentData() == "比例"
-        self.time_ratio.setEnabled(enabled and proportional)
-        self.fixed_seconds.setEnabled(enabled and not proportional)
+        self.candidate_form.setRowVisible(self.time_ratio, proportional)
+        self.candidate_form.setRowVisible(
+            self.fixed_seconds_field, not proportional
+        )
+        self.time_ratio.setEnabled(enabled)
+        self.fixed_seconds.setEnabled(enabled)

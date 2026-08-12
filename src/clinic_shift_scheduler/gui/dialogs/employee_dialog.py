@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 from ...enums import EmploymentType, FullTimeClass, ShiftMode
 from ..display_labels import role_display_name
 from ..drafts import EmployeeDraft
-from ..widgets import VisibleCheckBox
+from ..widgets import UnitInput, VisibleCheckBox
 from .localized_dialogs import ask_yes_no, localize_dialog_buttons, show_warning
 
 
@@ -106,19 +106,23 @@ class EmployeeEditDialog(QDialog):
         self.min_spin = _shift_spin()
         self.max_enabled = VisibleCheckBox("啟用最高班次")
         self.max_spin = _shift_spin()
-        self.shift_form.addRow("固定班次：", self.required_spin)
-        self.shift_form.addRow("目標班次：", self.target_spin)
+        self.required_field = UnitInput(self.required_spin, "節")
+        self.target_field = UnitInput(self.target_spin, "節")
+        self.shift_form.addRow("固定班次：", self.required_field)
+        self.shift_form.addRow("目標班次：", self.target_field)
         self.minimum_row = QWidget()
         minimum_layout = QHBoxLayout(self.minimum_row)
         minimum_layout.setContentsMargins(0, 0, 0, 0)
         minimum_layout.addWidget(self.min_enabled)
-        minimum_layout.addWidget(self.min_spin)
+        self.min_field = UnitInput(self.min_spin, "節")
+        minimum_layout.addWidget(self.min_field)
         self.shift_form.addRow("最低班次：", self.minimum_row)
         self.maximum_row = QWidget()
         maximum_layout = QHBoxLayout(self.maximum_row)
         maximum_layout.setContentsMargins(0, 0, 0, 0)
         maximum_layout.addWidget(self.max_enabled)
-        maximum_layout.addWidget(self.max_spin)
+        self.max_field = UnitInput(self.max_spin, "節")
+        maximum_layout.addWidget(self.max_field)
         self.shift_form.addRow("最高班次：", self.maximum_row)
         layout.addWidget(shift_group)
 
@@ -234,20 +238,20 @@ class EmployeeEditDialog(QDialog):
         exact_mode = mode is ShiftMode.EXACT
         range_mode = mode is ShiftMode.RANGE
         target_mode = mode is ShiftMode.TARGET
-        self.shift_form.setRowVisible(self.required_spin, exact_mode)
-        self.shift_form.setRowVisible(self.target_spin, target_mode)
+        self.shift_form.setRowVisible(self.required_field, exact_mode)
+        self.shift_form.setRowVisible(self.target_field, target_mode)
         self.shift_form.setRowVisible(self.minimum_row, range_mode or target_mode)
         self.shift_form.setRowVisible(self.maximum_row, range_mode or target_mode)
         self.min_enabled.setVisible(target_mode)
         self.max_enabled.setVisible(target_mode)
-        self.required_spin.setEnabled(exact_mode)
-        self.target_spin.setEnabled(target_mode)
+        self.required_field.setEnabled(exact_mode)
+        self.target_field.setEnabled(target_mode)
         self.min_enabled.setEnabled(target_mode)
         self.max_enabled.setEnabled(target_mode)
-        self.min_spin.setEnabled(
+        self.min_field.setEnabled(
             range_mode or (target_mode and self.min_enabled.isChecked())
         )
-        self.max_spin.setEnabled(
+        self.max_field.setEnabled(
             range_mode or (target_mode and self.max_enabled.isChecked())
         )
 
@@ -302,5 +306,4 @@ def _select_data(combo: QComboBox, value: object) -> None:
 def _shift_spin() -> QSpinBox:
     spin = QSpinBox()
     spin.setRange(0, 999)
-    spin.setSuffix(" 節")
     return spin

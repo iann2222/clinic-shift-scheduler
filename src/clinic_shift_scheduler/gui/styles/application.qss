@@ -188,6 +188,20 @@ QGroupBox#frozenSection {
     border: 1px solid #D5D9DB;
 }
 
+QFrame#candidateOptions {
+    background-color: $SURFACE;
+    border-radius: 4px;
+}
+
+QFrame#candidateOptions:disabled {
+    background-color: #E3E6E8;
+    color: #879197;
+}
+
+QFrame#candidateOptions:disabled QLabel {
+    color: #879197;
+}
+
 QScrollBar:vertical {
     background: $BACKGROUND;
     width: 12px;

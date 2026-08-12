@@ -45,11 +45,7 @@ class DocumentHeader(QFrame):
         self.path_label.setToolTip("尚未開啟檔案")
         identity.addWidget(self.month_label)
         identity.addWidget(self.path_label)
-        outer.addLayout(identity, 1)
-
-        self.status_label = QLabel("尚未建立檔案")
-        self.status_label.setObjectName("documentStatusDirty")
-        outer.addWidget(self.status_label)
+        outer.addLayout(identity)
 
         self.document_action_buttons: list[QPushButton] = []
         for text, shortcut, signal in (
@@ -63,9 +59,14 @@ class DocumentHeader(QFrame):
             self.document_action_buttons.append(button)
             outer.addWidget(button)
 
+        self.status_label = QLabel("尚未建立檔案")
+        self.status_label.setObjectName("documentStatusDirty")
+        outer.addWidget(self.status_label)
+        outer.addStretch(1)
+
         self.settings_button = QToolButton()
         self.settings_button.setText("設定")
-        self.settings_button.setToolTip("開啟一般與進階設定")
+        self.settings_button.setToolTip("開啟一般與候選班表設定")
         self.settings_button.setAccessibleName("設定")
         self.settings_button.clicked.connect(self.settings_requested.emit)
         outer.addWidget(self.settings_button)

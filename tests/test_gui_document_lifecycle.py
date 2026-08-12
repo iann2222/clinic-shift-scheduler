@@ -62,7 +62,7 @@ class GuiDocumentLifecycleTests(unittest.TestCase):
             )
             self.assertEqual(
                 window.month_clinic_page.period_label.text(),
-                "2026 年 8 月（2026-08-01~2026-08-31）",
+                "2026 年 8 月（2026-08-01 ~ 2026-08-31）",
             )
 
     def test_month_page_change_marks_document_dirty_and_invalidates_review(self) -> None:

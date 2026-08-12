@@ -70,6 +70,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("診所排班系統－排班資料編輯器")
         self.resize(1180, 760)
         self.setMinimumSize(920, 620)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         root = QWidget()
         root_layout = QHBoxLayout(root)
@@ -139,6 +140,9 @@ class MainWindow(QMainWindow):
         self._install_shortcuts()
         self._bind_session(None)
         self.navigate_to(PageId.MONTH_CLINIC)
+        # Keep initial focus neutral instead of highlighting the only enabled
+        # header action before a document has been opened.
+        self.setFocus()
 
     @property
     def page_ids(self) -> tuple[PageId, ...]:
