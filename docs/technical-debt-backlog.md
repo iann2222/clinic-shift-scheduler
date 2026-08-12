@@ -1,6 +1,6 @@
 # Technical Debt Backlog
 
-本文件只記錄目前尚待處理的技術債，作為進入使用者前端開發前的整理清單。
+本文件只記錄目前尚待處理的技術債，作為專案後續維護與重構清單。
 
 處理原則：
 
@@ -15,12 +15,12 @@
 
 目前主要複雜點包括：
 
-- `build_optimization_model()` 約 598 行。
-- `recompute_schedule_metrics()` 約 493 行。
-- `validate_schedule_result()` 約 436 行。
-- `solve_lexicographic()` 約 256 行。
-- `run_schedule_file()` 約 250 行。
-- `run_prechecks()` 約 204 行。
+- `build_optimization_model()` 同時建立多類指標與公平性目標。
+- `recompute_schedule_metrics()` 同時重算個人、類別與群組統計。
+- `validate_schedule_result()` 同時驗證硬性規則與所有鎖定目標。
+- `solve_lexicographic()` 同時管理 benchmark、分階段求解與最佳值鎖定。
+- `run_schedule_file()` 同時協調輸入、求解、正式輸出與候選處理。
+- `run_prechecks()` 同時執行多種容量與匹配檢查。
 
 預計依責任拆分模型指標建立、類別偏好、個人公平、共同公平、求解控制、結果重算、硬性驗證與應用流程；避免只把程式搬成更多大型 helper 而沒有形成清楚邊界。
 
@@ -45,6 +45,17 @@
 - 全部成功後才替換正式輸出。
 - 失敗時清理暫存產物並保留上一組完整結果。
 - 候選班表輸出採用相同策略或明確標示部分成功狀態。
+
+### 讓候選搜尋支援應用層取消介面
+
+正式最佳化已能透過 `CancellationToken` 合作式停止，但候選搜尋目前仍以主控台 `Ctrl+C`／signal 處理為主，未來 GUI 無法只透過共用 application callbacks 完整停止候選階段。
+
+預計處理：
+
+- 將同一個 `CancellationToken` 傳入候選搜尋與候選輸出流程。
+- 中止候選處理不得刪除或降級已完成的正式班表。
+- CLI 保留 `Ctrl+C` 體驗，但由 adapter 將其轉成共用取消請求。
+- 補充最佳化中止、候選搜尋中止與正式輸出保留測試。
 
 ## 中優先技術債
 
