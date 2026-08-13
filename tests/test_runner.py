@@ -17,6 +17,7 @@ from clinic_shift_scheduler import (
     CancellationToken,
     DiagnosticTimeSettings,
     EquivalentSolutionDiagnosticConfig,
+    EquivalentSolutionDiagnosticResult,
     EquivalentSolutionDiagnosticStatus,
     ExecutionPhase,
     FeasibilityStatus,
@@ -114,6 +115,25 @@ class ScheduleRunnerTests(unittest.TestCase):
 
         self.assertEqual(stream.getvalue().count("\n"), 2)
         self.assertNotIn("\r", stream.getvalue())
+
+    def test_console_candidate_start_uses_ctrl_c_stop_hint(self) -> None:
+        stream = StringIO()
+        printer = console_module.ConsoleProgressPrinter(
+            "[候選處理]",
+            stream,
+            step_started_suffix="按 Ctrl+C 可只終止候選處理",
+        )
+
+        printer(
+            ProgressEvent(
+                phase=ExecutionPhase.CANDIDATE_SEARCH,
+                kind=ProgressEventKind.STEP_STARTED,
+                message="開始搜尋同品質候選班表",
+            )
+        )
+
+        self.assertIn("按 Ctrl+C 可只終止候選處理", stream.getvalue())
+        self.assertNotIn("中止此診斷", stream.getvalue())
 
     def test_cli_defaults_follow_typed_application_defaults(self) -> None:
         defaults = SchedulerAppConfig(input_file="schedule.json")
@@ -506,7 +526,11 @@ class ScheduleRunnerTests(unittest.TestCase):
                     )
                 )
                 callbacks.diagnostic_progress(
-                    progress_event("開始搜尋同品質候選班表")
+                    ProgressEvent(
+                        phase=ExecutionPhase.CANDIDATE_SEARCH,
+                        kind=ProgressEventKind.STEP_STARTED,
+                        message="開始搜尋同品質候選班表",
+                    )
                 )
                 return result
 
@@ -521,11 +545,88 @@ class ScheduleRunnerTests(unittest.TestCase):
             self.assertIn("CP-SAT 最佳化", printed)
             self.assertIn("從讀檔到正式輸出", printed)
             self.assertIn("[候選處理] 開始搜尋", printed)
+            self.assertIn("按 Ctrl+C 可只終止候選處理", printed)
             self.assertNotIn("[排班] 開始搜尋", printed)
             self.assertIn(
                 "[執行] 總耗時（含完整排班與候選處理）：",
                 printed,
             )
+
+    def test_interrupted_candidate_processing_skips_candidate_exports(self) -> None:
+        employees = [
+            {
+                "employee_id": employee_id,
+                "name": employee_id,
+                "employment_type": "full_time",
+                "full_time_class": "A",
+                "roles": ["assistant"],
+                "fairness_group": "A_TEST",
+                "shift_mode": "EXACT",
+                "required_shifts": 1,
+            }
+            for employee_id in ("A1", "A2")
+        ]
+        payload = synthetic_schedule_input(
+            start_date="2024-10-01",
+            end_date="2024-10-01",
+            roles=["assistant"],
+            employees=employees,
+            positive_demands={
+                ("2024-10-01", "morning", "assistant"): 1,
+                ("2024-10-01", "afternoon", "assistant"): 1,
+            },
+        )
+
+        def interrupt_with_one_candidate(result, _config, **callbacks):
+            candidate_found = callbacks["candidate_found"]
+            candidate_found(1, result.assignments)
+            return EquivalentSolutionDiagnosticResult(
+                status=EquivalentSolutionDiagnosticStatus.INTERRUPTED,
+                alternative_count=1,
+                search_limit=10,
+                time_limit_seconds=30,
+                wall_time_seconds=0.1,
+            )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            input_path = root / "input.json"
+            input_path.write_text(
+                json.dumps(payload, ensure_ascii=False),
+                encoding="utf-8",
+            )
+            with patch.object(
+                runner_module,
+                "diagnose_equivalent_solutions",
+                side_effect=interrupt_with_one_candidate,
+            ), patch.object(
+                runner_module,
+                "_export_candidate_schedules",
+            ) as export_candidates:
+                result = run_schedule_file(
+                    input_path,
+                    output_directory=root / "output",
+                    intermediate_directory=root / "runtime" / "expanded-input",
+                    equivalent_solution_diagnostic_config=(
+                        EquivalentSolutionDiagnosticConfig(
+                            max_alternatives=10,
+                            max_time_seconds=30,
+                        )
+                    ),
+                    candidate_export_config=CandidateExportConfig(
+                        max_candidates=1,
+                        formats=("json",),
+                    ),
+                )
+
+        export_candidates.assert_not_called()
+        self.assertEqual(result.candidate_exports, ())
+        self.assertIsNotNone(result.equivalent_solution_diagnostic)
+        assert result.equivalent_solution_diagnostic is not None
+        self.assertIs(
+            result.equivalent_solution_diagnostic.status,
+            EquivalentSolutionDiagnosticStatus.INTERRUPTED,
+        )
 
 
 if __name__ == "__main__":

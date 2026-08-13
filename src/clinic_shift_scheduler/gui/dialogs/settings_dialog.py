@@ -115,7 +115,8 @@ class SettingsDialog(QDialog):
         layout.addWidget(group)
         notice = QLabel(
             "這裡只設定正式排班程式下次執行時使用的參數；"
-            "儲存設定不會立即開始排班。"
+            "儲存設定不會立即開始排班。從本編輯器的「執行排班」頁啟動時，"
+            "固定使用目前開啟的月份；輸入檔名則供獨立執行排班程式使用。"
         )
         notice.setObjectName("mutedText")
         notice.setWordWrap(True)

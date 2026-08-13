@@ -51,8 +51,8 @@ release/
 .\packaging\windows\smoke-test.ps1 -ReleasePath .\release\ClinicShiftScheduler-VERSION-win-x64\ClinicShiftScheduler-VERSION-win-x64.zip
 ```
 
-smoke test 會把 ZIP 解壓到 `runtime/packaging-smoke/`，移除 Conda、virtual environment 與 Python 的環境提示，並把 `PATH` 限制為 Windows 系統目錄後啟動封裝程式，避免開發環境意外補上漏掉的 DLL。它會先用 `ClinicShiftSchedulerEditor.exe` 開啟匿名輸入、正式驗證、另存並等價重開，再由 `ClinicShiftScheduler.exe` 驗證完整排班。驗證完畢後會刪除整個暫存解壓目錄。
+smoke test 會把 ZIP 解壓到 `runtime/packaging-smoke/`，移除 Conda、virtual environment 與 Python 的環境提示，並把 `PATH` 限制為 Windows 系統目錄後啟動封裝程式，避免開發環境意外補上漏掉的 DLL。它會用 `ClinicShiftSchedulerEditor.exe` 開啟匿名輸入、正式驗證、另存並等價重開，再由 Editor 透過 `ClinicShiftScheduler.exe` 的 worker 模式完成正式排班。驗證完畢後會刪除整個暫存解壓目錄。
 
 ## 驗收重點
 
-最終發布仍需在沒有 Python／Conda 的乾淨 Windows 64 位元環境解壓縮測試。使用者必須能用 `ClinicShiftSchedulerEditor.exe` 維護 `input/`，也能直接修改 JSON；執行 `ClinicShiftScheduler.exe` 後則必須在 `output/` 取得通過驗證的 JSON、Excel 與 PDF。
+最終發布仍需在沒有 Python／Conda 的乾淨 Windows 64 位元環境解壓縮測試。使用者必須能用 `ClinicShiftSchedulerEditor.exe` 維護 `input/`、從執行頁啟動排班，也能直接修改 JSON 或獨立執行 `ClinicShiftScheduler.exe`；兩種入口都必須在 `output/` 取得通過驗證的 JSON、Excel 與 PDF。

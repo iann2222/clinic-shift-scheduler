@@ -414,14 +414,18 @@ packaging/windows/
 視覺與平台驗收：
 
 - Windows 64-bit 的 100%、125%、150% scaling 可正常使用。
-- 主流程不出現尚未實作的 solver／結果功能干擾。
+- 執行頁能持續顯示目前階段與耗時，長時間求解時主視窗不凍結。
+- 執行前固定使用目前已驗證並儲存的月份；GUI 不以 `config.json` 中其他檔名取代目前文件。
+- 取消排班可合作式停止 CP-SAT；正式輸出完成後取消候選處理不得刪除既有結果。
 - 鍵盤可完成主要欄位移動、表格編輯、驗證與儲存。
 - PyInstaller `onedir` GUI smoke test 通過。
 - 既有 console 排班入口與完整測試仍通過。
 
 ## 17. 後續延展
 
-第二階段可直接在既有主視窗加入「執行排班」流程，透過 `ScheduleApplicationRequest`、typed progress events 與 background worker 呼叫 application service；第三階段再加入結果摘要與開啟輸出功能。既有輸入 drafts、presenters、pages 與文件 lifecycle 不需重寫。
+第二階段已在既有主視窗加入「執行排班」流程。Editor 透過 `QProcess` 啟動獨立 Scheduler worker，以版本化 JSON-lines 傳遞 typed progress、完成結果與結構化錯誤；GUI 不直接匯入 solver 或 exporters。執行頁顯示目前月份、階段、耗時、訊息、正式狀態、validation 與輸出路徑，並可取消及開啟輸出資料夾。既有命令列入口維持獨立可用。
+
+後續若擴充結果預覽，應讀取已落盤的正式 result model，不得在 GUI 重算排班規則或統計。
 
 ## 18. 實作進度
 
@@ -431,5 +435,7 @@ packaging/windows/
 快捷鍵。月份建立入口已集中於首個流程頁，完整日期選擇共用月份限定日曆；員工頁採唯讀摘要
 搭配新增／編輯 dialog。右上角設定頁已接入正式 `config.json` 契約，可編輯輸入檔、執行顯示與候選
 處理參數，並保留說明欄位及參考預設值後原子儲存。獨立 GUI `onedir` 與自動 smoke
-test 已完成，第一個 milestone 剩餘工作以 Windows 實機 High DPI 人工操作檢查為主；
-solver 執行按鈕、背景工作與結果顯示仍明確保留在後續階段。
+test 已完成。第二個 milestone 另完成獨立 worker、執行進度、合作式取消、正式結果摘要與輸出資料夾入口；
+執行頁已將正式排班的「終止排班」與正式輸出後的「終止候選處理」分開，
+後者不會降級或刪除已完成班表。剩餘工作以 Windows 實機 High DPI、封裝後 GUI 啟動
+worker 與人工操作檢查為主。

@@ -60,6 +60,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 class _SmokeArguments(argparse.Namespace):
     enabled: bool
+    run_schedule: bool
     input: Path | None
     output: Path | None
 
@@ -69,11 +70,23 @@ def _parse_gui_arguments(
 ) -> tuple[_SmokeArguments, list[str]]:
     parser = argparse.ArgumentParser(add_help=False)
     parser.add_argument("--smoke-test", action="store_true", dest="enabled")
+    parser.add_argument(
+        "--smoke-run-schedule",
+        action="store_true",
+        dest="run_schedule",
+    )
     parser.add_argument("--smoke-input", type=Path, dest="input")
     parser.add_argument("--smoke-output", type=Path, dest="output")
     smoke, remaining = parser.parse_known_args(arguments[1:], namespace=_SmokeArguments())
     if (smoke.input is None) != (smoke.output is None):
         parser.error("--smoke-input and --smoke-output must be provided together")
+    if smoke.run_schedule and (
+        not smoke.enabled or smoke.input is None or smoke.output is None
+    ):
+        parser.error(
+            "--smoke-run-schedule requires --smoke-test, --smoke-input and "
+            "--smoke-output"
+        )
     return smoke, [arguments[0], *remaining]
 
 
@@ -82,12 +95,23 @@ def _run_smoke_test(
     window: MainWindow,
     smoke: _SmokeArguments,
 ) -> None:
-    exit_code = 0
+    finished = False
     error_path = (
         None
         if smoke.output is None
         else smoke.output.with_suffix(smoke.output.suffix + ".error.txt")
     )
+    def finish(exit_code: int, error_text: str | None = None) -> None:
+        nonlocal finished
+        if finished:
+            return
+        finished = True
+        if error_text is not None and error_path is not None:
+            error_path.write_text(error_text, encoding="utf-8")
+        window._bind_session(None)
+        window.close()
+        app.exit(exit_code)
+
     try:
         if smoke.input is not None and smoke.output is not None:
             smoke.output.parent.mkdir(parents=True, exist_ok=True)
@@ -104,11 +128,34 @@ def _run_smoke_test(
             reopened = window.authoring_application.open_document(smoke.output)
             if SchedulePresenter.snapshot(reopened.draft) != original_snapshot:
                 raise RuntimeError("GUI smoke round-trip changed the input document")
+            if smoke.run_schedule:
+                window._bind_session(reopened)
+
+                def worker_finished(exit_code: int) -> None:
+                    try:
+                        if exit_code != 0:
+                            raise RuntimeError(
+                                f"GUI worker exited with code {exit_code}"
+                            )
+                        if not window.execution_page.terminal_received:
+                            raise RuntimeError(
+                                "GUI worker did not report a terminal result"
+                            )
+                        if "OPTIMAL" not in window.execution_page.result_status_label.text():
+                            raise RuntimeError("GUI worker result is not OPTIMAL")
+                        if "PASS" not in window.execution_page.validation_label.text():
+                            raise RuntimeError("GUI worker validation did not pass")
+                    except Exception:
+                        finish(1, traceback.format_exc())
+                    else:
+                        finish(0)
+
+                window.execution_controller.finished.connect(worker_finished)
+                window._start_schedule()
+                if not window.execution_controller.is_running:
+                    raise RuntimeError("GUI did not start the scheduling worker")
+                return
     except Exception:
-        exit_code = 1
-        if error_path is not None:
-            error_path.write_text(traceback.format_exc(), encoding="utf-8")
-    finally:
-        window._bind_session(None)
-        window.close()
-        app.exit(exit_code)
+        finish(1, traceback.format_exc())
+        return
+    finish(0)

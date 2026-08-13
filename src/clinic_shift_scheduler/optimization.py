@@ -1561,6 +1561,7 @@ def diagnose_equivalent_solutions(
     candidate_found: (
         Callable[[int, tuple[Assignment, ...]], None] | None
     ) = None,
+    cancellation: CancellationToken | None = None,
 ) -> EquivalentSolutionDiagnosticResult:
     """Count distinct equal-quality assignments up to a bound and time limit.
 
@@ -1608,8 +1609,10 @@ def diagnose_equivalent_solutions(
 
     started = perf_counter()
     alternative_count = 0
-    interrupted = False
+    interrupted = bool(cancellation and cancellation.is_cancelled)
     active_solver: cp_model.CpSolver | None = None
+    cancellation_monitor: threading.Thread | None = None
+    cancellation_monitor_stop = threading.Event()
     previous_sigint_handler = None
     handles_sigint = threading.current_thread() is threading.main_thread()
 
@@ -1623,6 +1626,24 @@ def diagnose_equivalent_solutions(
                 active_solver.stop_search()
 
         signal.signal(signal.SIGINT, stop_diagnostic)
+
+    if cancellation is not None:
+
+        def monitor_cancellation() -> None:
+            nonlocal interrupted
+            while not cancellation_monitor_stop.is_set():
+                if cancellation.wait(0.05):
+                    interrupted = True
+                    if active_solver is not None:
+                        active_solver.stop_search()
+                    return
+
+        cancellation_monitor = threading.Thread(
+            target=monitor_cancellation,
+            name="candidate-diagnostic-cancellation-monitor",
+            daemon=True,
+        )
+        cancellation_monitor.start()
 
     try:
         while alternative_count < config.max_alternatives:
@@ -1702,5 +1723,8 @@ def diagnose_equivalent_solutions(
             wall_time_seconds=perf_counter() - started,
         )
     finally:
+        cancellation_monitor_stop.set()
+        if cancellation_monitor is not None:
+            cancellation_monitor.join(timeout=1.0)
         if handles_sigint:
             signal.signal(signal.SIGINT, previous_sigint_handler)

@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QAction, QCloseEvent, QKeySequence
+from PySide6.QtCore import QUrl, Qt
+from PySide6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
@@ -36,12 +36,14 @@ from .dialogs import (
     show_information,
     show_warning,
 )
+from .execution_controller import ExecutionController
 
 from .navigation import NAVIGATION_ITEMS, PageId
 from .field_location import resolve_field_location
 from .pages import (
     DateOverridePage,
     EmployeePage,
+    ExecutionPage,
     FullTimeUnavailablePage,
     MonthClinicPage,
     PartTimeAvailablePage,
@@ -66,8 +68,10 @@ class MainWindow(QMainWindow):
         self.config_application = config_application or ConfigApplication()
         self.input_directory = Path(input_directory or Path.cwd() / "input")
         self.config_path = Path(config_path or Path.cwd() / "config.json")
+        self.application_root = self.config_path.resolve().parent
         self.session: AuthoringSession | None = None
-        self.setWindowTitle("診所排班系統－排班資料編輯器")
+        self._execution_locked = False
+        self.setWindowTitle("診所排班系統")
         self.resize(1180, 760)
         self.setMinimumSize(920, 620)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -100,6 +104,7 @@ class MainWindow(QMainWindow):
         self.full_time_unavailable_page = FullTimeUnavailablePage()
         self.part_time_available_page = PartTimeAvailablePage()
         self.review_save_page = ReviewSavePage()
+        self.execution_page = ExecutionPage()
         page_objects = (
             self.month_clinic_page,
             self.weekly_demand_page,
@@ -108,6 +113,7 @@ class MainWindow(QMainWindow):
             self.full_time_unavailable_page,
             self.part_time_available_page,
             self.review_save_page,
+            self.execution_page,
         )
         self._page_indexes: dict[PageId, int] = {}
         for page in page_objects:
@@ -137,6 +143,25 @@ class MainWindow(QMainWindow):
         self.review_save_page.save_requested.connect(self.save_document)
         self.review_save_page.save_as_requested.connect(self.save_document_as)
         self.review_save_page.issue_activated.connect(self.navigate_to_issue)
+        self.execution_controller = ExecutionController(
+            self.application_root,
+            self,
+        )
+        self.execution_page.run_requested.connect(self._start_schedule)
+        self.execution_page.cancel_requested.connect(self._cancel_schedule)
+        self.execution_page.stop_candidate_requested.connect(
+            self._stop_candidate_processing
+        )
+        self.execution_page.open_output_requested.connect(
+            self._open_output_directory
+        )
+        self.execution_controller.message_received.connect(
+            self._show_execution_message
+        )
+        self.execution_controller.stderr_received.connect(
+            self.execution_page.append_stderr
+        )
+        self.execution_controller.finished.connect(self._execution_finished)
         self._install_shortcuts()
         self._bind_session(None)
         self.navigate_to(PageId.MONTH_CLINIC)
@@ -320,6 +345,15 @@ class MainWindow(QMainWindow):
             self.month_clinic_page.focus_location(location)
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        if self.execution_controller.is_running:
+            if not ask_yes_no(
+                self,
+                "排班仍在進行",
+                "排班尚未完成，關閉程式會取消本次執行。確定要關閉嗎？",
+            ):
+                event.ignore()
+                return
+            self.execution_controller.stop_for_shutdown()
         if self._allow_document_replacement():
             event.accept()
         else:
@@ -327,6 +361,7 @@ class MainWindow(QMainWindow):
 
     def _bind_session(self, session: AuthoringSession | None) -> None:
         self.session = session
+        self.execution_page.reset_for_document()
         self.navigation.set_document_available(session is not None)
         self.month_clinic_page.bind_draft(
             None if session is None else session.draft
@@ -351,6 +386,7 @@ class MainWindow(QMainWindow):
 
     def _draft_changed(self) -> None:
         self.review_save_page.clear_validation()
+        self.execution_page.mark_input_changed()
         self._refresh_document_header()
 
     def _structure_changed(self) -> None:
@@ -373,6 +409,11 @@ class MainWindow(QMainWindow):
                 path=None,
                 state=DocumentState.NEW,
             )
+            self.execution_page.bind_document(
+                month=None,
+                path=None,
+                config_path=self.config_path,
+            )
             return
         state = (
             DocumentState.DIRTY
@@ -383,6 +424,11 @@ class MainWindow(QMainWindow):
             month=self.session.month_label,
             path=self.session.path,
             state=state,
+        )
+        self.execution_page.bind_document(
+            month=self.session.month_label,
+            path=self.session.path,
+            config_path=self.config_path,
         )
 
     def _save_to(self, target: Path, *, overwrite: bool) -> bool:
@@ -462,6 +508,13 @@ class MainWindow(QMainWindow):
             show_warning(self, "無法開啟文件", str(error))
 
     def _allow_document_replacement(self) -> bool:
+        if self.execution_controller.is_running:
+            show_information(
+                self,
+                "排班仍在進行",
+                "請先等待排班完成，或在「執行排班」頁取消本次執行。",
+            )
+            return False
         if self.session is None or not self.session.is_dirty:
             return True
         message = build_message_box(
@@ -487,3 +540,90 @@ class MainWindow(QMainWindow):
             "覆寫既有檔案",
             f"檔案已存在，確定要覆寫嗎？\n{target}",
         )
+
+    def _start_schedule(self) -> None:
+        if self.session is None or self.execution_controller.is_running:
+            return
+        validation = self.authoring_application.validate(self.session.draft)
+        if not validation.is_valid:
+            self.review_save_page.show_validation(
+                is_valid=False,
+                issues=validation.issues,
+            )
+            self.navigate_to(PageId.REVIEW_SAVE)
+            show_warning(
+                self,
+                "輸入資料尚未通過檢查",
+                "請先修正檢查清單中的問題，再執行排班。",
+            )
+            return
+        if self.session.path is None or self.session.is_dirty:
+            if not self.save_document():
+                return
+        assert self.session.path is not None
+        try:
+            self.config_application.open_document(self.config_path)
+        except (InputValidationError, OSError, ValueError) as error:
+            show_warning(
+                self,
+                "排班設定無法使用",
+                f"請先修正設定內容：\n{error}",
+            )
+            return
+
+        self.navigate_to(PageId.EXECUTION)
+        self.execution_page.begin()
+        self._set_execution_locked(True)
+        try:
+            self.execution_controller.start(
+                config_path=self.config_path,
+                input_path=self.session.path,
+                output_directory=self.application_root / "output",
+                intermediate_directory=(
+                    self.application_root / "runtime" / "expanded-input"
+                ),
+            )
+        except (OSError, RuntimeError, ValueError) as error:
+            self.execution_page.show_message(
+                {
+                    "type": "failed",
+                    "kind": "WORKER_START_FAILED",
+                    "message": str(error),
+                    "issues": [],
+                }
+            )
+            self.execution_page.process_finished()
+            self._set_execution_locked(False)
+
+    def _cancel_schedule(self) -> None:
+        if not self.execution_controller.is_running:
+            return
+        self.execution_page.request_cancelling()
+        self.execution_controller.cancel()
+
+    def _stop_candidate_processing(self) -> None:
+        if not self.execution_controller.is_running:
+            return
+        self.execution_page.request_candidate_stopping()
+        self.execution_controller.cancel()
+
+    def _show_execution_message(self, message: dict[str, object]) -> None:
+        self.execution_page.show_message(message)
+
+    def _execution_finished(self, _exit_code: int) -> None:
+        self.execution_page.process_finished()
+        self._set_execution_locked(False)
+
+    def _set_execution_locked(self, locked: bool) -> None:
+        self._execution_locked = locked
+        self.navigation.list_widget.setEnabled(
+            not locked and self.session is not None
+        )
+        for button in self.document_header.document_action_buttons:
+            button.setEnabled(not locked and self.session is not None)
+        self.document_header.settings_button.setEnabled(not locked)
+        for action in self.document_actions.values():
+            action.setEnabled(not locked)
+
+    def _open_output_directory(self, directory: str) -> None:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(directory))

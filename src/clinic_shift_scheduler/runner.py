@@ -56,6 +56,7 @@ from .optimization import (
     diagnose_equivalent_solutions,
     solve_lexicographic,
 )
+from .optimization_contracts import EquivalentSolutionDiagnosticStatus
 from .solver_contracts import Assignment, FeasibilityStatus, LexicographicResult
 from .time_formatting import format_seconds, format_seconds_with_minutes
 
@@ -585,8 +586,7 @@ def run_schedule_file(
         _notify(
             candidate_progress,
             "開始搜尋同品質候選班表"
-            f"（搜尋時間上限為 {format_seconds(resolved_diagnostic_config.max_time_seconds)}），"
-            "按 Ctrl+C 可只中止此診斷",
+            f"（搜尋時間上限為 {format_seconds(resolved_diagnostic_config.max_time_seconds)}）",
             phase=ExecutionPhase.CANDIDATE_SEARCH,
             kind=ProgressEventKind.STEP_STARTED,
         )
@@ -615,10 +615,15 @@ def run_schedule_file(
             resolved_diagnostic_config,
             progress=report_alternative,
             candidate_found=capture_candidate,
+            cancellation=cancellation,
         )
         equivalent_solution_diagnostic_seconds = perf_counter() - step_started
 
-        if captured_candidates:
+        if (
+            captured_candidates
+            and equivalent_solution_diagnostic.status
+            is not EquivalentSolutionDiagnosticStatus.INTERRUPTED
+        ):
             _notify(
                 candidate_progress,
                 f"輸出 {len(captured_candidates)} 份同品質候選班表",

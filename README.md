@@ -8,7 +8,8 @@
 - `src/clinic_shift_scheduler/authoring_models.py`：使用者維護的 weekly-v1 不可變 typed document。
 - `src/clinic_shift_scheduler/authoring.py`：weekly-v1 的驗證、讀寫與 canonical v1 逐日需求展開。
 - `src/clinic_shift_scheduler/authoring_application.py`：不載入求解器的月份建立、開啟、複製、驗證及原子儲存服務。
-- `src/clinic_shift_scheduler/gui/`：PySide6 輸入編輯器；以 draft／presenter 轉接正式 weekly-v1 document，不直接依賴 solver。
+- `src/clinic_shift_scheduler/gui/`：PySide6 桌面外殼；以 draft／presenter 編輯 weekly-v1，並以獨立 worker 執行排班，不直接依賴 solver。
+- `src/clinic_shift_scheduler/execution_protocol.py`、`execution_worker.py`：Editor 與獨立 Scheduler 程序共用的版本化訊息協定與背景執行入口。
 - `src/clinic_shift_scheduler/input_contracts.py`：JSON Schema 與 runtime parser 共用的輕量欄位契約。
 - `src/clinic_shift_scheduler/json_io.py`：使用者 JSON 文件的 UTF-8 讀取與原子替換。
 - `src/clinic_shift_scheduler/events.py`：前端／CLI 共用的結構化診斷、進度事件與取消介面。
@@ -112,9 +113,11 @@ PySide6 桌面前端目前已接上 weekly-v1 文件生命週期，可建立月�
 python src/run_gui.py
 ```
 
-第一個 GUI milestone 只負責輸入、驗證與儲存，不會呼叫 solver。正式排班仍使用
-下方既有入口；GUI 不會載入 OR-Tools、輸出器或更動排班規則。後續加入執行按鈕時，
-也只會透過既有 application service 串接，命令列入口仍可獨立使用。
+完成輸入後可在最後的「執行排班」頁檢查、儲存並執行目前月份。Editor 會啟動
+獨立 worker 程序，顯示階段、耗時、候選處理與正式輸出路徑；GUI 本身不載入
+OR-Tools 或輸出器，也不更動排班規則。正式排班階段可用「終止排班」，
+正式結果已落盤並進入候選處理後，改用「終止候選處理」且不影響正式班表。
+下方命令列入口仍可獨立使用。
 
 ### 完整執行一次排班
 
@@ -133,8 +136,9 @@ lexicographic optimization、獨立結果驗證，以及 JSON、Excel、PDF 輸�
 封裝版若由使用者直接雙擊執行，完成或失敗後會等待按 Enter 才關閉視窗；從既有
 PowerShell／VS Code 終端執行則維持原本結束行為，不會阻塞自動化流程。
 三份正式檔案完成後，程式才開始搜尋與正式班表具有完全相同鎖定品質、但核心
-assignment 不同的候選班表；因此不想等待診斷時，可在看到「正式 JSON／Excel／PDF
-已完成」後按 `Ctrl+C`，已產出的正式班表不受影響。候選數不包含正式輸出的那一份。
+assignment 不同的候選班表；因此不想等待候選處理時，可在看到「正式 JSON／Excel／PDF
+已完成」後，在終端按 `Ctrl+C`，或在 Editor 按「終止候選處理」；已產出的
+正式班表不受影響。候選數不包含正式輸出的那一份。
 若搜尋空間已完整證明，程式會列印精確數量；達到預設 100 份上限或本次 CP-SAT
 最佳化時間五分之一的診斷時限時，只列印「至少找到 N 份」並明確註明尚未證明
 是否還有更多。正式輸出完成時會先列印排班時間與全部檔案路徑，後續訊息改用

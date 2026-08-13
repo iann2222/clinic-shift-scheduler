@@ -17,7 +17,12 @@ OUTPUT_DIRECTORY = PROJECT_ROOT / "output"
 INTERMEDIATE_DIRECTORY = PROJECT_ROOT / "runtime" / "expanded-input"
 
 
-def main() -> int:
+def main(arguments: list[str] | None = None) -> int:
+    arguments = list(sys.argv[1:] if arguments is None else arguments)
+    if arguments and arguments[0] == "--gui-worker":
+        from clinic_shift_scheduler.execution_worker import main as worker_main
+
+        return worker_main(arguments[1:])
     config_path = PROJECT_ROOT / CONFIG_FILENAME
     try:
         config = load_scheduler_config(config_path)
@@ -34,8 +39,10 @@ def main() -> int:
 
 
 if __name__ == "__main__":
+    worker_mode = len(sys.argv) > 1 and sys.argv[1] == "--gui-worker"
     try:
         exit_code = main()
     finally:
-        pause_after_run_if_needed()
+        if not worker_mode:
+            pause_after_run_if_needed()
     raise SystemExit(exit_code)

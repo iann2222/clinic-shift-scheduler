@@ -47,7 +47,7 @@ class GuiFoundationTests(unittest.TestCase):
     def setUpClass(cls) -> None:
         cls.app = create_application(["gui-foundation-test"])
 
-    def test_navigation_contract_has_the_seven_input_pages_in_order(self) -> None:
+    def test_navigation_contract_has_input_pages_then_execution_in_order(self) -> None:
         self.assertEqual(
             tuple(item.page_id for item in NAVIGATION_ITEMS),
             (
@@ -58,6 +58,7 @@ class GuiFoundationTests(unittest.TestCase):
                 PageId.FULL_TIME_UNAVAILABLE,
                 PageId.PART_TIME_AVAILABLE,
                 PageId.REVIEW_SAVE,
+                PageId.EXECUTION,
             ),
         )
 
@@ -71,7 +72,7 @@ class GuiFoundationTests(unittest.TestCase):
             window.page_ids,
             tuple(item.page_id for item in NAVIGATION_ITEMS),
         )
-        self.assertEqual(window.page_stack.count(), 7)
+        self.assertEqual(window.page_stack.count(), 8)
         self.assertEqual(
             window.page_stack.currentWidget().page_id,
             PageId.MONTH_CLINIC,

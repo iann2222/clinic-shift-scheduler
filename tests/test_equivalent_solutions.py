@@ -5,6 +5,7 @@ from unittest.mock import patch
 
 import clinic_shift_scheduler.optimization as optimization
 from clinic_shift_scheduler import (
+    CancellationToken,
     EquivalentSolutionDiagnosticConfig,
     EquivalentSolutionDiagnosticStatus,
     diagnose_equivalent_solutions,
@@ -143,6 +144,22 @@ class EquivalentSolutionDiagnosticTests(unittest.TestCase):
             side_effect=KeyboardInterrupt,
         ):
             diagnostic = diagnose_equivalent_solutions(result)
+
+        self.assertIs(
+            diagnostic.status,
+            EquivalentSolutionDiagnosticStatus.INTERRUPTED,
+        )
+        self.assertEqual(diagnostic.alternative_count, 0)
+
+    def test_cancellation_token_interrupts_candidate_diagnostic(self) -> None:
+        result = self._two_assignment_result()
+        cancellation = CancellationToken()
+        cancellation.cancel()
+
+        diagnostic = diagnose_equivalent_solutions(
+            result,
+            cancellation=cancellation,
+        )
 
         self.assertIs(
             diagnostic.status,

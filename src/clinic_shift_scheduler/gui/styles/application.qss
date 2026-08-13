@@ -35,6 +35,12 @@ QFrame#documentHeader, QFrame#pageSurface {
     border-radius: 5px;
 }
 
+QScrollArea#executionContentScrollArea,
+QWidget#executionScrollContent {
+    background-color: transparent;
+    border: none;
+}
+
 QFrame#monthStartPanel {
     background-color: $PRIMARY_SOFT;
     border: 1px solid $BORDER;
@@ -56,6 +62,23 @@ QLabel#sectionTitle {
 QPushButton#monthActionButton {
     color: $PRIMARY;
     font-weight: 600;
+}
+
+QPushButton#primaryActionButton {
+    background-color: $PRIMARY;
+    border-color: $PRIMARY;
+    color: white;
+    font-weight: 600;
+}
+
+QPushButton#primaryActionButton:hover {
+    background-color: #315867;
+}
+
+QPushButton#primaryActionButton:disabled {
+    background-color: $BACKGROUND;
+    border-color: $BORDER;
+    color: $TEXT_MUTED;
 }
 
 QLabel#selectedDateLabel {

@@ -263,8 +263,6 @@ def _stage_release(
 
 
 def _smoke_test(config: dict[str, Any], release_directory: Path) -> None:
-    application_name = config["application"]["name"]
-    executable = release_directory / f"{application_name}.exe"
     editor_name = config["editor"]["name"]
     editor_executable = release_directory / f"{editor_name}.exe"
     config_path = release_directory / "config.json"
@@ -291,13 +289,6 @@ def _smoke_test(config: dict[str, Any], release_directory: Path) -> None:
             release_directory,
             editor_executable,
             runtime_directory,
-            smoke_environment,
-        )
-        _scheduler_smoke_test(
-            config,
-            release_directory,
-            executable,
-            output_directory,
             smoke_environment,
         )
     finally:
@@ -329,15 +320,13 @@ def _gui_smoke_test(
         [
             str(editor_executable),
             "--smoke-test",
+            "--smoke-run-schedule",
             f"--smoke-input={sample_input}",
             f"--smoke-output={gui_output}",
         ],
         cwd=release_directory,
         check=False,
-        timeout=min(
-            180.0,
-            float(config["build"]["smoke_test_timeout_seconds"]),
-        ),
+        timeout=float(config["build"]["smoke_test_timeout_seconds"]),
         env=smoke_environment,
     )
     if completed.returncode:
@@ -357,28 +346,13 @@ def _gui_smoke_test(
         sample_input.read_text(encoding="utf-8")
     ):
         raise PackagingError("packaged GUI smoke round-trip changed the input")
-    print("[發布] GUI smoke test：開啟／驗證／儲存／重開 PASS")
-
-
-def _scheduler_smoke_test(
-    config: dict[str, Any],
-    release_directory: Path,
-    executable: Path,
-    output_directory: Path,
-    smoke_environment: dict[str, str],
-) -> None:
-    print("[發布] 以匿名月份執行封裝後排班 smoke test")
-    completed = subprocess.run(
-        [str(executable)],
-        cwd=release_directory,
-        check=False,
-        timeout=float(config["build"]["smoke_test_timeout_seconds"]),
-        env=smoke_environment,
+    _verify_schedule_smoke_outputs(release_directory / "output")
+    print(
+        "[發布] GUI smoke test："
+        "開啟／驗證／儲存／重開／背景排班 PASS"
     )
-    if completed.returncode:
-        raise PackagingError(
-            f"packaged smoke test failed with exit code {completed.returncode}"
-        )
+
+def _verify_schedule_smoke_outputs(output_directory: Path) -> None:
     json_paths = tuple(output_directory.glob("*.result-v1.json"))
     excel_paths = tuple(output_directory.glob("*.result-v1.xlsx"))
     pdf_paths = tuple(output_directory.glob("*.result-v1.pdf"))
@@ -393,7 +367,6 @@ def _scheduler_smoke_test(
         raise PackagingError("smoke test Excel is not a valid XLSX archive")
     if not pdf_paths[0].read_bytes().startswith(b"%PDF-"):
         raise PackagingError("smoke test PDF does not have a PDF header")
-    print("[發布] 排班 smoke test：OPTIMAL + validation PASS")
 
 
 def _isolated_smoke_environment() -> dict[str, str]:

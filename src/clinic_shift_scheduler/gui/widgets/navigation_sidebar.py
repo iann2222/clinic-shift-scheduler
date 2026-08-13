@@ -31,7 +31,7 @@ class NavigationSidebar(QFrame):
         title.setObjectName("applicationTitle")
         layout.addWidget(title)
 
-        subtitle = QLabel("排班資料編輯器")
+        subtitle = QLabel("排班設定與執行")
         subtitle.setObjectName("mutedText")
         layout.addWidget(subtitle)
 

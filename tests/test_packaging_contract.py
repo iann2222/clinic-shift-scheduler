@@ -127,6 +127,13 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn('"pytest"', source)
         self.assertIn("excludes=packaging_only_excludes", source)
 
+    def test_release_smoke_runs_scheduler_through_editor_worker(self) -> None:
+        source = (
+            REPOSITORY_ROOT / "packaging/windows/build_release.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn('"--smoke-run-schedule"', source)
+        self.assertIn("_verify_schedule_smoke_outputs", source)
+
     def test_root_license_bundle_is_the_only_release_license_source(self) -> None:
         content = self.config["release_content"]
         self.assertEqual(content["licenses_source"], "licenses")

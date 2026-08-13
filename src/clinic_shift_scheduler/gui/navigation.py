@@ -14,6 +14,7 @@ class PageId(StrEnum):
     FULL_TIME_UNAVAILABLE = "full_time_unavailable"
     PART_TIME_AVAILABLE = "part_time_available"
     REVIEW_SAVE = "review_save"
+    EXECUTION = "execution"
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,5 +59,10 @@ NAVIGATION_ITEMS: tuple[NavigationItem, ...] = (
         PageId.REVIEW_SAVE,
         "檢查與儲存",
         "執行完整輸入檢查、定位問題並安全儲存文件。",
+    ),
+    NavigationItem(
+        PageId.EXECUTION,
+        "執行排班",
+        "執行目前已驗證並儲存的月份，查看進度與正式輸出結果。",
     ),
 )

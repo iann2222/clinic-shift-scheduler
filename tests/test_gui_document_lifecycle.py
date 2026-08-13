@@ -134,6 +134,54 @@ class GuiDocumentLifecycleTests(unittest.TestCase):
             )
             self.assertIn("檢查通過", window.review_save_page.status_label.text())
 
+    def test_execution_page_runs_current_saved_document_through_worker(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            window = self.make_window(Path(directory))
+            window.open_document_path(WEEKLY_EXAMPLE)
+            assert window.session is not None
+
+            with patch.object(window.execution_controller, "start") as start:
+                window._start_schedule()
+
+            self.assertEqual(
+                window.page_stack.currentWidget().page_id,
+                PageId.EXECUTION,
+            )
+            start.assert_called_once()
+            self.assertEqual(
+                start.call_args.kwargs["input_path"],
+                window.session.path,
+            )
+            self.assertFalse(window.navigation.list_widget.isEnabled())
+            self.assertFalse(window.document_header.settings_button.isEnabled())
+
+            window._show_execution_message(
+                {
+                    "type": "completed",
+                    "status": "OPTIMAL",
+                    "validation": "PASS",
+                    "paths": {
+                        "json": "output/result.json",
+                        "excel": "output/result.xlsx",
+                        "pdf": "output/result.pdf",
+                    },
+                    "timings": {"total_execution_seconds": 12.3},
+                }
+            )
+            window._execution_finished(0)
+
+            self.assertEqual(
+                window.execution_page.result_status_label.text(),
+                "最佳排班完成（OPTIMAL）",
+            )
+            self.assertEqual(
+                window.execution_page.validation_label.text(),
+                "通過（PASS）",
+            )
+            self.assertTrue(window.execution_page.open_output_button.isEnabled())
+            self.assertTrue(window.navigation.list_widget.isEnabled())
+            self.assertTrue(window.document_header.settings_button.isEnabled())
+
     def test_validation_issue_routes_to_relevant_page(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             window = self.make_window(Path(directory))

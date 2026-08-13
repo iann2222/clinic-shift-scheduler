@@ -14,7 +14,7 @@ from .application import (
     ScheduleApplicationRequest,
     run_schedule_application,
 )
-from .events import ProgressEvent, ProgressEventKind
+from .events import ExecutionPhase, ProgressEvent, ProgressEventKind
 from .optimization_contracts import (
     EquivalentSolutionDiagnosticResult,
     EquivalentSolutionDiagnosticStatus,
@@ -32,9 +32,16 @@ def _terminal_width(text: str) -> int:
 class ConsoleProgressPrinter:
     """Print heartbeat messages in place on interactive terminals."""
 
-    def __init__(self, label: str, stream: TextIO | None = None) -> None:
+    def __init__(
+        self,
+        label: str,
+        stream: TextIO | None = None,
+        *,
+        step_started_suffix: str | None = None,
+    ) -> None:
         self._label = label
         self._stream = stream or sys.stdout
+        self._step_started_suffix = step_started_suffix
         self._interactive = self._stream.isatty()
         self._active_width = 0
         self._lock = threading.Lock()
@@ -45,7 +52,14 @@ class ConsoleProgressPrinter:
             self._active_width = 0
 
     def __call__(self, event: ProgressEvent) -> None:
-        rendered = f"{self._label} {event.message}"
+        message = event.message
+        if (
+            self._step_started_suffix
+            and event.phase is ExecutionPhase.CANDIDATE_SEARCH
+            and event.kind is ProgressEventKind.STEP_STARTED
+        ):
+            message = f"{message}；{self._step_started_suffix}"
+        rendered = f"{self._label} {message}"
         is_heartbeat = event.kind in {
             ProgressEventKind.HEARTBEAT,
             ProgressEventKind.CANDIDATE_COUNT,
@@ -99,7 +113,10 @@ def run_schedule_request_with_console(
 
     command_started = perf_counter()
     schedule_progress = ConsoleProgressPrinter("[排班]")
-    diagnostic_progress = ConsoleProgressPrinter("[候選處理]")
+    diagnostic_progress = ConsoleProgressPrinter(
+        "[候選處理]",
+        step_started_suffix="按 Ctrl+C 可只終止候選處理",
+    )
     try:
         result = run_schedule_application(
             request,
