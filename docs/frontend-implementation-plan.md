@@ -1,62 +1,47 @@
-# Desktop Frontend Implementation Plan
+# Desktop Frontend Plan
 
-本文件定義診所排班系統第一版 Windows 桌面前端的實作邊界。第一個 GUI milestone 只處理使用者輸入、正式驗證與安全儲存，不呼叫 solver，不顯示排班進度、結果預覽或輸出檔案。
+本文件記錄診所排班系統 Windows 桌面前端目前的產品範圍、架構邊界與交付前仍需完成的工作。早期 milestone 的逐項開發紀錄不再保留；正式排班規則、資料契約與最佳化順序仍以排班規格文件為準。
 
-## 1. 目標與第一階段範圍
+## 1. 產品目標與目前狀態
 
-第一階段要讓一般使用者不必直接編輯 weekly JSON，即可完成：
+桌面前端的目標是讓一般使用者不必直接編輯 JSON 或操作 Python 環境，也能完成一次排班。現行主要流程已接通：
 
-- 建立一個全新月份。
-- 從既有月份複製建立新月份。
-- 開啟既有 `weekly-v1` JSON。
-- 完整編輯 weekly-v1 正式輸入。
-- 編輯並安全儲存 `config.json`。
-- 執行即時基本檢查與完整正式 validation。
-- 從錯誤清單定位至對應頁面、人員、日期或欄位。
-- 原子儲存、另存與重新開啟等價資料。
-- 保護尚未儲存的修改。
+```text
+建立／開啟月份
+→ 編輯月份需求與員工條件
+→ 檢查並安全儲存
+→ 執行排班
+→ 查看進度與終止控制
+→ 確認正式狀態及驗證結果
+→ 取得 JSON、Excel、PDF 與候選班表
+```
 
-本階段明確不包含：
+目前前端已具備：
 
-- 呼叫 CP-SAT、precheck 或任何最佳化流程。
-- 排班進度、候選處理與取消求解。
-- 結果預覽、統計、Excel、PDF 或輸出資料夾操作。
-- 修改 v1 Schema、排班規則或最佳化順序。
+- 建立新月份、從上月建立及開啟既有 `weekly-v1` JSON。
+- 編輯每週需求、特殊日期、員工、正職不可排及兼職可排資料。
+- 編輯並原子儲存 `config.json`。
+- 正式輸入 validation、錯誤定位、儲存／另存與未儲存變更保護。
+- 以獨立背景程序執行完整排班，顯示階段、訊息與耗時。
+- 分開處理「終止排班」與正式輸出後的「終止候選處理」。
+- 顯示正式狀態、獨立驗證結果與 JSON、Excel、PDF 路徑，並可開啟輸出資料夾。
 
-第一階段完成後，可建立第一個 GUI milestone tag。這個 tag 代表輸入編輯器達到可驗收狀態，不代表完整 GUI 已取代既有正式排班入口。
+GUI 不取代命令列入口；不使用前端時，仍可直接編輯 JSON／config 並獨立執行排班。
 
-## 2. 技術選型
+## 2. 技術與視覺原則
 
-- UI framework：`PySide6`。
-- UI toolkit：Qt Widgets，不使用 QML。
-- 支援平台：64-bit Windows。
-- UI 建立方式：Python 程式化建立，不以執行期載入 `.ui` 檔為核心。
-- 資料表格：優先使用 `QTableView + QAbstractTableModel`。
-- 樣式：少量集中式 QSS，不在各 widget 散落 style string。
-- 封裝：延續 PyInstaller `onedir`。
-- 測試：draft、presenter、application service 以純 Python 單元測試為主；Qt model、navigation 與主要視窗流程補 GUI integration tests。
+- 技術：Python 3.12、PySide6、Qt Widgets。
+- 平台：第一版只支援 Windows 64-bit。
+- UI：Python 程式化建立，搭配少量集中式 QSS。
+- 表格：使用 `QTableView + QAbstractTableModel`，不以 `QTableWidget` 保存 domain state。
+- 封裝：PyInstaller `onedir`，發布時提供 ZIP。
+- 風格：乾淨、低彩度、清楚的 Windows 行政工具；不使用動畫、漸層、玻璃效果或大型 dashboard。
+- 可讀性：文字不能只靠顏色表意，並需在 Windows 100%、125%、150% 顯示縮放下驗收。
+- 輸入：數值欄只保存純數字，單位顯示在欄位外；不顯示無意義的小數尾零。
 
-PySide6 應加入一般 application dependency，並在目前 Windows + Python 3.12 + PyInstaller 環境完成驗證後固定至已測試版本。發布包需包含 Qt／PySide6 的授權與第三方聲明。
+## 3. 資訊架構
 
-## 3. 視覺與互動原則
-
-整體風格是乾淨、簡潔、低彩度的 Windows 行政工具：
-
-- 使用淺灰白背景、低彩度藍色或藍綠色作為主要操作色。
-- 不使用動畫、漸層、玻璃效果、大型 dashboard 或不必要圖表。
-- 以清楚的標題、表格分組、留白與一致間距建立層次。
-- 成功、警告與錯誤除了顏色，也必須使用文字與圖示區分。
-- 員工顏色不作為整個輸入 UI 的主要導航機制。
-- 字型優先順序為 `Segoe UI`、`Microsoft JhengHei UI`、`Microsoft JhengHei`、sans-serif。
-- 支援鍵盤導覽、合理 tab order，避免只能使用滑鼠操作。
-- 數值輸入框只包含可編輯的純數字，`節`、`份`、`秒`、`年`、`月`等單位以相鄰文字呈現；可選小數只顯示有效位數，不保留無意義的尾端零。
-- 不以固定像素假設字型與顯示比例，驗收 100%、125%、150% Windows scaling。
-
-## 4. 主視窗資訊架構
-
-主視窗採左側導覽與右側內容區。
-
-必要流程頁面順序：
+主視窗採左側流程導覽與右側內容區，依序包含：
 
 1. 月份與診所設定
 2. 每週人力需求
@@ -65,377 +50,142 @@ PySide6 應加入一般 application dependency，並在目前 Windows + Python 3
 5. 正職不可排
 6. 兼職可排
 7. 檢查與儲存
+8. 執行排班
 
-視窗頂部固定顯示：
+文件標頭顯示目前月份、檔案、儲存狀態及儲存操作；設定按鈕獨立置於右上角。建立、從上月建立及開啟月份集中在第一頁，不與日常儲存操作混在一起。
 
-- 目前月份。
-- 目前檔名或完整路徑的精簡顯示。
-- 「已儲存」或「尚未儲存」狀態。
-- 儲存、另存等目前文件操作。
-- 文件資訊旁的儲存、另存與儲存狀態。
-- 與文件操作分隔、固定在右上角的設定按鈕。
+設定 dialog 分為「一般設定」與「候選班表設定」。候選處理停用時保留原設定值，但以 disabled 樣式呈現；固定時間與排班時間比例只顯示目前模式需要的欄位。
 
-「建立新月份／從上月建立／開啟既有月份」屬於流程入口，集中放在「月份與診所設定」頁最上方，以用途說明形成清楚的起始導覽，不與儲存及設定混在同一排工具列。鍵盤快捷鍵仍可保留。
+## 4. GUI 與後端責任分界
 
-齒輪開啟獨立設定 dialog。設定畫面區分「一般設定」與「候選班表設定」；既有候選搜尋、時間上限、候選輸出份數與格式保留在後者，不放進必要流程。比例與固定秒數兩種時間模式只顯示當下適用的欄位；停用候選處理時整區設定以 disabled 樣式呈現，但必須保留原有值。第一階段只維護 config，不觸發 solver。
-
-按鈕、數字欄位與選項元件取得焦點時可顯示清楚提示；使用者點擊無關的畫面空白或說明區域後，應清除殘留焦點與文字選取，避免視覺上誤以為操作仍被選中。
-
-不在第一階段主導覽放置假的「執行排班」或「排班結果」頁。後續階段會在不改寫既有輸入頁的情況下擴充主視窗 navigation model。
-
-## 5. GUI 與 domain 責任分界
-
-正式資料流固定為：
+輸入資料固定經過以下流程：
 
 ```text
-weekly/config document
-        ↓
-presenter 建立 mutable UI draft
-        ↓
-widgets / table models 編輯 draft
-        ↓
-presenter 組回正式 document payload
-        ↓
-application façade 呼叫正式 parser / validation
-        ↓
-atomic save
+正式 weekly/config document
+→ mutable UI draft
+→ Qt widgets / table models
+→ presenter 組回正式資料
+→ authoring/config application service
+→ 正式 parser 與 validation
+→ atomic save
 ```
 
-責任分界：
+責任原則：
 
-- Widgets 只顯示資料、收集操作與呈現錯誤，不接觸 solver。
-- Qt table models 管理列欄、editor、disabled cell、排序與變更通知。
-- Drafts 是可修改的純 Python UI state，不依賴 PySide6，也不是第二套正式輸入契約。
-- Presenters 負責 document 與 draft 的雙向映射、人類可讀標籤、欄位 path 與畫面位置映射。
-- `application.py` 提供建立、複製月份、開啟、驗證、儲存與另存的公開 façade；內部可委派輕量 authoring service，避免持續放大單一模組。
-- `authoring.py`、`app_config.py` 與既有 typed documents 仍是正式解析與驗證來源。
-- GUI 不直接建立 canonical demands，不寫入 `runtime/expanded-input/`。
-- GUI 不匯入 CP-SAT、optimizer、metrics 或 exporters。
+- Widgets 只呈現狀態及收集操作，不直接讀寫 JSON。
+- Draft 是可修改的 UI state，不是第二套資料契約。
+- Presenter 負責正式 document 與 draft 的雙向映射，以及 domain path 與畫面位置的對應。
+- Authoring／config application service 負責建立月份、開啟、驗證、儲存與另存。
+- 正式 parser、Schema 與 typed document 是唯一資料真相來源。
+- GUI 不自行展開逐日 demands，不重算排班規則、統計或最佳化結果。
+- GUI 程序不直接載入 CP-SAT、optimizer 或 exporters。
 
-Draft 不得成為新的 JSON contract。所有成功儲存的資料都必須能通過正式 parser，並由既有 `write_*_document()` 原子寫入。
+執行排班時，GUI 使用 `QProcess` 啟動獨立 worker，透過版本化 JSON-lines 協定接收進度、診斷及完成結果。worker 可在沒有 GUI 的情況下獨立運作，因此後續演算法調整不應要求重寫 widgets。
 
-## 6. Draft 與 presenter 設計
+## 5. 輸入與文件生命週期
 
-預計建立下列 mutable draft：
+### 月份與需求
 
-- `ScheduleDraft`：月份、角色、週間需求、日期例外、人員、休假與不可排的聚合狀態。
-- `EmployeeDraft`：人員基本資料、資格、班次模式、數值與兼職可排時段。
-- `WeeklyDemandDraft`：星期集合、營業狀態及動態職務需求。
-- `DateOverrideDraft`：日期、營業狀態及當日需求。
-- 可排資料仍由 `ScheduleDraft` 依 employee/date/period 管理正式的請假、不可排或兼職可排狀態；GUI 只提供較簡單的正職／兼職分流視圖。
-- `ConfigDraft`：一般與進階執行設定。
+- 新月份預設為本機日期的下一個月。
+- 固定使用早上、下午、晚上三個時段。
+- 每週需求以平日、星期六、星期日呈現，每個時段可獨立開診或休診。
+- 特定日期只有在需求與週間模板不同時才新增。
+- 假日標記只影響統計與公平性，不自動代表休診；目前前端只顯示、不提供修改。
+- 職務由正式文件提供，第一版 GUI 不開放增刪或改名。
 
-Draft 需保留足以做等價 round-trip 的資訊，包括可選欄位是否原本有宣告、notes 與 config 的 `__...__` 說明。Presenter 必須有下列純函式或 service 操作：
+### 員工與可排條件
 
-- document → draft。
-- draft → raw mapping／正式 document。
-- `DiagnosticIssue.path` → `FieldLocation`。
-- domain enum／key → 中文顯示標籤。
-- role rename／delete 的跨 draft 一致性更新。
+- `employee_id` 由系統建立並永久保留，改姓名不得改 ID。
+- 員工資料以摘要清單配合新增／編輯 dialog 操作。
+- 班次模式顯示為固定班次、班次範圍、目標班次，且只顯示該模式適用欄位。
+- 正職預設可排，前端只編輯不可排日期與時段。
+- 兼職預設不可排，前端只編輯明確可排日期與時段。
+- `fairness_group` 由正式資料保留，但不顯示給一般使用者。
 
-新員工 ID 使用不含職別語意的穩定 ID，例如 `EMP-` 加隨機唯一值。既有 `FT001`／`PT001` 等 ID 原樣保留。變更姓名、職別或 A/B/PT 類別都不得改變 employee ID。
+### 從上月建立
 
-## 7. 各頁功能
+保留員工、employee ID、類別、職務、班次模式與每週需求模板；改為新月份的起訖日期，並清除假日、特殊日期、休假、不可排與兼職可排等日期綁定資料。新文件一律標記為尚未儲存，班次數及兼職可排時段需重新確認。
 
-### 7.1 月份與診所設定
+### 儲存安全
 
-- 頁面最上方提供建立新月份、從上月建立、開啟既有月份三個入口；建立月份預設為本機日期的下一個月。
-- 顯示起訖日期，建立月份時固定為該月第一天至最後一天。
-- 假日清單移至「特殊日期設定」集中顯示；假日屬日期綁定資料，只供假日班次統計與公平性使用，不會自動代表休診，也不由 v1 自行推定國定假日。
-- 顯示固定三時段：早上、下午、晚上，不允許改名、增加或刪除。
-- 顯示層不提供職務增刪或改名；第一版前端將正式文件既有職務視為固定設定。
-- 顯示 authoring/schema version，但不讓一般使用者任意修改。
+- 開啟新檔、建立月份及關閉視窗前處理未儲存變更。
+- Validation 失敗或寫檔失敗不得清除 draft。
+- 只有 atomic save 成功後才能標記為已儲存。
+- 預設月份檔名為 `排班輸入_YYYY-MM.json`。
+- GUI 不寫入 `runtime/expanded-input/`；該資料夾只由正式排班流程產生。
+- 儲存後重新開啟必須與原 draft 語意等價，config 的 `__...__` 說明欄亦須保留。
 
-目前 weekly-v1 Schema 仍正式支援動態 `roles`，但第一版 GUI 不開放修改，以免一般使用者意外造成跨頁結構變更。開啟文件後仍依其正式 roles 顯示下列內容：
+## 6. 檢查、執行與結果
 
-- 週間需求與日期例外的 role counts。
-- 每位員工的職務。
-- 兼職 available slot 的角色限制。
+### 輸入檢查
 
-所有完整日期選擇共用月份限定的 `QCalendarWidget` 封裝：隱藏週次與原生 navigation bar，以「年份→月份」顯示目前月份；不得切換到前後月份，前後月補位日期使用灰底且不可選，所選日期使用實心高對比底色及邊框並在 dialog 下方再次顯示。
+「檢查與儲存」執行正式 weekly parser、normalization 與 `INPUT_INVALID` validation。問題保留 code、path、phase、severity 與 details，已知問題可定位至相關頁面、員工、日期或需求格。
 
-### 7.2 每週人力需求
+輸入檢查通過只代表資料格式與明訂條件有效，不保證整月一定可排。容量、匹配與求解可行性由執行排班時的 precheck 與 solver 判定。
 
-- 以平日、星期六、星期日為主要使用者視圖。
-- 每種日期類型的早／午／晚各自提供時段開關，新月份預設全部開啟。
-- 開啟時顯示所有動態職務的人數，新月份預設各職務 1 人。
-- 關閉單一時段時，該時段所有職務需求轉為 0；三個時段均關閉時才正式寫為整日休診。
-- 一般使用者單擊需求格，使數量在 1、2、3 間循環；正式資料仍維持明確整數與 0／缺漏區分。
+### 執行排班
 
-Presenter 將這個三類視圖映射為涵蓋 monday 至 sunday 的正式 `weekly_demands`。若開啟的既有文件使用更細的星期分組且無法無損折疊為三類，GUI 必須保留其分組或切換到進階星期視圖，不能靜默改寫語意。
+- 執行前驗證並儲存目前文件，且明確顯示載入的 config 與輸入檔。
+- 正式求解期間可「終止排班」；進入候選處理後只開放「終止候選處理」。
+- 正式輸出完成後再終止候選處理，不得刪除或降級正式結果。
+- 執行狀態固定於內容上方；執行訊息與頁面內容具有各自獨立的捲動區域。
+- 排班進行中隱藏正式結果並讓訊息區使用剩餘高度；完成後顯示正式結果並自動定位。
+- JSON、Excel、PDF 必須分別顯示；缺少任何預期媒介時明確標示「未產生」。
 
-### 7.3 特殊日期設定
+### 獨立驗證
 
-- 頁面分為主要的「特定日期」與次要的「假日標記」兩區；主畫面只保留必要規則說明，完整 domain 細節留在 tooltip 與規格文件。
-- 假日標記區暫時以較小的灰色凍結區顯示輸入既有資料，第一版前端不提供修改；建立空白月份時不自行下載或推定假日。
-- 顯示 override 清單，可新增、複製與刪除。
-- 日期必須位於目前月份且不可重複。
-- 每個日期的早／午／晚可各自設為「開啟／休診」，人數欄以單擊在 1、2、3 間循環，呈現與每週需求一致。
-- 顯示原本週間模板值，方便使用者建立差異，但正式 override 仍保存完整 staffing。
+獨立驗證由後端根據最終 assignment 與正規化輸入重新計算硬性規則、每日模式、統計及鎖定目標，不依賴 CP-SAT 內部衍生變數。只有正式狀態符合要求且驗證為 `PASS`，才可輸出正式班表；驗證失敗時不得將結果標示為可使用。
 
-### 7.4 員工資料
-
-- 使用 `QTableView` 顯示姓名、正職／兼職、A/B 類、職務、班次模式與班次數摘要。
-- 表格下方只顯示所選員工的唯讀詳細摘要，並以留白和獨立區塊與清單分隔。
-- 「新增員工」及摘要標題旁的「編輯」皆開啟 modal editor；只有按下儲存才將暫存值套回 draft，取消不得留下半成品。
-- 刪除員工只放在既有員工的編輯 dialog 內，不作為清單頁的平行主要操作。
-- 畫面中文標籤：固定班次、班次範圍、目標班次。`fairness_group` 仍由正式資料保存，但不顯示給一般使用者；新員工或切換 A/B/PT 類別時由 GUI 配置安全預設值。
-- EXACT 只顯示固定班次；RANGE 只顯示必填的最低／最高班次；TARGET 顯示目標班次及可勾選啟用的硬性最低／最高班次。非目前模式的條件列直接隱藏，不以停用欄位干擾使用者。
-- 兼職不可選 TARGET；正職必須選 A 或 B；不合法組合在 draft 層立即提示，正式 validation 仍為最終依據。
-- 員工刪除前提示將一併移除其休假、不可排與可排資料。
-
-### 7.5 正職不可排
-
-- 所有正職在同一張 `QTableView`，每位員工一列，只顯示姓名與不可排日期／時段清單。
-- 雙擊任一員工開啟當月日號 dialog；年份與月份已由文件決定，不要求重複輸入。
-- Dialog 分別輸入早、午、晚日號，可表達整日或單時段不可排。既有 `leave_requests` 與 `unavailable_slots` 在畫面上合併為一般人理解的「不可排」，正式儲存仍使用既有 Schema。
-- 未變更的整日請假及備註應保留；正式 leave/unavailable 優先規則不變。
-
-### 7.6 兼職可排
-
-- 所有兼職在同一張 `QTableView`，每位員工一列，只顯示姓名與明確可排日期／時段清單。
-- 雙擊後以相同日號 dialog 分別輸入早、午、晚可排日期；空白表示該時段沒有明確可排日期。
-- GUI 編輯既有日期清單時，保留仍存在時段的職務限制；新增時段預設適用該員工全部職務。
-- 兼職預設不可排與 `available_slots` 唯一允許集合的正式語意不變。
-
-### 7.7 檢查與儲存
-
-- 顯示尚未完成的基本欄位問題。
-- 執行完整 weekly parser、canonical normalization 與 INPUT_INVALID validation。
-- 依 severity、頁面、人員或日期顯示錯誤清單。
-- 點擊錯誤後切換頁面、選取對應 entity 並聚焦欄位。
-- 驗證失敗不清除 draft、不覆寫檔案，也不把狀態標記為 clean。
-- 驗證通過後提供儲存與另存；成功才顯示 clean。
-
-本階段的「完整 validation」不包含 precheck 或 CP-SAT feasibility，因為第一階段明確不呼叫 solver。畫面必須使用「輸入資料檢查通過」而不是「班表一定可排」等誤導文字。
-
-## 8. Validation UX 與錯誤定位
-
-驗證分兩層：
-
-1. Draft 基礎檢查：必填、型別、數字範圍、disabled field、日期是否落在月份等立即可判斷問題。
-2. 正式 validation：由 application façade 組回正式 document，呼叫既有 parser 與 canonical validation。
-
-正式 `DiagnosticIssue` 必須保留 code、path、phase、severity 與 details。Presenter 使用獨立 `FieldLocation`，至少包含：
-
-- page ID。
-- entity ID（employee ID、date 或 weekly group）。
-- field key／table cell。
-- 可供一般使用者閱讀的訊息。
-
-無法精確定位的 cross-field 問題仍顯示在檢查頁，並導向最相關頁面。中文訊息由集中 catalog 按 issue code 翻譯；未知 code 使用正式 message fallback，不能吞掉錯誤。
-
-## 9. 從上個月建立新月份
-
-月份複製是 application／authoring 層的正式操作，不由 GUI 複製 JSON。
-
-輸入為來源 document 與目標年月，輸出為尚未儲存的新 draft/document。複製規則：
-
-保留：
-
-- `authoring_version`、`schema_version` 與固定 periods。
-- 動態 roles。
-- weekly demands 模板。
-- 員工、employee ID、姓名、A/B/PT 類別、資格與 fairness group。
-- shift mode、required/target/min/max 與 notes；這些值先沿用，並在檢查頁提醒使用者確認新月份工作量。
-- 可沿用的 config 設定；輸入檔名改為新月份預設檔名。
-
-重建或清除：
-
-- period 改為目標月第一日至最後一日。
-- holidays 清空。
-- date overrides 清空。
-- leave requests 清空。
-- unavailable slots 清空。
-- 所有 PT available slots 清空，但保留 PT 本人的職務與班次模式資料。
-- 所有其他帶有舊月份日期的資料均不得複製。
-
-目標月份與來源月份相同時拒絕建立。建立後狀態為 unsaved，使用者必須檢查班次數與 PT 可排時段，通過 validation 後才可儲存。
-
-## 10. 未儲存狀態
-
-Document 與 config 分別追蹤 dirty state，主視窗彙整顯示：
-
-- 已儲存。
-- 尚未儲存。
-- 尚未建立檔案。
-
-下列操作若有未儲存修改，必須顯示「儲存／放棄／取消」：
-
-- 開啟其他檔案。
-- 建立新月份或從上月建立。
-- 關閉主視窗。
-- 重新載入目前檔案。
-
-儲存失敗或 validation failed 時留在原 draft，dirty state 不變。只有 atomic replace 成功後，才更新 current path、clean snapshot 與視窗狀態。
-
-Dirty 判定以 draft 的穩定 normalized snapshot 或明確 command tracking 為準，不依賴 widget 是否曾收到 edit signal，避免改回原值後仍永久顯示 dirty。
-
-## 11. 檔案開啟與儲存策略
-
-- 預設從 application root 的 `input/` 開啟與儲存 monthly weekly JSON。
-- 可讀取其他位置的 JSON 作為匯入來源，但要成為正式執行輸入時，另存至 `input/` 並同步 config 的輸入檔名。
-- 建立月份的預設檔名為 `排班輸入_YYYY-MM.json`。
-- 不允許以 GUI 寫入 `runtime/expanded-input/`。
-- 開啟時先完整解析至 typed document，成功後才替換目前 draft。
-- 儲存時由 draft 組回正式 document，正式驗證成功後使用現有原子寫入。
-- 另存不得在失敗時改變目前路徑或 clean state。
-- 覆寫既有檔案前顯示確認；原子 replace 只處理已明確確認的 target。
-- config 的 `__...__` 說明與預設設定區必須 round-trip 保留。
-
-## 12. Application façade
-
-第一階段預計在輕量 application boundary 提供：
-
-- `create_month(year, month, roles/default template)`。
-- `create_month_from_previous(source, year, month)`。
-- `open_authoring_document(path)`。
-- `validate_authoring_draft(draft)`。
-- `save_authoring_draft(path, draft, overwrite)`。
-- `save_authoring_draft_as(path, draft)`。
-- config 對應的 open／validate／save。
-
-公開 façade 放在或由 `application.py` 匯出；具體 authoring 操作可放在獨立輕量 service，避免 `application.py` 與既有排班 orchestration 繼續膨脹。所有介面不得匯入 OR-Tools 或 exporters。
-
-## 13. 預計檔案結構
+## 7. 主要程式邊界
 
 ```text
-src/
-├─ run_gui.py
-└─ clinic_shift_scheduler/
-   ├─ application.py                 # 公開 input application façade
-   ├─ authoring_application.py       # 建立、複製、驗證、儲存實作
-   └─ gui/
-      ├─ __init__.py
-      ├─ main.py
-      ├─ main_window.py
-      ├─ navigation.py
-      ├─ dialogs/
-      │  ├─ settings_dialog.py
-      │  └─ unsaved_changes_dialog.py
-      ├─ drafts/
-      │  ├─ schedule_draft.py
-      │  ├─ employee_draft.py
-      │  ├─ availability_draft.py
-      │  └─ config_draft.py
-      ├─ presenters/
-      │  ├─ schedule_presenter.py
-      │  ├─ config_presenter.py
-      │  ├─ validation_presenter.py
-      │  └─ field_location.py
-      ├─ models/
-      │  ├─ weekly_demand_table_model.py
-      │  ├─ date_override_table_model.py
-      │  ├─ employee_table_model.py
-      │  ├─ availability_table_model.py
-      │  └─ availability_summary_table_model.py
-      ├─ pages/
-      │  ├─ month_clinic_page.py
-      │  ├─ weekly_demand_page.py
-      │  ├─ date_override_page.py
-      │  ├─ employee_page.py
-      │  ├─ availability_page.py
-      │  └─ review_save_page.py
-      ├─ widgets/
-      │  ├─ navigation_sidebar.py
-      │  ├─ document_header.py
-      │  ├─ validation_list.py
-      │  └─ role_selector.py
-      ├─ styles/
-      │  ├─ palette.py
-      │  └─ application.qss
-      └─ resources/
-         └─ icons/
-
-tests/
-├─ test_authoring_application.py
-├─ test_gui_drafts.py
-├─ test_gui_presenters.py
-├─ test_gui_table_models.py
-├─ test_gui_validation_navigation.py
-└─ test_gui_document_lifecycle.py
-
-packaging/windows/
-├─ ClinicShiftSchedulerEditor.spec
-└─ smoke-test-gui.ps1
+src/clinic_shift_scheduler/
+├─ authoring_application.py      # 月份文件建立、開啟、驗證與儲存
+├─ config_application.py         # config 文件生命週期
+├─ application.py                # 完整排班 application service
+├─ execution_protocol.py         # GUI/worker JSON-lines 協定
+├─ execution_worker.py           # 無介面的背景排班入口
+└─ gui/
+   ├─ main.py / main_window.py
+   ├─ execution_controller.py    # QProcess 生命週期與合作式終止
+   ├─ drafts/                    # mutable UI state
+   ├─ presenters/                # document/draft 映射
+   ├─ models/                    # Qt table models
+   ├─ pages/                     # 八個流程頁
+   ├─ dialogs/ / widgets/
+   └─ styles/                    # palette 與集中式 QSS
 ```
 
-實作時可依責任合併過小檔案，但不得把 document mapping、validation translation 或檔案 I/O 塞回 widgets。
+新增功能時不得把 JSON I/O、排班計算或輸出媒介邏輯塞進 page/widget；執行協定新增欄位時須維持版本檢查並補 decoder 測試。
 
-## 14. Windows、High DPI 與封裝注意事項
+## 8. 測試與發布驗收
 
-- Qt 6 使用 device-independent pixels；避免依賴硬編碼尺寸與螢幕解析度。
-- 在 100%、125%、150% scaling 驗證主視窗、table editor、dialog 與錯誤提示。
-- 最小視窗尺寸應可在常見筆電解析度使用，表格超出時使用 scroll，不截斷主要操作。
-- 圖示使用可封裝資源並提供文字 tooltip，不使用 emoji 作核心 icon。
-- 第一階段新增獨立 GUI entry point；GUI executable 使用 windowed mode，不開 console。
-- 第一階段 GUI 尚不能執行排班，因此不取代既有正式 `ClinicShiftScheduler.exe`。過渡發布若要同時提供，GUI 使用清楚的 editor 名稱；後續接入完整流程後再決定主 executable 命名。
-- PyInstaller spec 明確收集 PySide6 所需 Qt plugins、styles、platforms 與 icon resources。
-- 既有 OR-Tools、Schema、PDF 字型與 user data 路徑仍須保持可用；GUI spec 不得破壞現有 console release。
-- frozen 模式使用 `application_root()` 尋找外部 `config.json`、`input/`，不可把使用者檔案寫入 `_internal/`。
-- 發布包保留 PySide6／Qt 及其他第三方授權聲明。
+自動測試至少涵蓋：
 
-## 15. 測試策略
+- document/draft round-trip、月份複製及 config 語意等價。
+- table model flags、編輯、disabled cell 與 change signals。
+- validation path 到頁面、entity 與欄位的定位。
+- 開啟、dirty、save、save as、discard、cancel 與 close。
+- worker 協定、長時間進度、正式取消、候選終止及輸出保留。
+- 正式結果狀態、獨立驗證與 JSON、Excel、PDF 路徑呈現。
+- GUI import boundary 不載入 OR-Tools、openpyxl 或 ReportLab。
+- 既有 solver、validator、exporter 與 console 完整回歸。
 
-- Draft／presenter／月份複製使用不啟動 Qt 的純 Python 測試。
-- Table model 測試 row/column、flags、data、setData、disabled cells 與 change signals。
-- Navigation 測試 issue path 對應頁面與欄位。
-- Lifecycle 測試開啟、dirty、save、save as、discard、cancel 與 close。
-- Atomic save failure 測試原檔保留、draft 保留、clean state 不變。
-- Round-trip 比較 `document.to_dict()` 的語意等價，不依賴 JSON whitespace 或 key order。
-- 既有完整 175 項測試持續執行，確保 GUI dependency 與 façade 不改變 solver／output。
-- Windows onedir smoke test 至少啟動 GUI、開啟匿名 weekly JSON、驗證、另存、關閉並以重新開啟確認等價。
+Windows 發布前仍須完成：
 
-## 16. 第一個 GUI Milestone 驗收標準
+- 在乾淨 Windows 64-bit 環境解壓縮 onedir ZIP，且不依賴 Python／Conda。
+- GUI 啟動 worker 並完成一份匿名月份的完整排班。
+- OR-Tools native dependencies、Excel、PDF 與繁中字型正常。
+- 100%、125%、150% High DPI 下主視窗、表格、dialog 與捲動可用。
+- 長時間排班時 GUI 保持回應，終止與關閉流程沒有殘留 worker。
 
-功能驗收：
+## 9. 交付前尚待補齊
 
-- 可建立指定年月的 weekly-v1 document。
-- 可從上月建立，保留穩定資料並清除所有日期綁定資料。
-- 可開啟既有 weekly-v1 JSON。
-- 可完整編輯目前正式 Schema 支援的輸入欄位。
-- 可新增、改名、刪除動態職務且所有參照保持一致。
-- 新員工取得唯一穩定 ID；改姓名不改 ID。
-- 正職與兼職可排語意在 UI 正確分流。
-- 可執行完整輸入 validation 並一次顯示多項錯誤。
-- 可由錯誤清單定位至對應頁面與 entity；可定位欄位的錯誤必須聚焦欄位。
-- Validation failed 不丟失 draft。
-- 可原子儲存與另存；失敗不破壞既有檔案。
-- 新建、開啟、切換與關閉時能保護未儲存修改。
-- 儲存後重新開啟，weekly document 與 config 語意等價。
+以下是目前仍具產品層級價值的工作，依優先順序排列：
 
-架構驗收：
+1. **結構化執行失敗診斷**：將 `PRECHECK_INFEASIBLE`、`INFEASIBLE`、`UNKNOWN`、`VALIDATION_FAILED` 等狀態轉為清楚中文摘要，並盡量由問題清單跳回相關需求、員工或可排頁面。執行失敗不得清除使用者資料。
+2. **結果快速入口**：完成後提供直接開啟 PDF、Excel 及候選班表資料夾的操作；JSON 保留為機器可讀結果，不必作為主要入口。
+3. **人工操作驗收**：確認失敗後修正再執行、重複執行與覆寫、終止後按鈕恢復、完成後修改輸入及舊結果標示等流程。
+4. **正式封裝驗收**：重新建置包含最新 GUI 的發布包，執行乾淨 Windows／High DPI／長時間排班 smoke test。
 
-- GUI modules 不匯入 OR-Tools、optimizer、metrics 或 exporters。
-- Widgets 不直接讀寫 JSON，也不持有分散修改的正式 frozen document。
-- 文件操作均經 presenter 與 application façade。
-- GUI import boundary 測試不載入 OR-Tools、openpyxl 或 ReportLab。
-
-視覺與平台驗收：
-
-- Windows 64-bit 的 100%、125%、150% scaling 可正常使用。
-- 執行頁能持續顯示目前階段與耗時，長時間求解時主視窗不凍結。
-- 執行前固定使用目前已驗證並儲存的月份；GUI 不以 `config.json` 中其他檔名取代目前文件。
-- 取消排班可合作式停止 CP-SAT；正式輸出完成後取消候選處理不得刪除既有結果。
-- 鍵盤可完成主要欄位移動、表格編輯、驗證與儲存。
-- PyInstaller `onedir` GUI smoke test 通過。
-- 既有 console 排班入口與完整測試仍通過。
-
-## 17. 後續延展
-
-第二階段已在既有主視窗加入「執行排班」流程。Editor 透過 `QProcess` 啟動獨立 Scheduler worker，以版本化 JSON-lines 傳遞 typed progress、完成結果與結構化錯誤；GUI 不直接匯入 solver 或 exporters。執行頁顯示目前月份、階段、耗時、訊息、正式狀態、validation 與輸出路徑，並可取消及開啟輸出資料夾。既有命令列入口維持獨立可用。
-
-後續若擴充結果預覽，應讀取已落盤的正式 result model，不得在 GUI 重算排班規則或統計。
-
-## 18. 實作進度
-
-目前輸入編輯器已完成文件生命週期，以及月份、每週需求、特定日期、員工、正職不可排、
-兼職可排、正式驗證與儲存頁面的主要功能。Validation 問題可定位到對應員工、需求格或
-日期清單；正職與兼職頁皆以所有同類員工一覽及當月日號 dialog 編輯，文件操作亦提供標準鍵盤
-快捷鍵。月份建立入口已集中於首個流程頁，完整日期選擇共用月份限定日曆；員工頁採唯讀摘要
-搭配新增／編輯 dialog。右上角設定頁已接入正式 `config.json` 契約，可編輯輸入檔、執行顯示與候選
-處理參數，並保留說明欄位及參考預設值後原子儲存。獨立 GUI `onedir` 與自動 smoke
-test 已完成。第二個 milestone 另完成獨立 worker、執行進度、合作式取消、正式結果摘要與輸出資料夾入口；
-執行頁已將正式排班的「終止排班」與正式輸出後的「終止候選處理」分開，
-後者不會降級或刪除已完成班表。剩餘工作以 Windows 實機 High DPI、封裝後 GUI 啟動
-worker 與人工操作檢查為主。
+後續若新增結果預覽，必須讀取已落盤的正式 result model，不得在 GUI 重新計算排班規則或統計。
