@@ -56,7 +56,7 @@ class ExecutionWorkerTests(unittest.TestCase):
             frozen=True,
             python_executable=Path("C:/Python/python.exe"),
         )
-        self.assertEqual(program, str(root / "ClinicShiftScheduler.exe"))
+        self.assertEqual(program, str(root / "quick-runner.exe"))
         self.assertEqual(arguments, ["--gui-worker"])
 
     def test_worker_command_uses_source_entry_during_development(self) -> None:
@@ -119,7 +119,7 @@ class ExecutionWorkerTests(unittest.TestCase):
 
         rendered = _gui_diagnostic_event(event)
 
-        self.assertIn("按「終止候選處理」可終止", rendered.message)
+        self.assertIn("按「終止候選處理」可終止（不影響先前已完成的排班輸出）", rendered.message)
         self.assertNotIn("Ctrl+C", rendered.message)
 
 

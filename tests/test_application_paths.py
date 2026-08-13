@@ -21,7 +21,7 @@ class ApplicationPathTests(unittest.TestCase):
     def test_frozen_execution_uses_executable_directory(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             release = Path(directory) / "ClinicShiftScheduler"
-            executable = release / "ClinicShiftScheduler.exe"
+            executable = release / "quick-runner.exe"
 
             self.assertEqual(
                 application_root(

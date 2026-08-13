@@ -41,11 +41,16 @@ def _load_config() -> dict[str, Any]:
         raise PackagingError("application.version must be a semantic version")
     if application.get("target") != "win-x64":
         raise PackagingError("the current release layer only supports win-x64")
+    scheduler_name = application.get("executable_name")
+    if not isinstance(scheduler_name, str) or not scheduler_name:
+        raise PackagingError("application.executable_name must be a non-empty string")
     editor = payload.get("editor")
     if not isinstance(editor, dict):
         raise PackagingError("config_packaging.json.editor must be an object")
-    if editor.get("name") == application.get("name"):
-        raise PackagingError("editor.name must differ from application.name")
+    if editor.get("name") == scheduler_name:
+        raise PackagingError(
+            "editor.name must differ from application.executable_name"
+        )
     if editor.get("entry_point") != "src/run_gui.py" or editor.get("console") is not False:
         raise PackagingError(
             "editor must use src/run_gui.py with console disabled"
@@ -255,10 +260,6 @@ def _stage_release(
         encoding="utf-8-sig",
     )
     shutil.copytree(license_directory, release_directory / "licenses")
-    (release_directory / "VERSION.txt").write_text(
-        version + "\n",
-        encoding="utf-8",
-    )
     return release_directory
 
 
@@ -494,7 +495,7 @@ def _smoke_test_path(config: dict[str, Any], source: Path) -> None:
     try:
         with zipfile.ZipFile(source) as archive:
             archive.extractall(extraction_root)
-        executable_name = f"{config['application']['name']}.exe"
+        executable_name = f"{config['editor']['name']}.exe"
         executables = tuple(extraction_root.glob(f"*/{executable_name}"))
         if len(executables) != 1:
             raise PackagingError(
@@ -583,7 +584,8 @@ def main(arguments: list[str] | None = None) -> int:
 
     application = config["application"]
     pyinstaller_output = pyinstaller_dist / application["name"]
-    if not (pyinstaller_output / f"{application['name']}.exe").is_file():
+    scheduler_name = application["executable_name"]
+    if not (pyinstaller_output / f"{scheduler_name}.exe").is_file():
         raise PackagingError("PyInstaller did not create the expected executable")
     editor_name = config["editor"]["name"]
     if not (pyinstaller_output / f"{editor_name}.exe").is_file():

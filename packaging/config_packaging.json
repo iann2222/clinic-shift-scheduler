@@ -2,6 +2,7 @@
   "config_version": "1",
   "application": {
     "name": "ClinicShiftScheduler",
+    "executable_name": "quick-runner",
     "display_name": "診所排班系統",
     "version": "0.1.0",
     "target": "win-x64",
@@ -9,8 +10,8 @@
     "console": true
   },
   "editor": {
-    "name": "ClinicShiftSchedulerEditor",
-    "display_name": "診所排班資料編輯器",
+    "name": "clinic-shift-scheduler",
+    "display_name": "診所排班系統",
     "entry_point": "src/run_gui.py",
     "console": false
   },

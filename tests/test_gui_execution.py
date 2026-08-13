@@ -107,7 +107,7 @@ class GuiExecutionTests(unittest.TestCase):
                 "type": "progress",
                 "phase": ExecutionPhase.CANDIDATE_SEARCH.value,
                 "kind": ProgressEventKind.STEP_STARTED.value,
-                "message": "開始搜尋；按「終止候選處理」可終止",
+                "message": "開始搜尋；按「終止候選處理」可終止（不影響先前已完成的排班輸出）",
             }
         )
         self.assertFalse(page.cancel_button.isEnabled())

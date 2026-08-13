@@ -30,7 +30,7 @@ from clinic_shift_scheduler.enums import Period
 
 from tests.fixtures import synthetic_schedule_input
 from clinic_shift_scheduler.ratio_fairness import ratio_basis_points
-from clinic_shift_scheduler.result_validation import FORMAL_STAGE_SEQUENCE
+from clinic_shift_scheduler.optimization_policy import FORMAL_STAGE_SEQUENCE
 
 
 def available(day: str, *periods: str) -> list[dict]:

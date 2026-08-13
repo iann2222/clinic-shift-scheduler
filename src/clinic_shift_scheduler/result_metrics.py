@@ -9,7 +9,6 @@ from types import MappingProxyType
 from typing import Mapping
 
 from .class_preferences import (
-    CLASS_PREFERENCES,
     ClassPreferenceMetric,
     PreferenceDirection,
     PreferenceRank,
@@ -21,10 +20,23 @@ from .daily_patterns import DailyPattern, PATTERN_PERIODS
 from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period
 from .models import DemandKey, NormalizedScheduleInput
 from .optimization_contracts import (
-    COMMON_GROUP_FAIRNESS_WEIGHTS,
     FairnessMetric,
     OptimizationStage,
     PreferenceBenchmarkResult,
+)
+from .optimization_policy import (
+    CLASS_PREFERENCES,
+    CLASS_REMAINING_PATTERN_METRICS,
+    COMMON_GROUP_FAIRNESS_WEIGHTS,
+    FULL_TIME_PATTERN_METRICS,
+    GROUP_FAIRNESS_EMPLOYMENT_TYPES,
+    GROUP_FAIRNESS_METRICS,
+    GROUP_FAIRNESS_STAGES,
+    PREFERENCE_RATIO_MAX_STAGE_BY_METRIC,
+    PREFERENCE_RATIO_TOTAL_STAGE_BY_MAX_STAGE,
+    PREFERENCE_REGRET_STAGES,
+    SUNDAY_FAIRNESS_METRICS,
+    SUNDAY_FAIRNESS_STAGES,
 )
 from .ratio_fairness import ratio_basis_points
 from .solver_contracts import Assignment, PersonDayKey, PersonPeriodKey
@@ -201,18 +213,6 @@ def recompute_schedule_metrics(
             FairnessMetric.HOLIDAY_SHIFTS: values.holiday_shifts,
         }[metric]
 
-    full_time_classes = {
-        FullTimeClass.A: (
-            FairnessMetric.CONSECUTIVE_DOUBLES,
-            FairnessMetric.SINGLE_SHIFT_DAYS,
-            FairnessMetric.MORNING_EVENING_DAYS,
-        ),
-        FullTimeClass.B: (
-            FairnessMetric.CONSECUTIVE_DOUBLES,
-            FairnessMetric.SINGLE_SHIFT_DAYS,
-            FairnessMetric.TRIPLE_DAYS,
-        ),
-    }
     pattern_ratios: dict[tuple[str, FairnessMetric], int | None] = {}
     ratio_gaps: dict[tuple[str, FairnessMetric], int] = {}
     preference_ratio_gaps: dict[
@@ -222,27 +222,7 @@ def recompute_schedule_metrics(
         OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP: {},
         OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP: {},
     }
-    preference_ratio_stage = {
-        (FullTimeClass.A, FairnessMetric.CONSECUTIVE_DOUBLES): (
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
-        ),
-        (FullTimeClass.B, FairnessMetric.SINGLE_SHIFT_DAYS): (
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
-        ),
-        (FullTimeClass.A, FairnessMetric.MORNING_EVENING_DAYS): (
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP
-        ),
-        (FullTimeClass.B, FairnessMetric.CONSECUTIVE_DOUBLES): (
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP
-        ),
-        (FullTimeClass.A, FairnessMetric.SINGLE_SHIFT_DAYS): (
-            OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP
-        ),
-        (FullTimeClass.B, FairnessMetric.TRIPLE_DAYS): (
-            OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP
-        ),
-    }
-    for full_time_class, class_metrics in full_time_classes.items():
+    for full_time_class, class_metrics in FULL_TIME_PATTERN_METRICS.items():
         groups: dict[str, list[str]] = defaultdict(list)
         for employee in data.source.employees:
             if employee.full_time_class is not full_time_class:
@@ -268,7 +248,9 @@ def recompute_schedule_metrics(
                     _gap(defined) if len(defined) >= 2 else 0
                 )
                 preference_ratio_gaps[
-                    preference_ratio_stage[(full_time_class, metric)]
+                    PREFERENCE_RATIO_MAX_STAGE_BY_METRIC[
+                        (full_time_class, metric)
+                    ]
                 ][(group, metric)] = ratio_gaps[(group, metric)]
 
     preference_metric_values = {
@@ -335,50 +317,24 @@ def recompute_schedule_metrics(
         )
 
     class_remaining_pattern_actuals = {
-        FullTimeClass.A: sum(
-            values.single_shift_days
-            for employee_id, values in employee_metrics.items()
-            if data.employees[employee_id].full_time_class is FullTimeClass.A
-        ),
-        FullTimeClass.B: sum(
-            values.triple_days
-            for employee_id, values in employee_metrics.items()
-            if data.employees[employee_id].full_time_class is FullTimeClass.B
-        ),
-    }
-
-    stage_members_and_metrics = {
-        OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS: (
-            tuple(
-                employee
-                for employee in data.source.employees
-                if employee.employment_type is EmploymentType.FULL_TIME
-            ),
-            None,
-        ),
-        OptimizationStage.PART_TIME_GROUP_FAIRNESS: (
-            tuple(
-                employee
-                for employee in data.source.employees
-                if employee.employment_type is EmploymentType.PART_TIME
-            ),
-            (FairnessMetric.TOTAL_SHIFTS,),
-        ),
-        OptimizationStage.COMMON_GROUP_FAIRNESS: (
-            tuple(data.source.employees),
-            (
-                FairnessMetric.MORNING_SHIFTS,
-                FairnessMetric.AFTERNOON_SHIFTS,
-                FairnessMetric.EVENING_SHIFTS,
-                FairnessMetric.SUNDAY_SHIFTS,
-                FairnessMetric.HOLIDAY_SHIFTS,
-            ),
-        ),
+        full_time_class: sum(
+            metric_value(employee.employee_id, metric)
+            for employee in data.source.employees
+            if employee.full_time_class is full_time_class
+        )
+        for full_time_class, metric in CLASS_REMAINING_PATTERN_METRICS.items()
     }
     fairness_gaps: dict[
         OptimizationStage, Mapping[tuple[str, FairnessMetric], int]
     ] = {}
-    for stage, (employees, stage_metrics) in stage_members_and_metrics.items():
+    for stage in GROUP_FAIRNESS_STAGES:
+        employees = tuple(
+            employee
+            for employee in data.source.employees
+            if employee.employment_type
+            in GROUP_FAIRNESS_EMPLOYMENT_TYPES[stage]
+        )
+        stage_metrics = GROUP_FAIRNESS_METRICS[stage]
         groups: dict[str, list[str]] = defaultdict(list)
         for employee in employees:
             groups[employee.fairness_group].append(employee.employee_id)
@@ -387,7 +343,9 @@ def recompute_schedule_metrics(
             if len(members) < 2:
                 continue
             group_metrics = (
-                full_time_classes[data.employees[members[0]].full_time_class]
+                FULL_TIME_PATTERN_METRICS[
+                    data.employees[members[0]].full_time_class
+                ]
                 if stage_metrics is None
                 else stage_metrics
             )
@@ -404,20 +362,13 @@ def recompute_schedule_metrics(
     ]
     sunday_gaps: dict[tuple[str, FairnessMetric], int] = {}
     if len(full_time_ids) >= 2:
-        for metric in (
-            FairnessMetric.SUNDAY_SHIFTS,
-            FairnessMetric.SUNDAY_ATTENDANCE_DAYS,
-        ):
+        for metric in SUNDAY_FAIRNESS_METRICS:
             sunday_gaps[("ALL_FULL_TIME", metric)] = _gap(
                 [metric_value(employee_id, metric) for employee_id in full_time_ids]
             )
     immutable_sunday_gaps = MappingProxyType(sunday_gaps)
-    fairness_gaps[
-        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP
-    ] = immutable_sunday_gaps
-    fairness_gaps[
-        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP
-    ] = immutable_sunday_gaps
+    for stage in SUNDAY_FAIRNESS_STAGES:
+        fairness_gaps[stage] = immutable_sunday_gaps
     fairness_gaps[
         OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP
     ] = MappingProxyType(ratio_gaps)
@@ -431,21 +382,12 @@ def recompute_schedule_metrics(
             OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
         ]
     )
-    ratio_total_stage = {
-        OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP: (
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_TOTAL_GAP
-        ),
-        OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP: (
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_TOTAL_GAP
-        ),
-        OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP: (
-            OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_TOTAL_GAP
-        ),
-    }
     for maximum_stage, gaps in preference_ratio_gaps.items():
         immutable = MappingProxyType(gaps)
         fairness_gaps[maximum_stage] = immutable
-        fairness_gaps[ratio_total_stage[maximum_stage]] = immutable
+        fairness_gaps[
+            PREFERENCE_RATIO_TOTAL_STAGE_BY_MAX_STAGE[maximum_stage]
+        ] = immutable
 
     target_deviation = sum(
         abs(
@@ -473,16 +415,16 @@ def recompute_schedule_metrics(
     objective_values = {
         OptimizationStage.FULL_TIME_TARGET_DEVIATION: target_deviation,
         OptimizationStage.PART_TIME_USAGE: part_time_usage,
-        OptimizationStage.FULL_TIME_PREFERENCE_RANK1_MAX_REGRET: max(
+        PREFERENCE_REGRET_STAGES[PreferenceRank.FIRST][0]: max(
             rank_regret_values[PreferenceRank.FIRST], default=0
         ),
-        OptimizationStage.FULL_TIME_PREFERENCE_RANK1_TOTAL_REGRET: sum(
+        PREFERENCE_REGRET_STAGES[PreferenceRank.FIRST][1]: sum(
             rank_regret_values[PreferenceRank.FIRST]
         ),
-        OptimizationStage.FULL_TIME_PREFERENCE_RANK2_MAX_REGRET: max(
+        PREFERENCE_REGRET_STAGES[PreferenceRank.SECOND][0]: max(
             rank_regret_values[PreferenceRank.SECOND], default=0
         ),
-        OptimizationStage.FULL_TIME_PREFERENCE_RANK2_TOTAL_REGRET: sum(
+        PREFERENCE_REGRET_STAGES[PreferenceRank.SECOND][1]: sum(
             rank_regret_values[PreferenceRank.SECOND]
         ),
         OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP: max(
@@ -529,10 +471,10 @@ def recompute_schedule_metrics(
         OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP: sum(
             ratio_gaps.values()
         ),
-        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP: max(
+        SUNDAY_FAIRNESS_STAGES[0]: max(
             sunday_gaps.values(), default=0
         ),
-        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP: sum(
+        SUNDAY_FAIRNESS_STAGES[1]: sum(
             sunday_gaps.values()
         ),
         **{

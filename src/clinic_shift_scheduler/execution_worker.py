@@ -164,6 +164,6 @@ def _gui_diagnostic_event(event: ProgressEvent) -> ProgressEvent:
     ):
         return replace(
             event,
-            message=f'{event.message}；按「終止候選處理」可終止',
+            message=f'{event.message}；按「終止候選處理」可終止（不影響先前已完成的排班輸出）',
         )
     return event

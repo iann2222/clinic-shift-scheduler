@@ -33,14 +33,34 @@ class PackagingContractTests(unittest.TestCase):
             "src/run_scheduler.py",
         )
         self.assertEqual(
+            self.config["application"]["executable_name"],
+            "quick-runner",
+        )
+        self.assertEqual(
             self.config["editor"]["entry_point"],
             "src/run_gui.py",
         )
+        self.assertEqual(
+            self.config["editor"]["name"],
+            "clinic-shift-scheduler",
+        )
         self.assertFalse(self.config["editor"]["console"])
         self.assertNotEqual(
-            self.config["application"]["name"],
+            self.config["application"]["executable_name"],
             self.config["editor"]["name"],
         )
+
+    def test_release_readme_owns_version_information(self) -> None:
+        readme = (
+            REPOSITORY_ROOT / "packaging/windows/resources/README.txt"
+        ).read_text(encoding="utf-8")
+        build_source = (
+            REPOSITORY_ROOT / "packaging/windows/build_release.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("{{VERSION}}", readme)
+        self.assertIn("clinic-shift-scheduler.exe", readme)
+        self.assertIn("quick-runner.exe", readme)
+        self.assertNotIn('release_directory / "VERSION.txt"', build_source)
 
     def test_pyinstaller_pin_matches_release_optional_dependency(self) -> None:
         project = tomllib.loads(
@@ -122,6 +142,7 @@ class PackagingContractTests(unittest.TestCase):
         ).read_text(encoding="utf-8")
 
         self.assertIn('packaging_config["editor"]', source)
+        self.assertIn('name=application["executable_name"]', source)
         self.assertIn('"gui/styles/*.qss"', source)
         self.assertIn("editor_exe", source)
         self.assertIn('"pytest"', source)

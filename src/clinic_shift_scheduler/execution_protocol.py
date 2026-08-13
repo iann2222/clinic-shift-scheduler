@@ -139,7 +139,7 @@ def worker_command(
     """Build the same worker invocation for source and frozen executions."""
 
     if frozen:
-        return str(application_root / "ClinicShiftScheduler.exe"), [
+        return str(application_root / "quick-runner.exe"), [
             "--gui-worker"
         ]
     return str(python_executable), [

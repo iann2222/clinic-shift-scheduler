@@ -24,7 +24,8 @@ _exports("application", "ScheduleApplicationCallbacks", "ScheduleApplicationErro
 _exports("authoring_application", "AuthoringApplication", "AuthoringFileExistsError", "AuthoringSession", "AuthoringValidationResult", "default_month_filename")
 _exports("config_application", "ConfigApplication", "ConfigSession", "ConfigValidationResult")
 _exports("application_contracts", "CandidateExportConfig")
-_exports("class_preferences", "CLASS_PREFERENCES", "ClassPreferenceDefinition", "ClassPreferenceMetric", "PreferenceDirection", "PreferenceRank", "class_opportunity_days")
+_exports("class_preferences", "ClassPreferenceDefinition", "ClassPreferenceMetric", "PreferenceDirection", "PreferenceRank", "class_opportunity_days")
+_exports("optimization_policy", "CLASS_PREFERENCES", "FORMAL_OBJECTIVE_STAGES", "FORMAL_STAGE_POLICIES", "FORMAL_STAGE_SEQUENCE", "FormalStagePolicy")
 _exports("errors", "InputValidationError", "ValidationIssue")
 _exports("events", "CancellationToken", "DiagnosticIssue", "DiagnosticSeverity", "ExecutionPhase", "OperationCancelledError", "ProgressCallback", "ProgressEvent", "ProgressEventKind")
 _exports("exporters", "DEFAULT_OUTPUT_DIRECTORY", "RESULT_CONTRACT_NAME", "RESULT_CONTRACT_VERSION", "WORKSHEET_NAMES", "ExportFileExistsError", "FormalExportError", "OutputPaths", "build_output_paths", "build_result_document", "build_workbook", "export_result_excel", "export_result_json", "export_schedule_pdf_from_excel")
@@ -126,6 +127,10 @@ __all__ = [
     "ScheduleRunError",
     "ScheduleRunResult",
     "FormalScheduleOutput",
+    "FormalStagePolicy",
+    "FORMAL_OBJECTIVE_STAGES",
+    "FORMAL_STAGE_POLICIES",
+    "FORMAL_STAGE_SEQUENCE",
     "MonthlyScheduleRow",
     "MonthlyScheduleTable",
     "EmployeeResultMetrics",

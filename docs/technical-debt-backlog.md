@@ -24,17 +24,6 @@
 
 預計依責任拆分模型指標建立、類別偏好、個人公平、共同公平、求解控制、結果重算、硬性驗證與應用流程；避免只把程式搬成更多大型 helper 而沒有形成清楚邊界。
 
-### 集中宣告正式最佳化政策
-
-目前正式 stage 順序、A/B 指標、fairness group 指標、共同公平權重及 objective 重算規則分散在 optimizer、metrics、validator 與 output。
-
-預計處理：
-
-- 建立不依賴 CP-SAT 的 declarative policy module。
-- 集中正式 stage 順序、類別適用 metric、方向、權重與顯示名稱。
-- solver 與獨立 metrics 各自實作計算，但共用同一份不可變政策定義。
-- 保留 validator 不讀取 CP-SAT 衍生變數的獨立性。
-
 ### 讓正式輸出成為整組交易
 
 目前 JSON、Excel、PDF 各自原子寫入，但三份正式檔案依序提交；後一種媒介失敗時可能留下不完整或不同版本的輸出組合。

@@ -14,7 +14,8 @@
 - `src/clinic_shift_scheduler/json_io.py`：使用者 JSON 文件的 UTF-8 讀取與原子替換。
 - `src/clinic_shift_scheduler/events.py`：前端／CLI 共用的結構化診斷、進度事件與取消介面。
 - `src/clinic_shift_scheduler/application_contracts.py`：不載入求解器的執行請求與候選輸出設定。
-- `src/clinic_shift_scheduler/optimization_contracts.py`：不依賴 CP-SAT 的正式目標與公平性契約。
+- `src/clinic_shift_scheduler/optimization_contracts.py`：不依賴 CP-SAT 的最佳化階段、狀態與結果契約。
+- `src/clinic_shift_scheduler/optimization_policy.py`：集中宣告正式 stage 順序、方向、A／B 偏好、公平性指標與權重。
 - `src/clinic_shift_scheduler/solver_contracts.py`：不依賴 CP-SAT 的 assignment 與求解結果契約。
 - `src/clinic_shift_scheduler/schemas/`：版本化 JSON Schema。
 - `src/clinic_shift_scheduler/validation.py`：結構與語意驗證，失敗統一回報 `INPUT_INVALID`。
@@ -22,7 +23,7 @@
 - `src/clinic_shift_scheduler/daily_patterns.py`：CP-SAT 與前置檢查共用的 v1 每日班型規則。
 - `src/clinic_shift_scheduler/feasibility.py`：無目標函數的 CP-SAT 硬性可行性模型。
 - `src/clinic_shift_scheduler/precheck.py`：總量、個人容量、職務容量及同時段匹配的必要條件檢查。
-- `src/clinic_shift_scheduler/class_preferences.py`：A／B 類各自偏好順位、方向、類別機會日及 regret 的共用定義。
+- `src/clinic_shift_scheduler/class_preferences.py`：A／B 偏好型別、類別機會日及 regret 的求解器無關計算。
 - `src/clinic_shift_scheduler/optimization.py`：TARGET 偏差、兼職用量、類別偏好 benchmark／regret、類別內個人比例／整數公平性、其他群組公平性與最佳值鎖定控制器。
 - `src/clinic_shift_scheduler/ratio_fairness.py`：optimizer、結果重算與報表共用的整數 basis-points 換算規則。
 - `src/clinic_shift_scheduler/result_metrics.py`：只從最終 assignments 重算每日模式、統計、公平性 gap 與完整目標向量。
@@ -113,7 +114,7 @@ PySide6 桌面前端目前已接上 weekly-v1 文件生命週期，可建立月�
 python src/run_gui.py
 ```
 
-完成輸入後可在最後的「執行排班」頁檢查、儲存並執行目前月份。Editor 會啟動
+完成輸入後可在最後的「執行排班」頁檢查、儲存並執行目前月份。GUI 會啟動
 獨立 worker 程序，顯示階段、耗時、候選處理與正式輸出路徑；GUI 本身不載入
 OR-Tools 或輸出器，也不更動排班規則。正式排班階段可用「終止排班」，
 正式結果已落盤並進入候選處理後，改用「終止候選處理」且不影響正式班表。

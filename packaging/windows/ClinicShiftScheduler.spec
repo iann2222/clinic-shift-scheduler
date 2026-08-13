@@ -61,7 +61,7 @@ scheduler_exe = EXE(
     scheduler_analysis.scripts,
     [],
     exclude_binaries=True,
-    name=application["name"],
+    name=application["executable_name"],
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,

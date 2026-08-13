@@ -34,45 +34,6 @@ class ClassPreferenceDefinition:
     direction: PreferenceDirection
 
 
-CLASS_PREFERENCES: tuple[ClassPreferenceDefinition, ...] = (
-    ClassPreferenceDefinition(
-        FullTimeClass.A,
-        PreferenceRank.FIRST,
-        ClassPreferenceMetric.CONSECUTIVE_DOUBLES,
-        PreferenceDirection.MAXIMIZE,
-    ),
-    ClassPreferenceDefinition(
-        FullTimeClass.B,
-        PreferenceRank.FIRST,
-        ClassPreferenceMetric.SINGLE_SHIFT_DAYS,
-        PreferenceDirection.MINIMIZE,
-    ),
-    ClassPreferenceDefinition(
-        FullTimeClass.A,
-        PreferenceRank.SECOND,
-        ClassPreferenceMetric.MORNING_EVENING_DAYS,
-        PreferenceDirection.MAXIMIZE,
-    ),
-    ClassPreferenceDefinition(
-        FullTimeClass.B,
-        PreferenceRank.SECOND,
-        ClassPreferenceMetric.CONSECUTIVE_DOUBLES,
-        PreferenceDirection.MAXIMIZE,
-    ),
-)
-
-
-def preference_definition(
-    full_time_class: FullTimeClass,
-    rank: PreferenceRank,
-) -> ClassPreferenceDefinition:
-    return next(
-        item
-        for item in CLASS_PREFERENCES
-        if item.full_time_class is full_time_class and item.rank is rank
-    )
-
-
 def class_opportunity_days(
     data: NormalizedScheduleInput,
     full_time_class: FullTimeClass,

@@ -7,8 +7,9 @@
 所有發布設定集中在 [`../config_packaging.json`](../config_packaging.json)：
 
 - `application.version`：本次發布版本號，也是資料夾與 ZIP 檔名的一部分。
-- `application.name`／`target`／`entry_point`：排班執行檔與目標平台。
-- `editor.name`／`entry_point`：無主控台視窗的輸入編輯器執行檔。
+- `application.name`／`version`／`target`：產品、發布檔名與目標平台。
+- `application.executable_name`／`entry_point`：快速命令列入口的名稱與程式入口。
+- `editor.name`／`entry_point`：無主控台視窗之完整 UI 的名稱與程式入口。
 - `build`：測試、smoke test、PyInstaller 版本及產物路徑。
 - `release_content`：使用者設定、匿名範例與說明文件來源。
 - `font`：固定 Noto Sans TC 來源、SHA-256 與輸出字重。
@@ -24,6 +25,13 @@
 ```powershell
 python -m pip install -e ".[test,release]"
 ```
+
+## 發布包的兩種執行方式
+
+- `clinic-shift-scheduler.exe`：完整 UI，也是一般使用者首選。可建立或開啟月份資料、檢查與儲存輸入、調整設定、執行排班並查看結果。
+- `quick-runner.exe`：快速命令列入口。適合已準備好 `config.json` 與 `input/` 月份 JSON 的使用者；雙擊或由終端執行後，會直接依設定完成排班並輸出到 `output/`。
+
+完整 UI 會在背景呼叫同一個 `quick-runner.exe`，兩種入口共用正式排班流程，沒有第二套 solver 邏輯。發布根目錄的版本號與最短操作步驟都寫在 `README.txt`。
 
 ## 建置流程與產物
 
@@ -51,8 +59,8 @@ release/
 .\packaging\windows\smoke-test.ps1 -ReleasePath .\release\ClinicShiftScheduler-VERSION-win-x64\ClinicShiftScheduler-VERSION-win-x64.zip
 ```
 
-smoke test 會把 ZIP 解壓到 `runtime/packaging-smoke/`，移除 Conda、virtual environment 與 Python 的環境提示，並把 `PATH` 限制為 Windows 系統目錄後啟動封裝程式，避免開發環境意外補上漏掉的 DLL。它會用 `ClinicShiftSchedulerEditor.exe` 開啟匿名輸入、正式驗證、另存並等價重開，再由 Editor 透過 `ClinicShiftScheduler.exe` 的 worker 模式完成正式排班。驗證完畢後會刪除整個暫存解壓目錄。
+smoke test 會把 ZIP 解壓到 `runtime/packaging-smoke/`，移除 Conda、virtual environment 與 Python 的環境提示，並把 `PATH` 限制為 Windows 系統目錄後啟動封裝程式，避免開發環境意外補上漏掉的 DLL。它會用 `clinic-shift-scheduler.exe` 開啟匿名輸入、正式驗證、另存並等價重開，再由 GUI 透過 `quick-runner.exe` 的 worker 模式完成正式排班。驗證完畢後會刪除整個暫存解壓目錄。
 
 ## 驗收重點
 
-最終發布仍需在沒有 Python／Conda 的乾淨 Windows 64 位元環境解壓縮測試。使用者必須能用 `ClinicShiftSchedulerEditor.exe` 維護 `input/`、從執行頁啟動排班，也能直接修改 JSON 或獨立執行 `ClinicShiftScheduler.exe`；兩種入口都必須在 `output/` 取得通過驗證的 JSON、Excel 與 PDF。
+最終發布仍需在沒有 Python／Conda 的乾淨 Windows 64 位元環境解壓縮測試。使用者必須能用 `clinic-shift-scheduler.exe` 維護 `input/`、從執行頁啟動排班，也能直接修改 JSON 或獨立執行 `quick-runner.exe`；兩種入口都必須在 `output/` 取得通過驗證的 JSON、Excel 與 PDF。發布根目錄只保留 `README.txt` 說明版本與操作方式，不另放 `VERSION.txt`。

@@ -15,7 +15,6 @@ from .daily_patterns import (
     PATTERN_PERIODS,
 )
 from .class_preferences import (
-    CLASS_PREFERENCES,
     PreferenceDirection,
     class_opportunity_days,
 )
@@ -28,6 +27,13 @@ from .optimization_contracts import (
     OptimizationStageResult,
     OptimizationStageStatus,
     PreferenceBenchmarkResult,
+)
+from .optimization_policy import (
+    CLASS_PREFERENCES,
+    CLASS_REMAINING_PATTERN_METRICS,
+    FORMAL_OBJECTIVE_STAGES,
+    FORMAL_STAGE_POLICY_BY_STAGE,
+    FORMAL_STAGE_SEQUENCE,
 )
 from .result_metrics import RecomputedScheduleMetrics, recompute_schedule_metrics
 from .solver_contracts import Assignment
@@ -58,28 +64,6 @@ class ValidationReport:
     @property
     def is_valid(self) -> bool:
         return self.status is ResultValidationStatus.PASS
-
-
-FORMAL_OBJECTIVE_STAGES: tuple[OptimizationStage, ...] = (
-    OptimizationStage.FULL_TIME_TARGET_DEVIATION,
-    OptimizationStage.PART_TIME_USAGE,
-    OptimizationStage.FULL_TIME_PREFERENCE_RANK1_MAX_REGRET,
-    OptimizationStage.FULL_TIME_PREFERENCE_RANK1_TOTAL_REGRET,
-    OptimizationStage.FULL_TIME_PREFERENCE_RANK2_MAX_REGRET,
-    OptimizationStage.FULL_TIME_PREFERENCE_RANK2_TOTAL_REGRET,
-    OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP,
-    OptimizationStage.FULL_TIME_FIRST_PREFERENCE_RATIO_TOTAL_GAP,
-    OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP,
-    OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS,
-    OptimizationStage.PART_TIME_GROUP_FAIRNESS,
-    OptimizationStage.COMMON_GROUP_FAIRNESS,
-    OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP,
-    OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP,
-)
-FORMAL_STAGE_SEQUENCE: tuple[OptimizationStage, ...] = (
-    OptimizationStage.HARD_FEASIBILITY,
-    *FORMAL_OBJECTIVE_STAGES,
-)
 
 
 def validate_schedule_result(
@@ -356,6 +340,15 @@ def validate_schedule_result(
             "optimization_stage_sequence_mismatch",
             "formal optimization stages are missing, duplicated, or out of order",
         )
+    for stage_result in stages:
+        policy = FORMAL_STAGE_POLICY_BY_STAGE.get(stage_result.stage)
+        if policy is not None and stage_result.direction is not policy.direction:
+            add(
+                "optimization_stages",
+                "optimization_stage_direction_mismatch",
+                "formal optimization stage direction does not match policy",
+                stage=stage_result.stage,
+            )
     benchmark_by_key = {
         (item.full_time_class, item.rank): item
         for item in preference_benchmarks
@@ -439,10 +432,7 @@ def validate_schedule_result(
                 "preference_benchmark_ideal_violated",
                 "final assignment is better than its recorded proven ideal",
             )
-    expected_pattern_locks = {
-        (FullTimeClass.A, FairnessMetric.SINGLE_SHIFT_DAYS),
-        (FullTimeClass.B, FairnessMetric.TRIPLE_DAYS),
-    }
+    expected_pattern_locks = set(CLASS_REMAINING_PATTERN_METRICS.items())
     pattern_lock_by_key = {
         (item.full_time_class, item.metric): item
         for item in class_pattern_locks

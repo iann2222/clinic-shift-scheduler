@@ -10,7 +10,6 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from .class_preferences import (
-    CLASS_PREFERENCES,
     PreferenceDirection,
     PreferenceRank,
 )
@@ -24,16 +23,18 @@ from .optimization_contracts import (
     OptimizationStageStatus,
     PreferenceBenchmarkResult,
 )
+from .optimization_policy import (
+    CLASS_PREFERENCES,
+    FORMAL_OBJECTIVE_STAGES,
+    FULL_TIME_PATTERN_METRICS,
+    GROUP_FAIRNESS_METRICS,
+)
 from .result_metrics import EmployeeResultMetrics, RecomputedScheduleMetrics
 from .ratio_fairness import (
     BASIS_POINTS_SCALE,
     ratio_basis_points,
 )
-from .result_validation import (
-    FORMAL_OBJECTIVE_STAGES,
-    ValidationReport,
-    validate_schedule_result,
-)
+from .result_validation import ValidationReport, validate_schedule_result
 from .solver_contracts import Assignment, FeasibilityStatus, LexicographicResult
 
 
@@ -399,26 +400,18 @@ def _metric_value(values: EmployeeResultMetrics, metric: FairnessMetric) -> int:
 
 
 def _group_metrics(employee) -> tuple[FairnessMetric, ...]:
-    common = (
-        FairnessMetric.MORNING_SHIFTS,
-        FairnessMetric.AFTERNOON_SHIFTS,
-        FairnessMetric.EVENING_SHIFTS,
-        FairnessMetric.SUNDAY_SHIFTS,
-        FairnessMetric.HOLIDAY_SHIFTS,
-    )
+    common = GROUP_FAIRNESS_METRICS[
+        OptimizationStage.COMMON_GROUP_FAIRNESS
+    ]
+    assert common is not None
     if employee.employment_type is EmploymentType.PART_TIME:
-        return (FairnessMetric.TOTAL_SHIFTS, *common)
-    if employee.full_time_class is FullTimeClass.A:
-        return (
-            FairnessMetric.CONSECUTIVE_DOUBLES,
-            FairnessMetric.SINGLE_SHIFT_DAYS,
-            FairnessMetric.MORNING_EVENING_DAYS,
-            *common,
-        )
+        part_time = GROUP_FAIRNESS_METRICS[
+            OptimizationStage.PART_TIME_GROUP_FAIRNESS
+        ]
+        assert part_time is not None
+        return (*part_time, *common)
     return (
-        FairnessMetric.CONSECUTIVE_DOUBLES,
-        FairnessMetric.SINGLE_SHIFT_DAYS,
-        FairnessMetric.TRIPLE_DAYS,
+        *FULL_TIME_PATTERN_METRICS[employee.full_time_class],
         *common,
     )
 
@@ -452,19 +445,9 @@ def _build_group_statistics(
         ratio_values: dict[str, Mapping[str, int | None]] = {}
         ratio_gaps: dict[str, int] = {}
         if employees[0].employment_type is EmploymentType.FULL_TIME:
-            pattern_metrics = (
-                (
-                    FairnessMetric.CONSECUTIVE_DOUBLES,
-                    FairnessMetric.SINGLE_SHIFT_DAYS,
-                    FairnessMetric.MORNING_EVENING_DAYS,
-                )
-                if employees[0].full_time_class is FullTimeClass.A
-                else (
-                    FairnessMetric.CONSECUTIVE_DOUBLES,
-                    FairnessMetric.SINGLE_SHIFT_DAYS,
-                    FairnessMetric.TRIPLE_DAYS,
-                )
-            )
+            pattern_metrics = FULL_TIME_PATTERN_METRICS[
+                employees[0].full_time_class
+            ]
             for metric in pattern_metrics:
                 values = MappingProxyType(
                     {

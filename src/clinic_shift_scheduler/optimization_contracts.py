@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from types import MappingProxyType
-from typing import Mapping
 
 from .class_preferences import (
     ClassPreferenceMetric,
@@ -66,17 +64,6 @@ class FairnessMetric(StrEnum):
     SUNDAY_SHIFTS = "sunday_shifts"
     SUNDAY_ATTENDANCE_DAYS = "sunday_attendance_days"
     HOLIDAY_SHIFTS = "holiday_shifts"
-
-
-COMMON_GROUP_FAIRNESS_WEIGHTS: Mapping[FairnessMetric, int] = MappingProxyType(
-    {
-        FairnessMetric.MORNING_SHIFTS: 3,
-        FairnessMetric.AFTERNOON_SHIFTS: 3,
-        FairnessMetric.EVENING_SHIFTS: 3,
-        FairnessMetric.SUNDAY_SHIFTS: 7,
-        FairnessMetric.HOLIDAY_SHIFTS: 3,
-    }
-)
 
 
 class ObjectiveDirection(StrEnum):

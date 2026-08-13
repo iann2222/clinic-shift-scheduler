@@ -17,7 +17,6 @@ from typing import Mapping
 from ortools.sat.python import cp_model
 
 from .class_preferences import (
-    CLASS_PREFERENCES,
     ClassPreferenceMetric,
     PreferenceDirection,
     PreferenceRank,
@@ -33,7 +32,6 @@ from .feasibility import (
 )
 from .models import Employee, NormalizedScheduleInput
 from .optimization_contracts import (
-    COMMON_GROUP_FAIRNESS_WEIGHTS,
     ClassPatternLockResult,
     ConstantProof,
     EquivalentSolutionDiagnosticConfig,
@@ -46,6 +44,21 @@ from .optimization_contracts import (
     OptimizationStageResult,
     OptimizationStageStatus,
     PreferenceBenchmarkResult,
+)
+from .optimization_policy import (
+    CLASS_PREFERENCES,
+    CLASS_REMAINING_PATTERN_METRICS,
+    COMMON_GROUP_FAIRNESS_WEIGHTS,
+    FORMAL_OBJECTIVE_STAGES,
+    FORMAL_STAGE_POLICY_BY_STAGE,
+    FULL_TIME_PATTERN_METRICS,
+    GROUP_FAIRNESS_EMPLOYMENT_TYPES,
+    GROUP_FAIRNESS_METRICS,
+    GROUP_FAIRNESS_STAGES,
+    PREFERENCE_RATIO_MAX_STAGE_BY_METRIC,
+    PREFERENCE_REGRET_STAGES,
+    SUNDAY_FAIRNESS_METRICS,
+    SUNDAY_FAIRNESS_STAGES,
 )
 from .precheck import PrecheckResult, PrecheckStatus, run_prechecks
 from .ratio_fairness import (
@@ -319,19 +332,6 @@ def build_optimization_model(
             ],
         )
 
-    full_time_classes = {
-        FullTimeClass.A: (
-            FairnessMetric.CONSECUTIVE_DOUBLES,
-            FairnessMetric.SINGLE_SHIFT_DAYS,
-            FairnessMetric.MORNING_EVENING_DAYS,
-        ),
-        FullTimeClass.B: (
-            FairnessMetric.CONSECUTIVE_DOUBLES,
-            FairnessMetric.SINGLE_SHIFT_DAYS,
-            FairnessMetric.TRIPLE_DAYS,
-        ),
-    }
-
     preference_metric_map = {
         ClassPreferenceMetric.CONSECUTIVE_DOUBLES: (
             FairnessMetric.CONSECUTIVE_DOUBLES
@@ -376,12 +376,8 @@ def build_optimization_model(
             (definition.full_time_class, definition.rank)
         ] = value
 
-    remaining_pattern_metrics = {
-        FullTimeClass.A: FairnessMetric.SINGLE_SHIFT_DAYS,
-        FullTimeClass.B: FairnessMetric.TRIPLE_DAYS,
-    }
     class_remaining_pattern_values: dict[FullTimeClass, cp_model.IntVar] = {}
-    for full_time_class, metric in remaining_pattern_metrics.items():
+    for full_time_class, metric in CLASS_REMAINING_PATTERN_METRICS.items():
         members = tuple(
             employee
             for employee in data.source.employees
@@ -429,7 +425,7 @@ def build_optimization_model(
         model.add(attendance == 0).only_enforce_if(active.Not())
         employee_attendance_active[employee_id] = active
         assert employee.full_time_class is not None
-        for metric in full_time_classes[employee.full_time_class]:
+        for metric in FULL_TIME_PATTERN_METRICS[employee.full_time_class]:
             ratio_name = f"pattern_ratio_bp[{employee_id},{metric.value}]"
             ratio_index = model.new_int_var(
                 0,
@@ -463,27 +459,7 @@ def build_optimization_model(
         OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP: {},
         OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP: {},
     }
-    preference_ratio_stage = {
-        (FullTimeClass.A, FairnessMetric.CONSECUTIVE_DOUBLES): (
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
-        ),
-        (FullTimeClass.B, FairnessMetric.SINGLE_SHIFT_DAYS): (
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_PERSON_RATIO_MAX_GAP
-        ),
-        (FullTimeClass.A, FairnessMetric.MORNING_EVENING_DAYS): (
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP
-        ),
-        (FullTimeClass.B, FairnessMetric.CONSECUTIVE_DOUBLES): (
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_PERSON_RATIO_MAX_GAP
-        ),
-        (FullTimeClass.A, FairnessMetric.SINGLE_SHIFT_DAYS): (
-            OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP
-        ),
-        (FullTimeClass.B, FairnessMetric.TRIPLE_DAYS): (
-            OptimizationStage.FULL_TIME_REMAINING_PATTERN_RATIO_MAX_GAP
-        ),
-    }
-    for full_time_class, metrics in full_time_classes.items():
+    for full_time_class, metrics in FULL_TIME_PATTERN_METRICS.items():
         groups: dict[str, list[Employee]] = defaultdict(list)
         for employee in data.source.employees:
             if employee.full_time_class is full_time_class:
@@ -541,7 +517,9 @@ def build_optimization_model(
                 model.add(gap == 0).only_enforce_if(any_active.Not())
                 ratio_gaps[(group, metric)] = gap
                 preference_ratio_gaps[
-                    preference_ratio_stage[(full_time_class, metric)]
+                    PREFERENCE_RATIO_MAX_STAGE_BY_METRIC[
+                        (full_time_class, metric)
+                    ]
                 ][(group, metric)] = gap
     ratio_max_gap: cp_model.IntVar | None = None
     if ratio_gaps:
@@ -568,34 +546,6 @@ def build_optimization_model(
         preference_ratio_max_gaps[stage] = maximum
         preference_ratio_totals[stage] = sum(gaps.values())
 
-    stage_members_and_metrics = {
-        OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS: (
-            tuple(
-                employee
-                for employee in data.source.employees
-                if employee.employment_type is EmploymentType.FULL_TIME
-            ),
-            None,
-        ),
-        OptimizationStage.PART_TIME_GROUP_FAIRNESS: (
-            tuple(
-                employee
-                for employee in data.source.employees
-                if employee.employment_type is EmploymentType.PART_TIME
-            ),
-            (FairnessMetric.TOTAL_SHIFTS,),
-        ),
-        OptimizationStage.COMMON_GROUP_FAIRNESS: (
-            tuple(data.source.employees),
-            (
-                FairnessMetric.MORNING_SHIFTS,
-                FairnessMetric.AFTERNOON_SHIFTS,
-                FairnessMetric.EVENING_SHIFTS,
-                FairnessMetric.SUNDAY_SHIFTS,
-                FairnessMetric.HOLIDAY_SHIFTS,
-            ),
-        ),
-    }
     fairness_gaps: dict[
         OptimizationStage,
         Mapping[tuple[str, FairnessMetric], cp_model.IntVar],
@@ -603,7 +553,14 @@ def build_optimization_model(
     fairness_objectives: dict[
         OptimizationStage, cp_model.LinearExpr | int
     ] = {}
-    for stage, (employees, metrics) in stage_members_and_metrics.items():
+    for stage in GROUP_FAIRNESS_STAGES:
+        employees = tuple(
+            employee
+            for employee in data.source.employees
+            if employee.employment_type
+            in GROUP_FAIRNESS_EMPLOYMENT_TYPES[stage]
+        )
+        metrics = GROUP_FAIRNESS_METRICS[stage]
         groups: dict[str, list[Employee]] = defaultdict(list)
         for employee in employees:
             groups[employee.fairness_group].append(employee)
@@ -612,7 +569,7 @@ def build_optimization_model(
             if len(members) < 2:
                 continue
             group_metrics = (
-                full_time_classes[members[0].full_time_class]
+                FULL_TIME_PATTERN_METRICS[members[0].full_time_class]
                 if metrics is None
                 else metrics
             )
@@ -657,10 +614,7 @@ def build_optimization_model(
     sunday_gaps: dict[tuple[str, FairnessMetric], cp_model.IntVar] = {}
     sunday_max_gap: cp_model.IntVar | None = None
     if len(full_time_members) >= 2:
-        for metric in (
-            FairnessMetric.SUNDAY_SHIFTS,
-            FairnessMetric.SUNDAY_ATTENDANCE_DAYS,
-        ):
+        for metric in SUNDAY_FAIRNESS_METRICS:
             member_values = [
                 employee_metrics[(employee.employee_id, metric)]
                 for employee in full_time_members
@@ -691,18 +645,14 @@ def build_optimization_model(
         )
         model.add_max_equality(sunday_max_gap, list(sunday_gaps.values()))
     immutable_sunday_gaps = MappingProxyType(sunday_gaps)
-    fairness_gaps[
-        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP
-    ] = immutable_sunday_gaps
-    fairness_gaps[
-        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP
-    ] = immutable_sunday_gaps
-    fairness_objectives[
-        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP
-    ] = sunday_max_gap if sunday_max_gap is not None else 0
-    fairness_objectives[
-        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP
-    ] = sum(sunday_gaps.values())
+    for stage in SUNDAY_FAIRNESS_STAGES:
+        fairness_gaps[stage] = immutable_sunday_gaps
+    fairness_objectives[SUNDAY_FAIRNESS_STAGES[0]] = (
+        sunday_max_gap if sunday_max_gap is not None else 0
+    )
+    fairness_objectives[SUNDAY_FAIRNESS_STAGES[1]] = sum(
+        sunday_gaps.values()
+    )
 
     return OptimizationModel(
         feasibility=feasibility,
@@ -908,7 +858,9 @@ def _formal_objective_specs(
     specs: list[_ObjectiveSpec] = [
         _ObjectiveSpec(
             stage=OptimizationStage.FULL_TIME_TARGET_DEVIATION,
-            direction=ObjectiveDirection.MINIMIZE,
+            direction=FORMAL_STAGE_POLICY_BY_STAGE[
+                OptimizationStage.FULL_TIME_TARGET_DEVIATION
+            ].direction,
             variables=tuple(built.target_deviations.values()),
             expression=built.target_objective,
             constant_value=target_constant,
@@ -916,7 +868,9 @@ def _formal_objective_specs(
         ),
         _ObjectiveSpec(
             stage=OptimizationStage.PART_TIME_USAGE,
-            direction=ObjectiveDirection.MINIMIZE,
+            direction=FORMAL_STAGE_POLICY_BY_STAGE[
+                OptimizationStage.PART_TIME_USAGE
+            ].direction,
             variables=part_time_variables,
             expression=built.part_time_objective,
             constant_value=part_time_constant,
@@ -924,18 +878,8 @@ def _formal_objective_specs(
         ),
     ]
 
-    regret_stages = {
-        PreferenceRank.FIRST: (
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_MAX_REGRET,
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK1_TOTAL_REGRET,
-        ),
-        PreferenceRank.SECOND: (
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_MAX_REGRET,
-            OptimizationStage.FULL_TIME_PREFERENCE_RANK2_TOTAL_REGRET,
-        ),
-    }
     for rank in PreferenceRank:
-        maximum_stage, total_stage = regret_stages[rank]
+        maximum_stage, total_stage = PREFERENCE_REGRET_STAGES[rank]
         maximum = built.class_preference_max_regret_variables.get(rank)
         regrets = tuple(
             value
@@ -954,7 +898,9 @@ def _formal_objective_specs(
             (
                 _ObjectiveSpec(
                     stage=maximum_stage,
-                    direction=ObjectiveDirection.MINIMIZE,
+                    direction=FORMAL_STAGE_POLICY_BY_STAGE[
+                        maximum_stage
+                    ].direction,
                     variables=(maximum,) if maximum is not None else (),
                     expression=maximum if maximum is not None else 0,
                     constant_value=constant,
@@ -962,7 +908,9 @@ def _formal_objective_specs(
                 ),
                 _ObjectiveSpec(
                     stage=total_stage,
-                    direction=ObjectiveDirection.MINIMIZE,
+                    direction=FORMAL_STAGE_POLICY_BY_STAGE[
+                        total_stage
+                    ].direction,
                     variables=regrets,
                     expression=built.class_preference_total_regret_objectives.get(
                         rank, 0
@@ -987,7 +935,9 @@ def _formal_objective_specs(
         (
             _ObjectiveSpec(
                 stage=OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP,
-                direction=ObjectiveDirection.MINIMIZE,
+                direction=FORMAL_STAGE_POLICY_BY_STAGE[
+                    OptimizationStage.FULL_TIME_PATTERN_RATIO_MAX_GAP
+                ].direction,
                 variables=(built.ratio_fairness_max_gap_variable,)
                 if built.ratio_fairness_max_gap_variable is not None
                 else (),
@@ -1003,7 +953,9 @@ def _formal_objective_specs(
                 stage=(
                     OptimizationStage.FULL_TIME_FIRST_PREFERENCE_RATIO_TOTAL_GAP
                 ),
-                direction=ObjectiveDirection.MINIMIZE,
+                direction=FORMAL_STAGE_POLICY_BY_STAGE[
+                    OptimizationStage.FULL_TIME_FIRST_PREFERENCE_RATIO_TOTAL_GAP
+                ].direction,
                 variables=tuple(first_preference_gaps.values()),
                 expression=sum(first_preference_gaps.values()),
                 constant_value=ratio_constant,
@@ -1011,7 +963,9 @@ def _formal_objective_specs(
             ),
             _ObjectiveSpec(
                 stage=OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP,
-                direction=ObjectiveDirection.MINIMIZE,
+                direction=FORMAL_STAGE_POLICY_BY_STAGE[
+                    OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP
+                ].direction,
                 variables=tuple(all_ratio_gaps.values()),
                 expression=built.ratio_fairness_total_objective,
                 constant_value=ratio_constant,
@@ -1020,16 +974,12 @@ def _formal_objective_specs(
         )
     )
 
-    for stage in (
-        OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS,
-        OptimizationStage.PART_TIME_GROUP_FAIRNESS,
-        OptimizationStage.COMMON_GROUP_FAIRNESS,
-    ):
+    for stage in GROUP_FAIRNESS_STAGES:
         gaps = built.fairness_gap_variables[stage]
         specs.append(
             _ObjectiveSpec(
                 stage=stage,
-                direction=ObjectiveDirection.MINIMIZE,
+                direction=FORMAL_STAGE_POLICY_BY_STAGE[stage].direction,
                 variables=tuple(gaps.values()),
                 expression=built.fairness_objectives[stage],
                 constant_value=None if gaps else 0,
@@ -1040,15 +990,12 @@ def _formal_objective_specs(
                 ),
             )
         )
-    for stage in (
-        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP,
-        OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_TOTAL_GAP,
-    ):
+    for stage in SUNDAY_FAIRNESS_STAGES:
         gaps = built.fairness_gap_variables[stage]
         specs.append(
             _ObjectiveSpec(
                 stage=stage,
-                direction=ObjectiveDirection.MINIMIZE,
+                direction=FORMAL_STAGE_POLICY_BY_STAGE[stage].direction,
                 variables=tuple(gaps.values()),
                 expression=built.fairness_objectives[stage],
                 constant_value=None if gaps else 0,
@@ -1059,7 +1006,12 @@ def _formal_objective_specs(
                 ),
             )
         )
-    return tuple(specs)
+    result = tuple(specs)
+    if tuple(item.stage for item in result) != FORMAL_OBJECTIVE_STAGES:
+        raise RuntimeError(
+            "optimizer objective specs do not match the formal v1 policy"
+        )
+    return result
 
 
 def _solve_once(
@@ -1292,7 +1244,9 @@ def solve_lexicographic(
         stages.append(
             OptimizationStageResult(
                 stage=OptimizationStage.HARD_FEASIBILITY,
-                direction=ObjectiveDirection.NONE,
+                direction=FORMAL_STAGE_POLICY_BY_STAGE[
+                    OptimizationStage.HARD_FEASIBILITY
+                ].direction,
                 status=OptimizationStageStatus.INFEASIBLE,
                 objective_value=None,
                 raw_solver_status=hard_run.raw_status_name,
@@ -1307,7 +1261,9 @@ def solve_lexicographic(
         stages.append(
             OptimizationStageResult(
                 stage=OptimizationStage.HARD_FEASIBILITY,
-                direction=ObjectiveDirection.NONE,
+                direction=FORMAL_STAGE_POLICY_BY_STAGE[
+                    OptimizationStage.HARD_FEASIBILITY
+                ].direction,
                 status=OptimizationStageStatus.UNKNOWN,
                 objective_value=None,
                 raw_solver_status=hard_run.raw_status_name,
@@ -1322,7 +1278,9 @@ def solve_lexicographic(
     stages.append(
         OptimizationStageResult(
             stage=OptimizationStage.HARD_FEASIBILITY,
-            direction=ObjectiveDirection.NONE,
+            direction=FORMAL_STAGE_POLICY_BY_STAGE[
+                OptimizationStage.HARD_FEASIBILITY
+            ].direction,
             status=OptimizationStageStatus.FEASIBLE,
             objective_value=None,
             raw_solver_status=hard_run.raw_status_name,
@@ -1496,10 +1454,7 @@ def solve_lexicographic(
                     )
                     break
         if rank is PreferenceRank.SECOND:
-            for full_time_class, metric in (
-                (FullTimeClass.A, FairnessMetric.SINGLE_SHIFT_DAYS),
-                (FullTimeClass.B, FairnessMetric.TRIPLE_DAYS),
-            ):
+            for full_time_class, metric in CLASS_REMAINING_PATTERN_METRICS.items():
                 variable = built.class_remaining_pattern_values[
                     full_time_class
                 ]
