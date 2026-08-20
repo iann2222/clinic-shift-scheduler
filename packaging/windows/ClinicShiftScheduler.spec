@@ -13,6 +13,11 @@ packaging_config = json.loads(
     )
 )
 application = packaging_config["application"]
+application["version"] = (
+    (repository_root / "packaging" / "version.txt")
+    .read_text(encoding="utf-8")
+    .strip()
+)
 asset_directory = repository_root / packaging_config["build"]["asset_directory"]
 font_directory = asset_directory / "fonts"
 packaging_only_excludes = [

@@ -23,10 +23,14 @@ class PackagingContractTests(unittest.TestCase):
 
     def test_packaging_config_owns_release_version_and_windows_target(self) -> None:
         self.assertEqual(self.config["config_version"], "1")
+        version = (
+            REPOSITORY_ROOT / "packaging" / "version.txt"
+        ).read_text(encoding="utf-8").strip()
         self.assertRegex(
-            self.config["application"]["version"],
+            version,
             r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$",
         )
+        self.assertNotIn("version", self.config["application"])
         self.assertEqual(self.config["application"]["target"], "win-x64")
         self.assertEqual(
             self.config["application"]["entry_point"],
@@ -74,13 +78,14 @@ class PackagingContractTests(unittest.TestCase):
             project["project"]["optional-dependencies"]["release"],
         )
 
-    def test_project_and_packaging_versions_match(self) -> None:
+    def test_project_version_uses_the_packaging_version_file(self) -> None:
         project = tomllib.loads(
             (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
         )
+        self.assertIn("version", project["project"]["dynamic"])
         self.assertEqual(
-            project["project"]["version"],
-            self.config["application"]["version"],
+            project["tool"]["setuptools"]["dynamic"]["version"],
+            {"file": ["packaging/version.txt"]},
         )
 
     def test_runtime_dependencies_do_not_include_unused_pandas(self) -> None:

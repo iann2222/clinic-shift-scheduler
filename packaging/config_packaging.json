@@ -4,7 +4,6 @@
     "name": "ClinicShiftScheduler",
     "executable_name": "quick-runner",
     "display_name": "診所排班系統",
-    "version": "0.1.0",
     "target": "win-x64",
     "entry_point": "src/run_scheduler.py",
     "console": true

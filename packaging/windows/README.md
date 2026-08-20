@@ -6,8 +6,8 @@
 
 所有發布設定集中在 [`../config_packaging.json`](../config_packaging.json)：
 
-- `application.version`：本次發布版本號，也是資料夾與 ZIP 檔名的一部分。
-- `application.name`／`version`／`target`：產品、發布檔名與目標平台。
+- [`../version.txt`](../version.txt)：唯一需要手動修改的發布版本號；同時提供 Python package metadata、發布資料夾、ZIP 與 README.txt。
+- `application.name`／`target`：產品、發布檔名與目標平台。
 - `application.executable_name`／`entry_point`：快速命令列入口的名稱與程式入口。
 - `editor.name`／`entry_point`：無主控台視窗之完整 UI 的名稱與程式入口。
 - `build`：測試、smoke test、PyInstaller 版本及產物路徑。

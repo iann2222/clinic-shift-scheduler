@@ -12,7 +12,6 @@ import re
 import shutil
 import subprocess
 import sys
-import tomllib
 import urllib.request
 import zipfile
 from datetime import UTC, datetime
@@ -22,11 +21,21 @@ from typing import Any
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
 PACKAGING_CONFIG_PATH = REPOSITORY_ROOT / "packaging" / "config_packaging.json"
+VERSION_PATH = REPOSITORY_ROOT / "packaging" / "version.txt"
 VERSION_PATTERN = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+(?:[-+][0-9A-Za-z.-]+)?$")
 
 
 class PackagingError(RuntimeError):
     """Raised when a release cannot be produced safely."""
+
+
+def _load_version() -> str:
+    if not VERSION_PATH.is_file():
+        raise PackagingError("packaging/version.txt is missing")
+    version = VERSION_PATH.read_text(encoding="utf-8").strip()
+    if not VERSION_PATTERN.fullmatch(version):
+        raise PackagingError("packaging/version.txt must contain a semantic version")
+    return version
 
 
 def _load_config() -> dict[str, Any]:
@@ -36,9 +45,8 @@ def _load_config() -> dict[str, Any]:
     application = payload.get("application")
     if not isinstance(application, dict):
         raise PackagingError("config_packaging.json.application must be an object")
-    version = application.get("version")
-    if not isinstance(version, str) or not VERSION_PATTERN.fullmatch(version):
-        raise PackagingError("application.version must be a semantic version")
+    version = _load_version()
+    application["version"] = version
     if application.get("target") != "win-x64":
         raise PackagingError("the current release layer only supports win-x64")
     scheduler_name = application.get("executable_name")
@@ -54,15 +62,6 @@ def _load_config() -> dict[str, Any]:
     if editor.get("entry_point") != "src/run_gui.py" or editor.get("console") is not False:
         raise PackagingError(
             "editor must use src/run_gui.py with console disabled"
-        )
-    project = tomllib.loads(
-        (REPOSITORY_ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    )
-    project_version = project["project"]["version"]
-    if version != project_version:
-        raise PackagingError(
-            "application.version must match pyproject.toml project.version: "
-            f"{version!r} != {project_version!r}"
         )
     return payload
 

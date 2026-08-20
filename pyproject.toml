@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "clinic-shift-scheduler"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Versioned CP-SAT clinic shift scheduler with validated outputs"
 requires-python = ">=3.11"
 dependencies = [
@@ -36,6 +36,9 @@ release = [
 [tool.setuptools]
 package-dir = {"" = "src"}
 include-package-data = true
+
+[tool.setuptools.dynamic]
+version = {file = ["packaging/version.txt"]}
 
 [tool.setuptools.packages.find]
 where = ["src"]
