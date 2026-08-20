@@ -130,6 +130,7 @@ class _EmployeeAvailabilityListPage(InputPage):
         employment_type: EmploymentType,
         *,
         mode_label: str,
+        hint_text: str | None = None,
         parent: QWidget | None = None,
     ) -> None:
         item = next(item for item in NAVIGATION_ITEMS if item.page_id is page_id)
@@ -141,11 +142,13 @@ class _EmployeeAvailabilityListPage(InputPage):
             parent=parent,
         )
         self._draft: ScheduleDraft | None = None
+        self._employment_type = employment_type
         self._mode_label = mode_label
         layout = QVBoxLayout()
         self.surface_layout.addLayout(layout, 1)
         hint = QLabel(
-            "雙擊員工或日期清單後，輸入該月日期並分別設定早、午、晚時段。"
+            hint_text
+            or "雙擊員工或日期清單後，輸入該月日期並分別設定早、午、晚時段。"
         )
         hint.setObjectName("mutedText")
         hint.setWordWrap(True)
@@ -201,17 +204,25 @@ class _EmployeeAvailabilityListPage(InputPage):
         employee = self.model.employee_at(index.row())
         if employee is None:
             return
+        complement = (
+            self._employment_type is EmploymentType.PART_TIME
+            and index.column() == 2
+        )
         dialog = PeriodDateListDialog(
             employee,
             self._draft.start_date,
-            self.model.selected_periods(employee),
-            mode_label=self._mode_label,
+            self.model.selected_periods(employee, complement=complement),
+            mode_label="不可排日期" if complement else self._mode_label,
             parent=self,
         )
         if not dialog.exec():
             return
         try:
-            self.model.replace_selected_periods(employee, dialog.selected_periods)
+            self.model.replace_selected_periods(
+                employee,
+                dialog.selected_periods,
+                complement=complement,
+            )
         except ValueError as error:
             show_warning(self, "無法更新日期", str(error))
             return
@@ -235,7 +246,18 @@ class PartTimeAvailablePage(_EmployeeAvailabilityListPage):
             PageId.PART_TIME_AVAILABLE,
             EmploymentType.PART_TIME,
             mode_label="可排日期",
+            hint_text=(
+                "雙擊可排或不可排欄位後，輸入該月日期並分別設定早、午、晚時段。"
+                "兩欄會自動同步更新，只需手動編輯其中一邊。"
+            ),
             parent=parent,
+        )
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.table.setWordWrap(True)
+        self.table.verticalHeader().setSectionResizeMode(
+            QHeaderView.ResizeMode.ResizeToContents
         )
 
 

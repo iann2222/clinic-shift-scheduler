@@ -52,8 +52,8 @@ NAVIGATION_ITEMS: tuple[NavigationItem, ...] = (
     ),
     NavigationItem(
         PageId.PART_TIME_AVAILABLE,
-        "兼職可排",
-        "集中設定所有兼職人員明確可以排班的日期與時段。",
+        "兼職時段",
+        "集中設定所有兼職人員的可排與不可排日期及時段。",
     ),
     NavigationItem(
         PageId.REVIEW_SAVE,

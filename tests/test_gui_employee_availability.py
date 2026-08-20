@@ -11,6 +11,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
 from PySide6.QtTest import QSignalSpy
+from PySide6.QtWidgets import QHeaderView, QLabel
 
 from clinic_shift_scheduler.authoring_application import AuthoringApplication
 from clinic_shift_scheduler.enums import EmploymentType, Period, ShiftMode
@@ -256,8 +257,29 @@ class EmployeeAvailabilityModelTests(unittest.TestCase):
         self.assertEqual(full_time.rowCount(), 4)
         self.assertEqual(part_time.rowCount(), 2)
         self.assertEqual(full_time.columnCount(), 2)
-        self.assertEqual(part_time.columnCount(), 2)
+        self.assertEqual(part_time.columnCount(), 3)
         self.assertIn("2 號（早）", part_time.data(part_time.index(0, 1)))
+        self.assertEqual(
+            part_time.headerData(2, Qt.Orientation.Horizontal),
+            "不可排日期與時段",
+        )
+
+    def test_part_time_available_and_unavailable_periods_are_complements(self) -> None:
+        model = AvailabilitySummaryTableModel(
+            EmploymentType.PART_TIME,
+            self.session.draft,
+        )
+        employee = model.employee_at(0)
+        assert employee is not None
+        unavailable = {(date(2026, 8, 1), Period.MORNING)}
+
+        model.replace_selected_periods(employee, unavailable, complement=True)
+
+        available_after = model.selected_periods(employee)
+        unavailable_after = model.selected_periods(employee, complement=True)
+        self.assertEqual(unavailable_after, unavailable)
+        self.assertFalse(available_after & unavailable_after)
+        self.assertEqual(len(available_after) + len(unavailable_after), 31 * 3)
 
     def test_full_time_summary_replaces_only_selected_employee_periods(self) -> None:
         model = AvailabilitySummaryTableModel(
@@ -360,6 +382,30 @@ class EmployeeAvailabilityModelTests(unittest.TestCase):
         self.assertGreaterEqual(
             full_time_page.table.columnWidth(0),
             full_time_page.table.fontMetrics().horizontalAdvance("中文四字"),
+        )
+        self.assertEqual(part_time_page.table.model().columnCount(), 3)
+        header = part_time_page.table.horizontalHeader()
+        self.assertEqual(
+            header.sectionResizeMode(1),
+            QHeaderView.ResizeMode.Stretch,
+        )
+        self.assertEqual(
+            header.sectionResizeMode(2),
+            QHeaderView.ResizeMode.Stretch,
+        )
+        self.assertTrue(part_time_page.table.wordWrap())
+        self.assertTrue(
+            any(
+                "只需手動編輯其中一邊" in label.text()
+                for label in part_time_page.findChildren(QLabel, "mutedText")
+            )
+        )
+        self.assertIn(
+            "兼職時段",
+            [
+                label.text()
+                for label in part_time_page.findChildren(QLabel, "pageTitle")
+            ],
         )
 
     def test_availability_model_edits_full_time_matrix(self) -> None:
