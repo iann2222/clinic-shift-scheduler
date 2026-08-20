@@ -188,9 +188,8 @@ class EmployeePage(InputPage):
         dialog = EmployeeEditDialog(self._draft.roles, parent=self)
         if not dialog.exec():
             return
-        employee = self._draft.add_employee()
+        employee = self.model.append_employee()
         self._apply_editor_values(employee, dialog.values)
-        self.model.refresh()
         row = self.model.row_for_employee_id(employee.employee_id)
         self.table.selectRow(row)
         self._load_employee(employee)

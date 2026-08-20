@@ -45,6 +45,17 @@ class EmployeeTableModel(QAbstractTableModel):
                 self.index(self.rowCount() - 1, self.columnCount() - 1),
             )
 
+    def append_employee(self) -> EmployeeDraft:
+        """Append one draft employee and notify Qt about the new table row."""
+
+        if self._draft is None:
+            raise RuntimeError("尚未綁定員工資料草稿")
+        row = self.rowCount()
+        self.beginInsertRows(QModelIndex(), row, row)
+        employee = self._draft.add_employee()
+        self.endInsertRows()
+        return employee
+
     def employee_at(self, row: int) -> EmployeeDraft | None:
         if self._draft is None or not 0 <= row < len(self._draft.employees):
             return None

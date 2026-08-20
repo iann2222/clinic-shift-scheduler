@@ -10,6 +10,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PySide6.QtCore import Qt
+from PySide6.QtTest import QSignalSpy
 
 from clinic_shift_scheduler.authoring_application import AuthoringApplication
 from clinic_shift_scheduler.enums import EmploymentType, Period, ShiftMode
@@ -227,6 +228,20 @@ class EmployeeAvailabilityModelTests(unittest.TestCase):
         }
         self.assertIn("職務", headers)
         self.assertNotIn("公平分組", headers)
+
+    def test_employee_summary_model_notifies_view_when_employee_is_added(self) -> None:
+        model = EmployeeTableModel(self.session.draft)
+        original_count = model.rowCount()
+        rows_inserted = QSignalSpy(model.rowsInserted)
+
+        employee = model.append_employee()
+
+        self.assertEqual(model.rowCount(), original_count + 1)
+        self.assertEqual(rows_inserted.count(), 1)
+        self.assertEqual(
+            model.employee_at(original_count).employee_id,
+            employee.employee_id,
+        )
 
     def test_summary_models_show_all_employees_of_their_own_type(self) -> None:
         full_time = AvailabilitySummaryTableModel(
