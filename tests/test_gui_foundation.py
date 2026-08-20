@@ -34,6 +34,7 @@ from clinic_shift_scheduler.gui.dialogs import (
 from clinic_shift_scheduler.gui.main import create_application
 from clinic_shift_scheduler.gui.main_window import MainWindow
 from clinic_shift_scheduler.gui.navigation import NAVIGATION_ITEMS, PageId
+from clinic_shift_scheduler.gui.pages import DateOverridePage, WeeklyDemandPage
 from clinic_shift_scheduler.gui.styles.loader import load_application_stylesheet
 from clinic_shift_scheduler.gui.widgets.document_header import DocumentState
 from clinic_shift_scheduler.config_application import ConfigApplication
@@ -61,6 +62,15 @@ class GuiFoundationTests(unittest.TestCase):
                 PageId.EXECUTION,
             ),
         )
+
+    def test_staffing_tables_use_the_same_non_alternating_row_background(self) -> None:
+        weekly_page = WeeklyDemandPage()
+        date_override_page = DateOverridePage()
+        self.addCleanup(weekly_page.close)
+        self.addCleanup(date_override_page.close)
+
+        self.assertFalse(weekly_page.table.alternatingRowColors())
+        self.assertFalse(date_override_page.table.alternatingRowColors())
 
     def test_main_window_builds_navigation_header_and_page_stack(self) -> None:
         window = MainWindow()

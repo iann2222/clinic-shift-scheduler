@@ -66,7 +66,7 @@ class DateOverridePage(InputPage):
 
         self.table = QTableView()
         self.table.setAccessibleName("特定日期調整")
-        self.table.setAlternatingRowColors(True)
+        self.table.setAlternatingRowColors(False)
         self.table.setSelectionBehavior(
             QAbstractItemView.SelectionBehavior.SelectRows
         )
