@@ -23,7 +23,7 @@ class ValidationTests(unittest.TestCase):
         self.assertEqual(normalized.source.schema_version, "v1")
         self.assertEqual(normalized.dates, (date(2024, 10, 1),))
         self.assertEqual(normalized.open_dates, (date(2024, 10, 1),))
-        self.assertEqual(normalized.employees["FT002"].shift_mode, ShiftMode.TARGET)
+        self.assertEqual(normalized.employees["FT002"].shift_mode, ShiftMode.RANGE)
         self.assertEqual(
             normalized.demands[(date(2024, 10, 1), Period.EVENING, "reception")],
             0,
@@ -52,24 +52,36 @@ class ValidationTests(unittest.TestCase):
 
     def test_target_above_capacity_without_explicit_bounds_is_valid(self) -> None:
         payload = clone_fixture()
-        payload["employees"][1]["target_shifts"] = 999
+        employee = payload["employees"][2]
+        employee["shift_mode"] = "TARGET"
+        employee["target_shifts"] = 999
+        del employee["min_shifts"]
+        del employee["max_shifts"]
 
         normalized = validate_and_normalize(payload)
 
-        employee = normalized.employees["FT002"]
+        employee = normalized.employees["PT001"]
         self.assertEqual(employee.target_shifts, 999)
         self.assertIsNone(employee.min_shifts)
         self.assertIsNone(employee.max_shifts)
 
     def test_target_conflicting_with_explicit_min_is_invalid(self) -> None:
         payload = clone_fixture()
-        payload["employees"][1]["min_shifts"] = 6
+        employee = payload["employees"][2]
+        employee["shift_mode"] = "TARGET"
+        employee["target_shifts"] = 5
+        employee["min_shifts"] = 6
+        del employee["max_shifts"]
 
         self.assert_invalid(payload, "target_outside_bounds")
 
     def test_target_conflicting_with_explicit_max_is_invalid(self) -> None:
         payload = clone_fixture()
-        payload["employees"][1]["max_shifts"] = 4
+        employee = payload["employees"][2]
+        employee["shift_mode"] = "TARGET"
+        employee["target_shifts"] = 5
+        employee["max_shifts"] = 4
+        del employee["min_shifts"]
 
         self.assert_invalid(payload, "target_outside_bounds")
 
@@ -85,14 +97,29 @@ class ValidationTests(unittest.TestCase):
         cases.append(range_without_max)
 
         target_with_required = clone_fixture()
-        target_with_required["employees"][1]["required_shifts"] = 5
+        target_employee = target_with_required["employees"][2]
+        target_employee["shift_mode"] = "TARGET"
+        target_employee["target_shifts"] = 1
+        target_employee["required_shifts"] = 1
+        del target_employee["min_shifts"]
+        del target_employee["max_shifts"]
         cases.append(target_with_required)
 
         for payload in cases:
             with self.subTest(payload=payload):
                 self.assert_invalid(payload, "invalid_shift_fields")
 
-    def test_part_time_target_is_not_supported_in_v1(self) -> None:
+    def test_full_time_target_is_not_supported_in_v1(self) -> None:
+        payload = clone_fixture()
+        employee = payload["employees"][1]
+        employee["shift_mode"] = "TARGET"
+        employee["target_shifts"] = 1
+        del employee["min_shifts"]
+        del employee["max_shifts"]
+
+        self.assert_invalid(payload, "unsupported_full_time_target")
+
+    def test_part_time_target_is_supported_in_v1(self) -> None:
         payload = clone_fixture()
         employee = payload["employees"][2]
         employee["shift_mode"] = "TARGET"
@@ -100,7 +127,9 @@ class ValidationTests(unittest.TestCase):
         del employee["min_shifts"]
         del employee["max_shifts"]
 
-        self.assert_invalid(payload, "unsupported_part_time_target")
+        normalized = validate_and_normalize(payload)
+
+        self.assertEqual(normalized.employees["PT001"].shift_mode, ShiftMode.TARGET)
 
     def test_missing_demand_is_not_treated_as_zero(self) -> None:
         payload = clone_fixture()

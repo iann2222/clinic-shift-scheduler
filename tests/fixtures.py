@@ -47,8 +47,9 @@ def minimal_valid_input() -> dict[str, Any]:
                 "full_time_class": "B",
                 "roles": ["assistant"],
                 "fairness_group": "B_ASSISTANT",
-                "shift_mode": "TARGET",
-                "target_shifts": 5,
+                "shift_mode": "RANGE",
+                "min_shifts": 0,
+                "max_shifts": 3,
             },
             {
                 "employee_id": "PT001",

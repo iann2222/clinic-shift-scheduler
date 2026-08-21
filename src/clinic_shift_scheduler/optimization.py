@@ -64,6 +64,7 @@ from .precheck import PrecheckResult, PrecheckStatus, run_prechecks
 from .ratio_fairness import (
     BASIS_POINTS_SCALE,
     ratio_basis_points,
+    relative_deviation_basis_points,
 )
 from .shift_bounds import hard_minimum_shifts
 from .solver_contracts import (
@@ -77,9 +78,12 @@ from .solver_contracts import (
 @dataclass(frozen=True, slots=True)
 class OptimizationModel:
     feasibility: FeasibilityModel
-    target_differences: Mapping[str, cp_model.IntVar]
     target_deviations: Mapping[str, cp_model.IntVar]
-    target_objective: cp_model.LinearExpr | int
+    target_relative_deviation_basis_points: Mapping[str, cp_model.IntVar]
+    target_relative_fairness_gaps: Mapping[str, cp_model.IntVar]
+    target_overall_deviation_basis_points: cp_model.IntVar | None
+    target_max_regret_variable: cp_model.IntVar | None
+    target_total_regret_objective: cp_model.LinearExpr | int
     part_time_objective: cp_model.LinearExpr | int
     class_preference_values: Mapping[
         tuple[FullTimeClass, PreferenceRank], cp_model.IntVar
@@ -162,8 +166,9 @@ def build_optimization_model(
 
     feasibility = build_feasibility_model(data)
     model = feasibility.model
-    target_differences: dict[str, cp_model.IntVar] = {}
     target_deviations: dict[str, cp_model.IntVar] = {}
+    target_relative_deviations: dict[str, cp_model.IntVar] = {}
+    target_deviation_upper_bounds: dict[str, int] = {}
     for employee in data.source.employees:
         if employee.shift_mode is not ShiftMode.TARGET:
             continue
@@ -192,8 +197,113 @@ def build_optimization_model(
         # OR-Tools 9.12 mis-encodes the negated offset when AddAbsEquality
         # receives a shifted expression directly, so take abs of a linked var.
         model.add_abs_equality(deviation, difference)
-        target_differences[employee.employee_id] = difference
         target_deviations[employee.employee_id] = deviation
+        target_deviation_upper_bounds[employee.employee_id] = deviation_upper_bound
+        lookup = [
+            relative_deviation_basis_points(value, employee.target_shifts)
+            for value in range(deviation_upper_bound + 1)
+        ]
+        relative_deviation = model.new_int_var(
+            0,
+            max(lookup, default=0),
+            _var_name("target_relative_deviation_bp", employee.employee_id),
+        )
+        model.add_element(deviation, lookup, relative_deviation)
+        target_relative_deviations[employee.employee_id] = relative_deviation
+
+    target_employees = tuple(
+        employee
+        for employee in data.source.employees
+        if employee.employment_type is EmploymentType.PART_TIME
+        and employee.shift_mode is ShiftMode.TARGET
+    )
+    target_overall_deviation_bp: cp_model.IntVar | None = None
+    target_fairness_gaps: dict[str, cp_model.IntVar] = {}
+    target_fairness_gap_upper_bounds: list[int] = []
+    target_max_regret: cp_model.IntVar | None = None
+    target_total_regret: cp_model.LinearExpr | int = 0
+    if target_employees:
+        total_deviation_upper_bound = sum(
+            target_deviation_upper_bounds[employee.employee_id]
+            for employee in target_employees
+        )
+        total_target_units = sum(
+            max(employee.target_shifts or 0, 1)
+            for employee in target_employees
+        )
+        overall_lookup = [
+            relative_deviation_basis_points(value, total_target_units)
+            for value in range(total_deviation_upper_bound + 1)
+        ]
+        target_overall_deviation_bp = model.new_int_var(
+            0,
+            max(overall_lookup, default=0),
+            "part_time_target_overall_deviation_bp",
+        )
+        total_deviation = model.new_int_var(
+            0,
+            total_deviation_upper_bound,
+            "part_time_target_total_deviation",
+        )
+        model.add(
+            total_deviation
+            == sum(
+                target_deviations[employee.employee_id]
+                for employee in target_employees
+            )
+        )
+        model.add_element(
+            total_deviation,
+            overall_lookup,
+            target_overall_deviation_bp,
+        )
+        target_groups: dict[str, list[Employee]] = defaultdict(list)
+        for employee in target_employees:
+            target_groups[employee.fairness_group].append(employee)
+        for group, members in sorted(target_groups.items()):
+            if len(members) < 2:
+                continue
+            member_values = [
+                target_relative_deviations[employee.employee_id]
+                for employee in members
+            ]
+            upper_bound = max(
+                relative_deviation_basis_points(
+                    target_deviation_upper_bounds[employee.employee_id],
+                    employee.target_shifts or 0,
+                )
+                for employee in members
+            )
+            maximum = model.new_int_var(
+                0, upper_bound, f"part_time_target_max[{group}]"
+            )
+            minimum = model.new_int_var(
+                0, upper_bound, f"part_time_target_min[{group}]"
+            )
+            gap = model.new_int_var(
+                0, upper_bound, f"part_time_target_gap[{group}]"
+            )
+            model.add_max_equality(maximum, member_values)
+            model.add_min_equality(minimum, member_values)
+            model.add(gap == maximum - minimum)
+            target_fairness_gaps[group] = gap
+            target_fairness_gap_upper_bounds.append(upper_bound)
+        regret_components = [
+            target_overall_deviation_bp,
+            *target_fairness_gaps.values(),
+        ]
+        target_max_regret = model.new_int_var(
+            0,
+            max(
+                [
+                    max(overall_lookup, default=0),
+                    *target_fairness_gap_upper_bounds,
+                ]
+            ),
+            "part_time_target_max_regret",
+        )
+        model.add_max_equality(target_max_regret, regret_components)
+        target_total_regret = sum(regret_components)
 
     part_time_counts = tuple(
         feasibility.employee_shift_counts[employee.employee_id]
@@ -559,6 +669,10 @@ def build_optimization_model(
             for employee in data.source.employees
             if employee.employment_type
             in GROUP_FAIRNESS_EMPLOYMENT_TYPES[stage]
+            and not (
+                stage is OptimizationStage.PART_TIME_GROUP_FAIRNESS
+                and employee.shift_mode is ShiftMode.TARGET
+            )
         )
         metrics = GROUP_FAIRNESS_METRICS[stage]
         groups: dict[str, list[Employee]] = defaultdict(list)
@@ -656,9 +770,14 @@ def build_optimization_model(
 
     return OptimizationModel(
         feasibility=feasibility,
-        target_differences=MappingProxyType(target_differences),
         target_deviations=MappingProxyType(target_deviations),
-        target_objective=sum(target_deviations.values()),
+        target_relative_deviation_basis_points=MappingProxyType(
+            target_relative_deviations
+        ),
+        target_relative_fairness_gaps=MappingProxyType(target_fairness_gaps),
+        target_overall_deviation_basis_points=target_overall_deviation_bp,
+        target_max_regret_variable=target_max_regret,
+        target_total_regret_objective=target_total_regret,
         part_time_objective=sum(part_time_counts),
         class_preference_values=MappingProxyType(class_preference_values),
         class_remaining_pattern_values=MappingProxyType(
@@ -774,33 +893,6 @@ def _hard_fixed_count(
     return minimum if minimum == maximum else None
 
 
-def _target_constant(
-    data: NormalizedScheduleInput,
-    precheck: PrecheckResult,
-) -> tuple[int | None, ConstantProof | None]:
-    target_employees = tuple(
-        employee
-        for employee in data.source.employees
-        if employee.shift_mode is ShiftMode.TARGET
-    )
-    if not target_employees:
-        return 0, ConstantProof.NO_TARGET_EMPLOYEES
-
-    fixed_counts = {
-        employee.employee_id: _hard_fixed_count(employee, precheck)
-        for employee in target_employees
-    }
-    if all(value is not None for value in fixed_counts.values()):
-        return (
-            sum(
-                abs(fixed_counts[employee.employee_id] - employee.target_shifts)
-                for employee in target_employees
-            ),
-            ConstantProof.ALL_TARGET_COUNTS_HARD_FIXED,
-        )
-    return None, None
-
-
 def _part_time_constant(
     data: NormalizedScheduleInput,
     precheck: PrecheckResult,
@@ -848,7 +940,6 @@ def _formal_objective_specs(
 ) -> tuple[_ObjectiveSpec, ...]:
     """Return the revised class-specific formal objective sequence."""
 
-    target_constant, target_proof = _target_constant(data, precheck)
     part_time_constant, part_time_proof = _part_time_constant(data, precheck)
     part_time_variables = tuple(
         built.feasibility.employee_shift_counts[employee.employee_id]
@@ -856,16 +947,6 @@ def _formal_objective_specs(
         if employee.employment_type is EmploymentType.PART_TIME
     )
     specs: list[_ObjectiveSpec] = [
-        _ObjectiveSpec(
-            stage=OptimizationStage.FULL_TIME_TARGET_DEVIATION,
-            direction=FORMAL_STAGE_POLICY_BY_STAGE[
-                OptimizationStage.FULL_TIME_TARGET_DEVIATION
-            ].direction,
-            variables=tuple(built.target_deviations.values()),
-            expression=built.target_objective,
-            constant_value=target_constant,
-            constant_proof=target_proof,
-        ),
         _ObjectiveSpec(
             stage=OptimizationStage.PART_TIME_USAGE,
             direction=FORMAL_STAGE_POLICY_BY_STAGE[
@@ -975,6 +1056,48 @@ def _formal_objective_specs(
     )
 
     for stage in GROUP_FAIRNESS_STAGES:
+        if stage is OptimizationStage.PART_TIME_GROUP_FAIRNESS:
+            target_constant = (
+                None if built.target_max_regret_variable is not None else 0
+            )
+            target_proof = (
+                None
+                if built.target_max_regret_variable is not None
+                else ConstantProof.NO_TARGET_EMPLOYEES
+            )
+            specs.extend(
+                (
+                    _ObjectiveSpec(
+                        stage=OptimizationStage.PART_TIME_TARGET_MAX_REGRET,
+                        direction=FORMAL_STAGE_POLICY_BY_STAGE[
+                            OptimizationStage.PART_TIME_TARGET_MAX_REGRET
+                        ].direction,
+                        variables=(built.target_max_regret_variable,)
+                        if built.target_max_regret_variable is not None
+                        else (),
+                        expression=(
+                            built.target_max_regret_variable
+                            if built.target_max_regret_variable is not None
+                            else 0
+                        ),
+                        constant_value=target_constant,
+                        constant_proof=target_proof,
+                    ),
+                    _ObjectiveSpec(
+                        stage=OptimizationStage.PART_TIME_TARGET_TOTAL_REGRET,
+                        direction=FORMAL_STAGE_POLICY_BY_STAGE[
+                            OptimizationStage.PART_TIME_TARGET_TOTAL_REGRET
+                        ].direction,
+                        variables=(
+                            *built.target_relative_deviation_basis_points.values(),
+                            *built.target_relative_fairness_gaps.values(),
+                        ),
+                        expression=built.target_total_regret_objective,
+                        constant_value=target_constant,
+                        constant_proof=target_proof,
+                    ),
+                )
+            )
         gaps = built.fairness_gap_variables[stage]
         specs.append(
             _ObjectiveSpec(
@@ -1379,7 +1502,7 @@ def solve_lexicographic(
             )
         return None
 
-    base_specs = _formal_objective_specs(data, built, precheck)[:2]
+    base_specs = _formal_objective_specs(data, built, precheck)[:1]
     incomplete = execute_specs(base_specs)
     if incomplete is not None:
         return incomplete

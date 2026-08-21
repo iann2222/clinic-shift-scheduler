@@ -233,8 +233,8 @@ class FeasibilityTests(unittest.TestCase):
 
     def test_target_value_is_not_a_hard_constraint_but_explicit_min_is(self) -> None:
         target = single_employee_pattern_input(
-            employment_type="full_time",
-            full_time_class="B",
+            employment_type="part_time",
+            full_time_class=None,
             worked_periods={"morning"},
         )
         employee = target["employees"][0]

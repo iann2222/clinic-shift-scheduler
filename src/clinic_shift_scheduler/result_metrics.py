@@ -17,7 +17,7 @@ from .class_preferences import (
     preference_regret_days,
 )
 from .daily_patterns import DailyPattern, PATTERN_PERIODS
-from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period
+from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period, ShiftMode
 from .models import DemandKey, NormalizedScheduleInput
 from .optimization_contracts import (
     FairnessMetric,
@@ -38,7 +38,10 @@ from .optimization_policy import (
     SUNDAY_FAIRNESS_METRICS,
     SUNDAY_FAIRNESS_STAGES,
 )
-from .ratio_fairness import ratio_basis_points
+from .ratio_fairness import (
+    ratio_basis_points,
+    relative_deviation_basis_points,
+)
 from .solver_contracts import Assignment, PersonDayKey, PersonPeriodKey
 
 
@@ -84,6 +87,10 @@ class RecomputedScheduleMetrics:
     pattern_ratio_basis_points: Mapping[
         tuple[str, FairnessMetric], int | None
     ]
+    target_deviations: Mapping[str, int]
+    target_relative_deviation_basis_points: Mapping[str, int]
+    target_relative_fairness_gaps: Mapping[str, int]
+    target_overall_deviation_basis_points: int
     class_preference_actual_values: Mapping[
         tuple[FullTimeClass, PreferenceRank], int
     ]
@@ -333,6 +340,10 @@ def recompute_schedule_metrics(
             for employee in data.source.employees
             if employee.employment_type
             in GROUP_FAIRNESS_EMPLOYMENT_TYPES[stage]
+            and not (
+                stage is OptimizationStage.PART_TIME_GROUP_FAIRNESS
+                and employee.shift_mode is ShiftMode.TARGET
+            )
         )
         stage_metrics = GROUP_FAIRNESS_METRICS[stage]
         groups: dict[str, list[str]] = defaultdict(list)
@@ -389,13 +400,43 @@ def recompute_schedule_metrics(
             PREFERENCE_RATIO_TOTAL_STAGE_BY_MAX_STAGE[maximum_stage]
         ] = immutable
 
-    target_deviation = sum(
-        abs(
-            employee_metrics[employee.employee_id].total_shifts
-            - employee.target_shifts
-        )
+    target_employees = tuple(
+        employee
         for employee in data.source.employees
-        if employee.target_shifts is not None
+        if employee.employment_type is EmploymentType.PART_TIME
+        and employee.shift_mode is ShiftMode.TARGET
+    )
+    target_deviations = {
+        employee.employee_id: abs(
+            employee_metrics[employee.employee_id].total_shifts
+            - (employee.target_shifts or 0)
+        )
+        for employee in target_employees
+    }
+    target_relative_deviations = {
+        employee.employee_id: relative_deviation_basis_points(
+            target_deviations[employee.employee_id],
+            employee.target_shifts or 0,
+        )
+        for employee in target_employees
+    }
+    target_groups: dict[str, list[int]] = defaultdict(list)
+    for employee in target_employees:
+        target_groups[employee.fairness_group].append(
+            target_relative_deviations[employee.employee_id]
+        )
+    target_fairness_gaps = {
+        group: _gap(values)
+        for group, values in sorted(target_groups.items())
+        if len(values) >= 2
+    }
+    target_overall_deviation = (
+        relative_deviation_basis_points(
+            sum(target_deviations.values()),
+            sum(max(employee.target_shifts or 0, 1) for employee in target_employees),
+        )
+        if target_employees
+        else 0
     )
     part_time_usage = sum(
         employee_metrics[employee.employee_id].total_shifts
@@ -413,7 +454,6 @@ def recompute_schedule_metrics(
         for rank in PreferenceRank
     }
     objective_values = {
-        OptimizationStage.FULL_TIME_TARGET_DEVIATION: target_deviation,
         OptimizationStage.PART_TIME_USAGE: part_time_usage,
         PREFERENCE_REGRET_STAGES[PreferenceRank.FIRST][0]: max(
             rank_regret_values[PreferenceRank.FIRST], default=0
@@ -471,6 +511,13 @@ def recompute_schedule_metrics(
         OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP: sum(
             ratio_gaps.values()
         ),
+        OptimizationStage.PART_TIME_TARGET_MAX_REGRET: max(
+            [target_overall_deviation, *target_fairness_gaps.values()],
+            default=0,
+        ),
+        OptimizationStage.PART_TIME_TARGET_TOTAL_REGRET: (
+            target_overall_deviation + sum(target_fairness_gaps.values())
+        ),
         SUNDAY_FAIRNESS_STAGES[0]: max(
             sunday_gaps.values(), default=0
         ),
@@ -512,6 +559,12 @@ def recompute_schedule_metrics(
         daily_patterns=MappingProxyType(daily_patterns),
         employee_metrics=MappingProxyType(employee_metrics),
         pattern_ratio_basis_points=MappingProxyType(pattern_ratios),
+        target_deviations=MappingProxyType(target_deviations),
+        target_relative_deviation_basis_points=MappingProxyType(
+            target_relative_deviations
+        ),
+        target_relative_fairness_gaps=MappingProxyType(target_fairness_gaps),
+        target_overall_deviation_basis_points=target_overall_deviation,
         class_preference_actual_values=MappingProxyType(
             class_preference_actuals
         ),

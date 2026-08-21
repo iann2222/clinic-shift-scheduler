@@ -15,7 +15,6 @@ from .enums import FullTimeClass
 
 class OptimizationStage(StrEnum):
     HARD_FEASIBILITY = "hard_feasibility"
-    FULL_TIME_TARGET_DEVIATION = "full_time_target_deviation"
     PART_TIME_USAGE = "part_time_usage"
     FULL_TIME_PREFERENCE_RANK1_MAX_REGRET = "full_time_preference_rank1_max_regret"
     FULL_TIME_PREFERENCE_RANK1_TOTAL_REGRET = "full_time_preference_rank1_total_regret"
@@ -45,6 +44,8 @@ class OptimizationStage(StrEnum):
     )
     FULL_TIME_PATTERN_RATIO_TOTAL_GAP = "full_time_pattern_ratio_total_gap"
     FULL_TIME_PATTERN_INTEGER_FAIRNESS = "full_time_pattern_integer_fairness"
+    PART_TIME_TARGET_MAX_REGRET = "part_time_target_max_regret"
+    PART_TIME_TARGET_TOTAL_REGRET = "part_time_target_total_regret"
     PART_TIME_GROUP_FAIRNESS = "part_time_group_fairness"
     COMMON_GROUP_FAIRNESS = "common_group_fairness"
     FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP = "full_time_sunday_fairness_max_gap"
@@ -82,7 +83,6 @@ class OptimizationStageStatus(StrEnum):
 
 class ConstantProof(StrEnum):
     NO_TARGET_EMPLOYEES = "NO_TARGET_EMPLOYEES"
-    ALL_TARGET_COUNTS_HARD_FIXED = "ALL_TARGET_COUNTS_HARD_FIXED"
     NO_PART_TIME_EMPLOYEES = "NO_PART_TIME_EMPLOYEES"
     ALL_PART_TIME_COUNTS_HARD_FIXED = "ALL_PART_TIME_COUNTS_HARD_FIXED"
     ALL_FULL_TIME_COUNTS_HARD_FIXED_BY_COVERAGE = (

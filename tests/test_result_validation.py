@@ -135,7 +135,7 @@ class IndependentResultValidationTests(unittest.TestCase):
         target_index = next(
             index
             for index, item in enumerate(self.result.stages)
-            if item.stage is OptimizationStage.FULL_TIME_TARGET_DEVIATION
+            if item.stage is OptimizationStage.PART_TIME_TARGET_MAX_REGRET
         )
         target = self.result.stages[target_index]
         changed_stage = replace(
@@ -274,7 +274,11 @@ class IndependentResultValidationTests(unittest.TestCase):
         )
 
         target_payload = minimal_valid_input()
-        target_payload["employees"][1]["min_shifts"] = 4
+        target_employee = target_payload["employees"][2]
+        target_employee["shift_mode"] = "TARGET"
+        target_employee["target_shifts"] = 1
+        target_employee["min_shifts"] = 1
+        del target_employee["max_shifts"]
         target_data = validate_and_normalize(target_payload)
         target_report = validate_schedule_result(
             target_data,

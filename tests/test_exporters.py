@@ -61,7 +61,7 @@ class JsonExporterTests(unittest.TestCase):
             document["contract"],
             {"name": RESULT_CONTRACT_NAME, "version": RESULT_CONTRACT_VERSION},
         )
-        self.assertEqual(RESULT_CONTRACT_VERSION, "1.9")
+        self.assertEqual(RESULT_CONTRACT_VERSION, "1.10")
         self.assertEqual(document["input_schema_version"], "v1")
         self.assertEqual(document["generated_at"], "2024-10-02T03:04:05Z")
         self.assertEqual(document["month"], "2024-10")
@@ -73,7 +73,7 @@ class JsonExporterTests(unittest.TestCase):
             document["objective_vector"],
             document["statistics"]["overall"]["objective_vector"],
         )
-        self.assertEqual(len(document["stage_records"]), 15)
+        self.assertEqual(len(document["stage_records"]), 16)
         self.assertEqual(len(document["preference_benchmarks"]), 4)
         self.assertTrue(
             all(
@@ -333,9 +333,9 @@ class ExcelExporterTests(unittest.TestCase):
                 )
             )
             self.assertEqual(
-                values["full_time_target_deviation"],
+                values["part_time_target_max_regret"],
                 self.output.overall_statistics.objective_vector[
-                    "full_time_target_deviation"
+                    "part_time_target_max_regret"
                 ],
             )
         finally:

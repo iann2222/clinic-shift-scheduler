@@ -228,9 +228,9 @@ class EmployeeEditDialog(QDialog):
         )
         self.class_combo.setEnabled(full_time)
         target_index = self.mode_combo.findData(ShiftMode.TARGET)
-        self.mode_combo.model().item(target_index).setEnabled(full_time)
+        self.mode_combo.model().item(target_index).setEnabled(not full_time)
         if (
-            not full_time
+            full_time
             and ShiftMode(self.mode_combo.currentData()) is ShiftMode.TARGET
         ):
             _select_data(self.mode_combo, ShiftMode.RANGE)

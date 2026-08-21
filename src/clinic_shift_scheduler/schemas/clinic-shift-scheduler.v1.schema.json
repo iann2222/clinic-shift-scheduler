@@ -195,11 +195,13 @@
       "allOf": [
         {
           "if": {"properties": {"employment_type": {"const": "full_time"}}},
-          "then": {"required": ["full_time_class"]},
+          "then": {
+            "required": ["full_time_class"],
+            "properties": {"shift_mode": {"enum": ["EXACT", "RANGE"]}}
+          },
           "else": {
             "properties": {
-              "full_time_class": {"type": "null"},
-              "shift_mode": {"enum": ["EXACT", "RANGE"]}
+              "full_time_class": {"type": "null"}
             }
           }
         },

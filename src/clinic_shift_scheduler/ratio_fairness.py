@@ -26,3 +26,21 @@ def ratio_basis_points(numerator: int, denominator: int) -> int | None:
     return (
         numerator * BASIS_POINTS_SCALE + denominator // 2
     ) // denominator
+
+
+def relative_deviation_basis_points(deviation: int, target: int) -> int:
+    """Return TARGET deviation relative to the employee's own target.
+
+    Unlike a pattern ratio, deviation may exceed its denominator.  A zero
+    target uses one shift as the normalization unit: zero deviation is 0 bp
+    and each excess shift contributes 10,000 bp.
+    """
+
+    if deviation < 0:
+        raise ValueError("deviation must be non-negative")
+    if target < 0:
+        raise ValueError("target must be non-negative")
+    denominator = max(target, 1)
+    return (
+        deviation * BASIS_POINTS_SCALE + denominator // 2
+    ) // denominator

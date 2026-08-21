@@ -58,6 +58,7 @@ class EmployeeDraftTests(unittest.TestCase):
 
     def test_shift_mode_transition_clears_incompatible_fields(self) -> None:
         employee = self.draft.employees[0]
+        self.draft.set_employee_type(employee, EmploymentType.PART_TIME)
 
         self.draft.set_shift_mode(employee, ShiftMode.TARGET)
         employee.target_shifts = 20
@@ -73,14 +74,17 @@ class EmployeeDraftTests(unittest.TestCase):
         self.assertIsNone(employee.max_shifts)
         self.assertTrue(self.application.validate(self.draft).is_valid)
 
-    def test_part_time_rejects_target_and_uses_explicit_slots(self) -> None:
+    def test_full_time_rejects_target_and_part_time_uses_explicit_slots(self) -> None:
         employee = self.draft.employees[0]
+        with self.assertRaisesRegex(ValueError, "正職"):
+            self.draft.set_shift_mode(employee, ShiftMode.TARGET)
+
         self.draft.set_employee_type(employee, EmploymentType.PART_TIME)
 
         self.assertIsNone(employee.full_time_class)
         self.assertEqual(employee.available_slots, [])
-        with self.assertRaisesRegex(ValueError, "兼職"):
-            self.draft.set_shift_mode(employee, ShiftMode.TARGET)
+        self.draft.set_shift_mode(employee, ShiftMode.TARGET)
+        self.assertEqual(employee.target_shifts, 0)
         self.assertTrue(self.application.validate(self.draft).is_valid)
 
     def test_remove_employee_cascades_all_cross_references(self) -> None:
@@ -506,6 +510,9 @@ class EmployeeAvailabilityModelTests(unittest.TestCase):
         self.assertTrue(dialog.min_enabled.isHidden())
         self.assertTrue(dialog.max_enabled.isHidden())
 
+        dialog.type_combo.setCurrentIndex(
+            dialog.type_combo.findData(EmploymentType.PART_TIME)
+        )
         dialog.mode_combo.setCurrentIndex(dialog.mode_combo.findData(ShiftMode.TARGET))
         self.assertFalse(dialog.shift_form.isRowVisible(dialog.required_field))
         self.assertTrue(dialog.shift_form.isRowVisible(dialog.target_field))

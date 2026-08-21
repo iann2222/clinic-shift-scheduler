@@ -38,7 +38,6 @@ class OptimizationPolicyTests(unittest.TestCase):
             FORMAL_STAGE_SEQUENCE,
             (
                 OptimizationStage.HARD_FEASIBILITY,
-                OptimizationStage.FULL_TIME_TARGET_DEVIATION,
                 OptimizationStage.PART_TIME_USAGE,
                 OptimizationStage.FULL_TIME_PREFERENCE_RANK1_MAX_REGRET,
                 OptimizationStage.FULL_TIME_PREFERENCE_RANK1_TOTAL_REGRET,
@@ -48,6 +47,8 @@ class OptimizationPolicyTests(unittest.TestCase):
                 OptimizationStage.FULL_TIME_FIRST_PREFERENCE_RATIO_TOTAL_GAP,
                 OptimizationStage.FULL_TIME_PATTERN_RATIO_TOTAL_GAP,
                 OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS,
+                OptimizationStage.PART_TIME_TARGET_MAX_REGRET,
+                OptimizationStage.PART_TIME_TARGET_TOTAL_REGRET,
                 OptimizationStage.PART_TIME_GROUP_FAIRNESS,
                 OptimizationStage.COMMON_GROUP_FAIRNESS,
                 OptimizationStage.FULL_TIME_SUNDAY_FAIRNESS_MAX_GAP,

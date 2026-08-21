@@ -52,7 +52,8 @@ def full_time_employee(
 def part_time_employee(
     employee_id: str,
     *,
-    required_shifts: int,
+    required_shifts: int | None = None,
+    target_shifts: int | None = None,
     available_slots: list[dict] | None = None,
 ) -> dict:
     employee = {
@@ -62,9 +63,13 @@ def part_time_employee(
         "full_time_class": None,
         "roles": ["assistant"],
         "fairness_group": f"PT_{employee_id}",
-        "shift_mode": "EXACT",
-        "required_shifts": required_shifts,
     }
+    if target_shifts is not None:
+        employee["shift_mode"] = "TARGET"
+        employee["target_shifts"] = target_shifts
+    else:
+        employee["shift_mode"] = "EXACT"
+        employee["required_shifts"] = required_shifts
     if available_slots is not None:
         employee["available_slots"] = available_slots
     return employee
@@ -498,10 +503,10 @@ class PrecheckTests(unittest.TestCase):
             end_date="2024-10-01",
             roles=["assistant"],
             employees=[
-                full_time_employee(
+                part_time_employee(
                     "TARGET",
-                    shift_mode="TARGET",
-                    required_shifts=99,
+                    target_shifts=99,
+                    available_slots=[slot("2024-10-01", "morning")],
                 )
             ],
             positive_demands={

@@ -13,7 +13,14 @@ from .class_preferences import (
     PreferenceDirection,
     PreferenceRank,
 )
-from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period, Weekday
+from .enums import (
+    EmploymentType,
+    FullTimeClass,
+    PERIODS_V1,
+    Period,
+    ShiftMode,
+    Weekday,
+)
 from .models import NormalizedScheduleInput
 from .optimization_contracts import (
     ClassPatternLockResult,
@@ -119,6 +126,9 @@ class IndividualStatistics:
     full_time_class: FullTimeClass | None
     fairness_group: str
     shift_mode: str
+    target_shifts: int | None
+    target_deviation: int | None
+    target_relative_deviation_basis_points: int | None
     total_shifts: int
     role_counts: Mapping[str, int]
     period_counts: Mapping[str, int]
@@ -357,6 +367,15 @@ def _build_individual_statistics(
                 full_time_class=employee.full_time_class,
                 fairness_group=employee.fairness_group,
                 shift_mode=employee.shift_mode.value,
+                target_shifts=employee.target_shifts,
+                target_deviation=metrics.target_deviations.get(
+                    employee.employee_id
+                ),
+                target_relative_deviation_basis_points=(
+                    metrics.target_relative_deviation_basis_points.get(
+                        employee.employee_id
+                    )
+                ),
                 total_shifts=values.total_shifts,
                 role_counts=MappingProxyType(dict(values.role_counts)),
                 period_counts=MappingProxyType(
@@ -461,6 +480,29 @@ def _build_group_statistics(
                 defined = [value for value in values.values() if value is not None]
                 ratio_gaps[metric.value] = (
                     max(defined) - min(defined) if len(defined) >= 2 else 0
+                )
+        else:
+            target_ids = tuple(
+                employee.employee_id
+                for employee in employees
+                if employee.shift_mode is ShiftMode.TARGET
+            )
+            if target_ids:
+                values = MappingProxyType(
+                    {
+                        employee_id: (
+                            metrics.target_relative_deviation_basis_points[
+                                employee_id
+                            ]
+                        )
+                        for employee_id in target_ids
+                    }
+                )
+                ratio_values["target_relative_deviation"] = values
+                ratio_gaps["target_relative_deviation"] = (
+                    max(values.values()) - min(values.values())
+                    if len(values) >= 2
+                    else 0
                 )
         result.append(
             FairnessGroupStatistics(

@@ -269,6 +269,8 @@ class ScheduleDraft:
             employee.available_slots = None
             if employee.fairness_group.startswith("PT_"):
                 employee.fairness_group = "A_GENERAL"
+            if employee.shift_mode is ShiftMode.TARGET:
+                self.set_shift_mode(employee, ShiftMode.RANGE)
         else:
             employee.full_time_class = None
             employee.full_time_class_declared = True
@@ -278,8 +280,6 @@ class ScheduleDraft:
                 for item in self.unavailable_slots
                 if item.employee_id != employee.employee_id
             ]
-            if employee.shift_mode is ShiftMode.TARGET:
-                self.set_shift_mode(employee, ShiftMode.RANGE)
             if not employee.fairness_group.startswith("PT_"):
                 employee.fairness_group = "PT_GENERAL"
         self.touch()
@@ -290,10 +290,10 @@ class ScheduleDraft:
         shift_mode: ShiftMode,
     ) -> None:
         if (
-            employee.employment_type is EmploymentType.PART_TIME
+            employee.employment_type is EmploymentType.FULL_TIME
             and shift_mode is ShiftMode.TARGET
         ):
-            raise ValueError("兼職人員只支援固定班次或班次範圍")
+            raise ValueError("正職人員只支援固定班次或班次範圍")
         employee.shift_mode = shift_mode
         employee.required_shifts = None
         employee.target_shifts = None

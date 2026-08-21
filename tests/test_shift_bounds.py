@@ -24,7 +24,13 @@ class ShiftBoundsTests(unittest.TestCase):
         self.assertEqual(hard_maximum_within_capacity(employee, 1), 1)
 
     def test_target_without_explicit_bounds_only_uses_physical_capacity(self) -> None:
-        employee = self.data.employees["FT002"]
+        payload = minimal_valid_input()
+        raw = payload["employees"][2]
+        raw["shift_mode"] = "TARGET"
+        raw["target_shifts"] = 5
+        del raw["min_shifts"]
+        del raw["max_shifts"]
+        employee = validate_and_normalize(payload).employees["PT001"]
 
         self.assertEqual(hard_minimum_shifts(employee), 0)
         self.assertEqual(hard_maximum_within_capacity(employee, 4), 4)

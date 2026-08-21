@@ -18,16 +18,16 @@ class GuiValidationPresentationTests(unittest.TestCase):
 
     def test_known_issue_uses_chinese_message_without_losing_raw_issue(self) -> None:
         issue = DiagnosticIssue(
-            code="unsupported_part_time_target",
+            code="unsupported_full_time_target",
             path="$.employees[1].shift_mode",
-            message="part-time v1 supports only EXACT or RANGE",
+            message="full-time v1 supports only EXACT or RANGE",
         )
 
         rendered = format_validation_issue(issue)
 
         self.assertIn("班次模式", rendered)
-        self.assertIn("兼職人員只支援", rendered)
-        self.assertEqual(issue.message, "part-time v1 supports only EXACT or RANGE")
+        self.assertIn("正職人員只支援", rendered)
+        self.assertEqual(issue.message, "full-time v1 supports only EXACT or RANGE")
 
 
 if __name__ == "__main__":

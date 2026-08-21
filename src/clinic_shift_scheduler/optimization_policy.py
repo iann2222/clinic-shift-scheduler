@@ -78,11 +78,6 @@ FORMAL_STAGE_POLICIES: tuple[FormalStagePolicy, ...] = (
         "硬性限制與可行性",
     ),
     FormalStagePolicy(
-        OptimizationStage.FULL_TIME_TARGET_DEVIATION,
-        ObjectiveDirection.MINIMIZE,
-        "正職 TARGET 偏差",
-    ),
-    FormalStagePolicy(
         OptimizationStage.PART_TIME_USAGE,
         ObjectiveDirection.MINIMIZE,
         "兼職總使用量",
@@ -126,6 +121,16 @@ FORMAL_STAGE_POLICIES: tuple[FormalStagePolicy, ...] = (
         OptimizationStage.FULL_TIME_PATTERN_INTEGER_FAIRNESS,
         ObjectiveDirection.MINIMIZE,
         "正職班型整數公平",
+    ),
+    FormalStagePolicy(
+        OptimizationStage.PART_TIME_TARGET_MAX_REGRET,
+        ObjectiveDirection.MINIMIZE,
+        "兼職 TARGET 最大正規化損失",
+    ),
+    FormalStagePolicy(
+        OptimizationStage.PART_TIME_TARGET_TOTAL_REGRET,
+        ObjectiveDirection.MINIMIZE,
+        "兼職 TARGET 正規化損失總和",
     ),
     FormalStagePolicy(
         OptimizationStage.PART_TIME_GROUP_FAIRNESS,

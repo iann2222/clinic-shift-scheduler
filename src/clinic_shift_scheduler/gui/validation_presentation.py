@@ -15,7 +15,7 @@ _MESSAGES = {
     "unqualified_available_role": "可排職務不在該員工的職務內。",
     "incompatible_fairness_group": "同一公平分組不可混合不同聘用類別或 A／B 類別。",
     "invalid_full_time_class": "兼職人員不可設定 A／B 正職類別。",
-    "unsupported_part_time_target": "兼職人員只支援固定班次或班次範圍。",
+    "unsupported_full_time_target": "正職人員只支援固定班次或班次範圍。",
     "invalid_shift_fields": "班次模式與所填班次欄位不一致。",
     "invalid_shift_range": "最低班次不可大於最高班次。",
     "target_outside_bounds": "目標班次必須位於已設定的最低與最高班次之間。",

@@ -328,6 +328,12 @@ def _parse_employees(
                 f"{path}.full_time_class",
                 issues,
             )
+            if mode is ShiftMode.TARGET:
+                issues.add(
+                    "unsupported_full_time_target",
+                    f"{path}.shift_mode",
+                    "full-time v1 supports only EXACT or RANGE",
+                )
         elif employment_type is EmploymentType.PART_TIME:
             if value.get("full_time_class") is not None:
                 issues.add(
@@ -335,13 +341,6 @@ def _parse_employees(
                     f"{path}.full_time_class",
                     "part-time employee must omit full_time_class or set it to null",
                 )
-            if mode is ShiftMode.TARGET:
-                issues.add(
-                    "unsupported_part_time_target",
-                    f"{path}.shift_mode",
-                    "part-time v1 supports only EXACT or RANGE",
-                )
-
         required, target, minimum, maximum = _validate_shift_fields(value, mode, path, issues)
         declared = "available_slots" in value
         slots: tuple[AvailableSlot, ...] = ()

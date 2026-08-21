@@ -29,7 +29,10 @@ from clinic_shift_scheduler import (
 from clinic_shift_scheduler.enums import Period
 
 from tests.fixtures import synthetic_schedule_input
-from clinic_shift_scheduler.ratio_fairness import ratio_basis_points
+from clinic_shift_scheduler.ratio_fairness import (
+    ratio_basis_points,
+    relative_deviation_basis_points,
+)
 from clinic_shift_scheduler.optimization_policy import FORMAL_STAGE_SEQUENCE
 
 
@@ -91,6 +94,7 @@ def part_time(
     minimum: int | None = None,
     maximum: int | None = None,
     required: int | None = None,
+    target: int | None = None,
     available_slots: list[dict],
     fairness_group: str | None = None,
     roles: list[str] | None = None,
@@ -104,7 +108,14 @@ def part_time(
         "fairness_group": fairness_group or f"PT_{employee_id}",
         "available_slots": available_slots,
     }
-    if required is not None:
+    if target is not None:
+        employee["shift_mode"] = "TARGET"
+        employee["target_shifts"] = target
+        if minimum is not None:
+            employee["min_shifts"] = minimum
+        if maximum is not None:
+            employee["max_shifts"] = maximum
+    elif required is not None:
         employee["shift_mode"] = "EXACT"
         employee["required_shifts"] = required
     else:
@@ -166,10 +177,10 @@ class LexicographicOptimizationTests(unittest.TestCase):
             with self.subTest(target=target, periods=periods):
                 payload = one_day_input(
                     [
-                        full_time(
+                        part_time(
                             "TARGET",
-                            shift_mode="TARGET",
                             target=target,
+                            available_slots=available("2024-10-01", *periods),
                         )
                     ],
                     periods,
@@ -178,7 +189,7 @@ class LexicographicOptimizationTests(unittest.TestCase):
                 result = solve_lexicographic(validate_and_normalize(payload))
                 target_stage = stage(
                     result,
-                    OptimizationStage.FULL_TIME_TARGET_DEVIATION,
+                    OptimizationStage.PART_TIME_TARGET_MAX_REGRET,
                 )
 
                 self.assertEqual(result.status, FeasibilityStatus.FEASIBLE)
@@ -195,11 +206,11 @@ class LexicographicOptimizationTests(unittest.TestCase):
                 )
                 self.assertEqual(
                     target_stage.objective_value,
-                    expected_deviation,
+                    ratio_basis_points(expected_deviation, max(target, 1)),
                 )
                 self.assertTrue(target_stage.locked)
 
-    def test_part_time_usage_is_minimized_after_target_stage(self) -> None:
+    def test_part_time_usage_is_minimized_before_target_stage(self) -> None:
         periods = ("morning", "afternoon")
         payload = one_day_input(
             [
@@ -222,7 +233,7 @@ class LexicographicOptimizationTests(unittest.TestCase):
         result = solve_lexicographic(validate_and_normalize(payload))
         target_stage = stage(
             result,
-            OptimizationStage.FULL_TIME_TARGET_DEVIATION,
+            OptimizationStage.PART_TIME_TARGET_MAX_REGRET,
         )
         part_time_stage = stage(result, OptimizationStage.PART_TIME_USAGE)
 
@@ -237,19 +248,14 @@ class LexicographicOptimizationTests(unittest.TestCase):
         self.assertEqual(part_time_stage.status, OptimizationStageStatus.OPTIMAL)
         self.assertTrue(part_time_stage.locked)
 
-    def test_later_stage_cannot_worsen_locked_target_value(self) -> None:
+    def test_target_stage_cannot_worsen_locked_part_time_usage(self) -> None:
         periods = ("morning", "afternoon", "evening")
         payload = one_day_input(
             [
-                full_time(
-                    "TARGET",
-                    shift_mode="TARGET",
-                    target=1,
-                ),
+                full_time("FT", shift_mode="EXACT", required=1),
                 part_time(
-                    "PT",
-                    minimum=0,
-                    maximum=1,
+                    "TARGET",
+                    target=1,
                     available_slots=available("2024-10-01", *periods),
                 ),
             ],
@@ -259,20 +265,80 @@ class LexicographicOptimizationTests(unittest.TestCase):
         result = solve_lexicographic(validate_and_normalize(payload))
         target_stage = stage(
             result,
-            OptimizationStage.FULL_TIME_TARGET_DEVIATION,
+            OptimizationStage.PART_TIME_TARGET_MAX_REGRET,
         )
         part_time_stage = stage(result, OptimizationStage.PART_TIME_USAGE)
 
-        self.assertEqual(target_stage.objective_value, 1)
+        self.assertEqual(target_stage.objective_value, 10000)
         self.assertTrue(target_stage.locked)
-        self.assertEqual(part_time_stage.objective_value, 1)
-        self.assertTrue(part_time_stage.locked)
+        self.assertEqual(part_time_stage.objective_value, 2)
+        self.assertEqual(
+            part_time_stage.status,
+            OptimizationStageStatus.SKIPPED_CONSTANT,
+        )
+        self.assertFalse(part_time_stage.locked)
         self.assertEqual(result.employee_shift_counts["TARGET"], 2)
         self.assertEqual(result.target_deviations["TARGET"], 1)
-        self.assertEqual(result.part_time_total, 1)
+        self.assertEqual(result.part_time_total, 2)
         self.assertEqual(
             tuple(item.stage for item in result.stages),
             FORMAL_STAGE_SEQUENCE,
+        )
+
+    def test_target_fairness_uses_relative_deviation_for_different_targets(self) -> None:
+        slots = [
+            *available("2024-10-01", "morning", "afternoon"),
+            *available("2024-10-02", "morning"),
+        ]
+        payload = synthetic_schedule_input(
+            start_date="2024-10-01",
+            end_date="2024-10-02",
+            roles=["assistant"],
+            employees=[
+                part_time(
+                    "PT_SMALL",
+                    target=2,
+                    fairness_group="PT_SHARED",
+                    available_slots=slots,
+                ),
+                part_time(
+                    "PT_LARGE",
+                    target=4,
+                    fairness_group="PT_SHARED",
+                    available_slots=slots,
+                ),
+            ],
+            positive_demands={
+                ("2024-10-01", "morning", "assistant"): 1,
+                ("2024-10-01", "afternoon", "assistant"): 1,
+                ("2024-10-02", "morning", "assistant"): 1,
+            },
+        )
+
+        data = validate_and_normalize(payload)
+        result = solve_lexicographic(data)
+        metrics = recompute_schedule_metrics(
+            data, result.assignments, result.preference_benchmarks
+        )
+
+        self.assertEqual(result.employee_shift_counts["PT_SMALL"], 1)
+        self.assertEqual(result.employee_shift_counts["PT_LARGE"], 2)
+        self.assertEqual(
+            metrics.target_relative_deviation_basis_points,
+            {"PT_SMALL": 5000, "PT_LARGE": 5000},
+        )
+        self.assertEqual(metrics.target_relative_fairness_gaps, {"PT_SHARED": 0})
+        self.assertEqual(
+            metrics.objective_values[
+                OptimizationStage.PART_TIME_TARGET_MAX_REGRET
+            ],
+            5000,
+        )
+        self.assertEqual(
+            metrics.objective_values[
+                OptimizationStage.PART_TIME_TARGET_TOTAL_REGRET
+            ],
+            5000,
         )
 
     def test_constant_part_time_total_is_skipped_with_proof(self) -> None:
@@ -310,14 +376,24 @@ class LexicographicOptimizationTests(unittest.TestCase):
 
     def test_nonoptimal_objective_is_not_locked_or_followed_by_next_stage(self) -> None:
         payload = one_day_input(
-            [full_time("TARGET", shift_mode="TARGET", target=1)],
+            [
+                full_time("FT", shift_mode="RANGE", minimum=0, maximum=2),
+                part_time(
+                    "PT",
+                    minimum=0,
+                    maximum=2,
+                    available_slots=available(
+                        "2024-10-01", "morning", "afternoon"
+                    ),
+                ),
+            ],
             ("morning", "afternoon"),
         )
         normalized = validate_and_normalize(payload)
         original_solve_once = optimization._solve_once
         calls = 0
 
-        def downgrade_target(model, config):
+        def downgrade_part_time_usage(model, config):
             nonlocal calls
             calls += 1
             run = original_solve_once(model, config)
@@ -329,12 +405,14 @@ class LexicographicOptimizationTests(unittest.TestCase):
                 )
             return run
 
-        with patch.object(optimization, "_solve_once", side_effect=downgrade_target):
+        with patch.object(
+            optimization, "_solve_once", side_effect=downgrade_part_time_usage
+        ):
             result = solve_lexicographic(normalized)
 
         target_stage = stage(
             result,
-            OptimizationStage.FULL_TIME_TARGET_DEVIATION,
+            OptimizationStage.PART_TIME_USAGE,
         )
         self.assertEqual(result.status, FeasibilityStatus.FEASIBLE)
         self.assertFalse(result.implemented_objective_prefix_optimal)
@@ -344,7 +422,7 @@ class LexicographicOptimizationTests(unittest.TestCase):
 
     def test_unknown_before_any_solution_maps_to_unknown(self) -> None:
         payload = one_day_input(
-            [full_time("TARGET", shift_mode="TARGET", target=1)],
+            [full_time("FT", shift_mode="EXACT", required=1)],
             ("morning",),
         )
         unknown_run = optimization._SolverRun(
@@ -389,7 +467,17 @@ class LexicographicOptimizationTests(unittest.TestCase):
 
     def test_unknown_later_stage_preserves_prior_feasible_solution(self) -> None:
         payload = one_day_input(
-            [full_time("TARGET", shift_mode="TARGET", target=1)],
+            [
+                full_time("FT", shift_mode="RANGE", minimum=0, maximum=2),
+                part_time(
+                    "PT",
+                    minimum=0,
+                    maximum=2,
+                    available_slots=available(
+                        "2024-10-01", "morning", "afternoon"
+                    ),
+                ),
+            ],
             ("morning", "afternoon"),
         )
         normalized = validate_and_normalize(payload)
@@ -876,6 +964,9 @@ class FairnessOptimizationTests(unittest.TestCase):
         self.assertEqual(ratio_basis_points(1, 32), 313)
         self.assertEqual(ratio_basis_points(0, 3), 0)
         self.assertIsNone(ratio_basis_points(0, 0))
+        self.assertEqual(relative_deviation_basis_points(0, 0), 0)
+        self.assertEqual(relative_deviation_basis_points(1, 0), 10000)
+        self.assertEqual(relative_deviation_basis_points(3, 2), 15000)
 
     def test_ratio_groups_are_modelled_independently(self) -> None:
         payload = one_day_input(
