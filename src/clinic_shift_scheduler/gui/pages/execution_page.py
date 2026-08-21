@@ -96,7 +96,7 @@ class ExecutionPage(InputPage):
         self.status_label.setObjectName("mutedText")
         self.status_label.setWordWrap(True)
         status_layout.addWidget(self.status_label)
-        self.elapsed_label = QLabel("已耗時：0 秒")
+        self.elapsed_label = QLabel("總耗時：0 秒")
         self.elapsed_label.setObjectName("mutedText")
         status_layout.addWidget(self.elapsed_label)
         actions = QHBoxLayout()
@@ -201,7 +201,7 @@ class ExecutionPage(InputPage):
         self.status_label.setText("資料準備完成後即可執行排班。")
         self.status_label.setObjectName("mutedText")
         self._repolish_status()
-        self.elapsed_label.setText("已耗時：0 秒")
+        self.elapsed_label.setText("總耗時：0 秒")
         self.result_status_label.setText("尚未產生")
         self.validation_label.setText("尚未執行")
         self.candidate_label.setText("尚未執行")
@@ -389,7 +389,7 @@ class ExecutionPage(InputPage):
             if minutes
             else f"{seconds} 秒"
         )
-        self.elapsed_label.setText(f"已耗時：{rendered}")
+        self.elapsed_label.setText(f"總耗時：{rendered}")
 
     def _repolish_status(self) -> None:
         self.status_label.style().unpolish(self.status_label)

@@ -88,6 +88,7 @@ class GuiExecutionTests(unittest.TestCase):
 
         self.assertEqual(page.config_label.text(), str(config_path))
         self.assertEqual(page.cancel_button.text(), "終止排班")
+        self.assertEqual(page.elapsed_label.text(), "總耗時：0 秒")
         self.assertIs(page.status_group.parentWidget(), page.surface)
         self.assertIs(page.document_group.parentWidget(), page.scroll_content)
         self.assertIs(page.log_group.parentWidget(), page.scroll_content)
