@@ -149,6 +149,7 @@ class PackagingContractTests(unittest.TestCase):
         self.assertIn('packaging_config["editor"]', source)
         self.assertIn('name=application["executable_name"]', source)
         self.assertIn('"gui/styles/*.qss"', source)
+        self.assertNotIn('"gui/styles/*.svg"', source)
         self.assertIn("editor_exe", source)
         self.assertIn('"pytest"', source)
         self.assertIn("excludes=packaging_only_excludes", source)

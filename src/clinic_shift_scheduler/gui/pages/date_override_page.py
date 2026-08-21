@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QModelIndex, Signal
+from PySide6.QtCore import QModelIndex, Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QGroupBox,
@@ -20,6 +20,7 @@ from ..drafts import ScheduleDraft
 from ..field_location import FieldLocation
 from ..models import DateOverrideTableModel
 from ..navigation import NAVIGATION_ITEMS, PageId
+from ..widgets import LockedStaffingCellDelegate, PeriodToggleDelegate
 from .base import InputPage
 
 
@@ -79,7 +80,11 @@ class DateOverridePage(InputPage):
         self.model = DateOverrideTableModel()
         self.model.draft_changed.connect(self.draft_changed.emit)
         self.table.setModel(self.model)
-        self.table.clicked.connect(self._cycle_staffing_count)
+        self.table.setItemDelegate(LockedStaffingCellDelegate(self.table))
+        self.table.setItemDelegateForColumn(0, PeriodToggleDelegate(self.table))
+        self.table.setMouseTracking(True)
+        self.table.viewport().setMouseTracking(True)
+        self.table.clicked.connect(self._handle_table_click)
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         for column, width in ((0, 65), (1, 130), (2, 110)):
@@ -154,8 +159,19 @@ class DateOverridePage(InputPage):
             self.table.scrollTo(index)
             self.table.setFocus()
 
-    def _cycle_staffing_count(self, index: QModelIndex) -> None:
-        if index.column() >= 3:
+    def _handle_table_click(self, index: QModelIndex) -> None:
+        if index.column() == 0:
+            current = self.model.data(index, Qt.ItemDataRole.CheckStateRole)
+            self.model.setData(
+                index,
+                (
+                    Qt.CheckState.Unchecked
+                    if current == Qt.CheckState.Checked
+                    else Qt.CheckState.Checked
+                ),
+                Qt.ItemDataRole.CheckStateRole,
+            )
+        elif index.column() >= 3:
             self.model.cycle_count(index)
 
     def _add(self, is_open: bool) -> None:

@@ -8,7 +8,8 @@ from .palette import stylesheet_tokens
 
 
 def load_application_stylesheet() -> str:
-    template = files(__package__).joinpath("application.qss").read_text(
+    resources = files(__package__)
+    template = resources.joinpath("application.qss").read_text(
         encoding="utf-8"
     )
     for name, value in sorted(

@@ -180,7 +180,10 @@ class WeeklyDemandTableModel(QAbstractTableModel):
         rule = self._draft.weekly_demands[rule_index]
         period = PERIODS_V1[period_index]
         if index.column() == 0:
-            return base | Qt.ItemFlag.ItemIsUserCheckable
+            # The view toggles this column for any click in the cell.  Do not
+            # mark it as user-checkable, otherwise Qt only accepts indicator
+            # clicks and can toggle it a second time.
+            return base
         if index.column() >= 3:
             if not self._period_is_open(rule, period):
                 # A closed period is intentionally a locked display cell.  It

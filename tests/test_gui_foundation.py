@@ -13,8 +13,9 @@ from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QDate, Qt
+from PySide6.QtCore import QDate, QRect, Qt
 from PySide6.QtTest import QTest
+from PySide6.QtGui import QColor, QImage, QPainter, QStandardItemModel
 from PySide6.QtWidgets import (
     QApplication,
     QCalendarWidget,
@@ -23,6 +24,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QMessageBox,
     QPushButton,
+    QStyle,
+    QStyleOptionViewItem,
     QTableWidget,
 )
 
@@ -38,7 +41,12 @@ from clinic_shift_scheduler.gui.navigation import NAVIGATION_ITEMS, PageId
 from clinic_shift_scheduler.gui.pages import DateOverridePage, WeeklyDemandPage
 from clinic_shift_scheduler.gui.styles.loader import load_application_stylesheet
 from clinic_shift_scheduler.gui.widgets.document_header import DocumentState
+from clinic_shift_scheduler.gui.widgets import (
+    LockedStaffingCellDelegate,
+    PeriodToggleDelegate,
+)
 from clinic_shift_scheduler.config_application import ConfigApplication
+from clinic_shift_scheduler.authoring_application import AuthoringApplication
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -72,6 +80,75 @@ class GuiFoundationTests(unittest.TestCase):
 
         self.assertFalse(weekly_page.table.alternatingRowColors())
         self.assertFalse(date_override_page.table.alternatingRowColors())
+        self.assertIsInstance(
+            weekly_page.table.itemDelegate(), LockedStaffingCellDelegate
+        )
+        self.assertIsInstance(
+            date_override_page.table.itemDelegate(), LockedStaffingCellDelegate
+        )
+        self.assertIsInstance(
+            weekly_page.table.itemDelegateForColumn(0), PeriodToggleDelegate
+        )
+        self.assertIsInstance(
+            date_override_page.table.itemDelegateForColumn(0), PeriodToggleDelegate
+        )
+
+    def test_staffing_period_switches_toggle_from_any_column_zero_click(self) -> None:
+        draft = AuthoringApplication().open_document(
+            REPOSITORY_ROOT / "input/匿名範本/排班輸入_匿名_2026-08.json"
+        ).draft
+        weekly_page = WeeklyDemandPage()
+        date_override_page = DateOverridePage()
+        self.addCleanup(weekly_page.close)
+        self.addCleanup(date_override_page.close)
+        weekly_page.bind_draft(draft)
+        date_override_page.bind_draft(draft)
+
+        weekly_index = weekly_page.model.index(0, 0)
+        weekly_page._handle_table_click(weekly_index)
+        self.assertEqual(
+            weekly_page.model.data(weekly_index, Qt.ItemDataRole.CheckStateRole),
+            Qt.CheckState.Unchecked,
+        )
+
+        date_override_page.model.add_override(date(2026, 8, 15), is_open=False)
+        override_index = date_override_page.model.index(0, 0)
+        date_override_page._handle_table_click(override_index)
+        self.assertEqual(
+            date_override_page.model.data(
+                override_index, Qt.ItemDataRole.CheckStateRole
+            ),
+            Qt.CheckState.Checked,
+        )
+
+    def test_period_toggle_delegate_draws_a_white_check_mark(self) -> None:
+        model = QStandardItemModel(1, 1)
+        index = model.index(0, 0)
+        model.setData(index, "開啟", Qt.ItemDataRole.DisplayRole)
+        model.setData(index, Qt.CheckState.Checked, Qt.ItemDataRole.CheckStateRole)
+        image = QImage(80, 32, QImage.Format.Format_ARGB32)
+        image.fill(QColor("#000000"))
+        option = QStyleOptionViewItem()
+        option.rect = QRect(0, 0, image.width(), image.height())
+        option.state = QStyle.StateFlag.State_Enabled
+        option.palette = QApplication.palette()
+        painter = QPainter(image)
+        try:
+            PeriodToggleDelegate().paint(painter, option, index)
+        finally:
+            painter.end()
+
+        # The indicator fills its own rectangle with the primary color, so a
+        # white pixel in this area can only be the explicitly drawn check mark.
+        check_area = (
+            image.pixelColor(x, y)
+            for x in range(11, 23)
+            for y in range(11, 22)
+        )
+        self.assertTrue(
+            any(color.red() > 220 and color.green() > 220 and color.blue() > 220
+                for color in check_area)
+        )
 
     def test_main_window_builds_navigation_header_and_page_stack(self) -> None:
         window = MainWindow()
@@ -485,6 +562,9 @@ class GuiFoundationTests(unittest.TestCase):
         self.assertIn("Microsoft JhengHei UI", stylesheet)
         self.assertIn("QTabBar::tab:selected", stylesheet)
         self.assertIn("QTabWidget#settingsTabs::pane", stylesheet)
+        self.assertIn("QTableView::item:selected", stylesheet)
+        self.assertIn("selection-background-color: transparent", stylesheet)
+        self.assertNotIn("QTableView::indicator", stylesheet)
         self.assertIn("QScrollBar::handle:vertical", stylesheet)
         self.assertIn("QPushButton:focus", stylesheet)
 

@@ -132,6 +132,20 @@ QPushButton:disabled, QToolButton:disabled {
     background-color: $BACKGROUND;
 }
 
+/* Table selection remains functional without the platform blue fill. */
+QTableView {
+    selection-background-color: transparent;
+    selection-color: $TEXT;
+    outline: none;
+}
+
+QTableView::item:selected,
+QTableView::item:selected:active,
+QTableView::item:selected:!active {
+    background-color: transparent;
+    color: $TEXT;
+}
+
 QListWidget#navigationList {
     background: transparent;
     border: none;

@@ -169,6 +169,14 @@ class WeeklyDemandTableModelTests(unittest.TestCase):
             {"#d5d8dc"},
         )
 
+    def test_period_switch_cell_uses_page_level_click_handling(self) -> None:
+        draft = self.application.open_document(WEEKLY_EXAMPLE).draft
+        model = WeeklyDemandTableModel(draft)
+
+        flags = model.flags(model.index(0, 0))
+
+        self.assertFalse(flags & Qt.ItemFlag.ItemIsUserCheckable)
+
 
 class DateOverrideTableModelTests(unittest.TestCase):
     def setUp(self) -> None:
@@ -218,6 +226,9 @@ class DateOverrideTableModelTests(unittest.TestCase):
         )
         self.assertFalse(
             model.flags(model.index(1, 3)) & Qt.ItemFlag.ItemIsSelectable
+        )
+        self.assertFalse(
+            model.flags(model.index(1, 0)) & Qt.ItemFlag.ItemIsUserCheckable
         )
 
         model.remove_override_at(2)

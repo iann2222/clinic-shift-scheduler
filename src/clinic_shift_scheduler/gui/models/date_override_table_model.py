@@ -196,7 +196,8 @@ class DateOverrideTableModel(QAbstractTableModel):
         override = self._draft.date_overrides[index.row() // len(PERIODS_V1)]
         period = PERIODS_V1[index.row() % len(PERIODS_V1)]
         if index.column() == 0:
-            return base | Qt.ItemFlag.ItemIsUserCheckable
+            # The page handles a click anywhere in this cell as the toggle.
+            return base
         if index.column() >= 3:
             if not self._period_is_open(override, period):
                 # Keep closed-period staffing cells fully locked so a click
