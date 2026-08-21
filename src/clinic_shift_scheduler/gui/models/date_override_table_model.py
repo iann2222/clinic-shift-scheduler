@@ -199,7 +199,9 @@ class DateOverrideTableModel(QAbstractTableModel):
             return base | Qt.ItemFlag.ItemIsUserCheckable
         if index.column() >= 3:
             if not self._period_is_open(override, period):
-                return Qt.ItemFlag.ItemIsSelectable
+                # Keep closed-period staffing cells fully locked so a click
+                # cannot apply a selection background over the disabled gray.
+                return Qt.ItemFlag.NoItemFlags
             return base
         return base
 

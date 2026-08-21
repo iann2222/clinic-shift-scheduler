@@ -145,6 +145,7 @@ class WeeklyDemandTableModelTests(unittest.TestCase):
 
         flags = model.flags(index)
         self.assertFalse(flags & Qt.ItemFlag.ItemIsEnabled)
+        self.assertFalse(flags & Qt.ItemFlag.ItemIsSelectable)
         self.assertFalse(flags & Qt.ItemFlag.ItemIsEditable)
         self.assertFalse(model.setData(index, 1))
         self.assertTrue(
@@ -214,6 +215,9 @@ class DateOverrideTableModelTests(unittest.TestCase):
         self.assertIsNone(session.draft.date_overrides[0].staffing)
         self.assertFalse(
             model.flags(model.index(1, 3)) & Qt.ItemFlag.ItemIsEnabled
+        )
+        self.assertFalse(
+            model.flags(model.index(1, 3)) & Qt.ItemFlag.ItemIsSelectable
         )
 
         model.remove_override_at(2)

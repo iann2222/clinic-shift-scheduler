@@ -183,7 +183,10 @@ class WeeklyDemandTableModel(QAbstractTableModel):
             return base | Qt.ItemFlag.ItemIsUserCheckable
         if index.column() >= 3:
             if not self._period_is_open(rule, period):
-                return Qt.ItemFlag.ItemIsSelectable
+                # A closed period is intentionally a locked display cell.  It
+                # must not remain selectable, otherwise the platform selection
+                # palette can visually override its disabled background.
+                return Qt.ItemFlag.NoItemFlags
             return base
         return base
 
