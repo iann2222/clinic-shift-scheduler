@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -17,12 +17,19 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
     QWidget,
 )
 
+from ...enums import FullTimeClass
+from ...optimization_policy import (
+    CLASS_POLICY_SUMMARIES,
+    USER_FACING_OPTIMIZATION_FLOW,
+    ClassPolicySummary,
+)
 from ..drafts import ConfigDraft
 from ..widgets import TrimmedDoubleSpinBox, UnitInput, VisibleCheckBox
 
@@ -52,13 +59,14 @@ class SettingsDialog(QDialog):
         )
         self.setWindowTitle("設定")
         self.setModal(True)
-        self.resize(620, 500)
+        self.resize(880, 610)
 
         layout = QVBoxLayout(self)
         self.tabs = QTabWidget()
         self.tabs.setObjectName("settingsTabs")
         self.tabs.addTab(self._general_tab(), "一般設定")
         self.tabs.addTab(self._advanced_tab(), "候選班表設定")
+        self.tabs.addTab(self._details_tab(), "詳情")
         layout.addWidget(self.tabs, 1)
 
         lower = QHBoxLayout()
@@ -181,6 +189,108 @@ class SettingsDialog(QDialog):
         layout.addWidget(notice)
         layout.addStretch(1)
         return page
+
+    def _details_tab(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("settingsDetailsPage")
+        page_layout = QVBoxLayout(page)
+        page_layout.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("settingsDetailsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content = QWidget()
+        content.setObjectName("settingsDetailsContent")
+        columns = QHBoxLayout(content)
+        columns.setContentsMargins(14, 14, 14, 14)
+        columns.setSpacing(16)
+
+        class_column = QVBoxLayout()
+        class_column.setSpacing(12)
+        class_heading = QLabel("正職類別說明")
+        class_heading.setObjectName("detailsColumnTitle")
+        class_column.addWidget(class_heading)
+        for full_time_class in (FullTimeClass.A, FullTimeClass.B):
+            class_column.addWidget(
+                self._class_policy_card(CLASS_POLICY_SUMMARIES[full_time_class])
+            )
+        class_column.addStretch(1)
+
+        flow_column = QVBoxLayout()
+        flow_column.setSpacing(10)
+        flow_heading = QLabel("核心排班流程")
+        flow_heading.setObjectName("detailsColumnTitle")
+        flow_column.addWidget(flow_heading)
+        flow_intro = QLabel(
+            "每一步取得最佳值後才進入下一步；後面的公平性不會破壞前面已鎖定的排班品質。"
+        )
+        flow_intro.setObjectName("mutedText")
+        flow_intro.setWordWrap(True)
+        flow_column.addWidget(flow_intro)
+        for number, step in enumerate(USER_FACING_OPTIMIZATION_FLOW, start=1):
+            flow_column.addWidget(
+                self._policy_step_card(number, step.title, step.description)
+            )
+        flow_column.addStretch(1)
+
+        columns.addLayout(class_column, 2)
+        columns.addLayout(flow_column, 3)
+        scroll.setWidget(content)
+        page_layout.addWidget(scroll)
+        return page
+
+    @staticmethod
+    def _class_policy_card(summary: ClassPolicySummary) -> QFrame:
+        card = QFrame()
+        card.setObjectName("policyCard")
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(7)
+
+        title = QLabel(summary.title)
+        title.setObjectName("policyCardTitle")
+        layout.addWidget(title)
+        description = QLabel(summary.summary)
+        description.setWordWrap(True)
+        layout.addWidget(description)
+        for item in summary.preferences:
+            label = QLabel(f"• {item}")
+            label.setWordWrap(True)
+            layout.addWidget(label)
+        for item in summary.hard_rules:
+            label = QLabel(f"限制：{item}")
+            label.setObjectName("policyHardRule")
+            label.setWordWrap(True)
+            layout.addWidget(label)
+        return card
+
+    @staticmethod
+    def _policy_step_card(number: int, title_text: str, description_text: str) -> QFrame:
+        card = QFrame()
+        card.setObjectName("policyStepCard")
+        layout = QHBoxLayout(card)
+        layout.setContentsMargins(10, 9, 12, 9)
+        layout.setSpacing(10)
+
+        number_label = QLabel(str(number))
+        number_label.setObjectName("policyStepNumber")
+        number_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        number_label.setFixedSize(26, 26)
+        layout.addWidget(number_label, 0, Qt.AlignmentFlag.AlignTop)
+
+        text_layout = QVBoxLayout()
+        text_layout.setSpacing(2)
+        title = QLabel(title_text)
+        title.setObjectName("policyStepTitle")
+        title.setWordWrap(True)
+        text_layout.addWidget(title)
+        description = QLabel(description_text)
+        description.setObjectName("mutedText")
+        description.setWordWrap(True)
+        text_layout.addWidget(description)
+        layout.addLayout(text_layout, 1)
+        return card
 
     def _load_widgets(self) -> None:
         draft = self.draft

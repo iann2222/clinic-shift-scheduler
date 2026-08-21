@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QCalendarWidget,
     QDialog,
     QDialogButtonBox,
+    QLabel,
     QMessageBox,
     QPushButton,
     QTableWidget,
@@ -208,10 +209,20 @@ class GuiFoundationTests(unittest.TestCase):
         dialog = self._settings_dialog()
         self.addCleanup(dialog.close)
 
-        self.assertEqual(dialog.tabs.count(), 2)
+        self.assertEqual(dialog.tabs.count(), 3)
         self.assertEqual(dialog.tabs.tabText(0), "一般設定")
         self.assertEqual(dialog.tabs.tabText(1), "候選班表設定")
+        self.assertEqual(dialog.tabs.tabText(2), "詳情")
         self.assertNotIn("設定", {item.title for item in NAVIGATION_ITEMS})
+
+        dialog.tabs.setCurrentIndex(2)
+        visible_text = "\n".join(
+            label.text() for label in dialog.tabs.currentWidget().findChildren(QLabel)
+        )
+        self.assertIn("A 類正職", visible_text)
+        self.assertIn("B 類正職", visible_text)
+        self.assertIn("先確認班表合法且能完整補足需求", visible_text)
+        self.assertIn("最後改善全體正職週日公平", visible_text)
 
     def test_standard_dialog_buttons_are_always_chinese(self) -> None:
         month_dialog = MonthDialog("建立月份", "選擇月份")

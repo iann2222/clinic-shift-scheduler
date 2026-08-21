@@ -66,7 +66,7 @@ class DocumentHeader(QFrame):
 
         self.settings_button = QToolButton()
         self.settings_button.setText("設定")
-        self.settings_button.setToolTip("開啟一般與候選班表設定")
+        self.settings_button.setToolTip("開啟一般設定、候選班表設定與排班規則詳情")
         self.settings_button.setAccessibleName("設定")
         self.settings_button.clicked.connect(self.settings_requested.emit)
         outer.addWidget(self.settings_button)

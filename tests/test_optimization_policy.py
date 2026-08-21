@@ -14,6 +14,7 @@ from clinic_shift_scheduler.optimization_contracts import (
     OptimizationStage,
 )
 from clinic_shift_scheduler.optimization_policy import (
+    CLASS_POLICY_SUMMARIES,
     CLASS_PREFERENCES,
     CLASS_REMAINING_PATTERN_METRICS,
     COMMON_GROUP_FAIRNESS_WEIGHTS,
@@ -29,6 +30,7 @@ from clinic_shift_scheduler.optimization_policy import (
     PREFERENCE_REGRET_STAGES,
     SUNDAY_FAIRNESS_METRICS,
     SUNDAY_FAIRNESS_STAGES,
+    USER_FACING_OPTIMIZATION_FLOW,
 )
 
 
@@ -109,6 +111,29 @@ class OptimizationPolicyTests(unittest.TestCase):
         self.assertEqual(
             set(PREFERENCE_REGRET_STAGES),
             set(PreferenceRank),
+        )
+
+    def test_user_facing_policy_content_tracks_the_formal_sequence(self) -> None:
+        displayed_stages = tuple(
+            stage
+            for step in USER_FACING_OPTIMIZATION_FLOW
+            for stage in step.stages
+        )
+        self.assertEqual(displayed_stages, FORMAL_STAGE_SEQUENCE)
+        self.assertTrue(
+            all(step.title.strip() and step.description.strip()
+                for step in USER_FACING_OPTIMIZATION_FLOW)
+        )
+        self.assertEqual(set(CLASS_POLICY_SUMMARIES), set(FullTimeClass))
+        self.assertIn(
+            "每天最多兩節",
+            CLASS_POLICY_SUMMARIES[FullTimeClass.A].hard_rules[0],
+        )
+        self.assertTrue(
+            any(
+                "最多三天" in rule
+                for rule in CLASS_POLICY_SUMMARIES[FullTimeClass.B].hard_rules
+            )
         )
 
     def test_pattern_and_remaining_metrics_are_complete(self) -> None:

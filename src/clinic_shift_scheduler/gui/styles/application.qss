@@ -225,6 +225,55 @@ QFrame#candidateOptions:disabled QLabel {
     color: #879197;
 }
 
+QScrollArea#settingsDetailsScroll,
+QWidget#settingsDetailsContent,
+QWidget#settingsDetailsPage {
+    background-color: $SURFACE;
+    border: none;
+}
+
+QLabel#detailsColumnTitle {
+    color: $PRIMARY;
+    font-size: 12pt;
+    font-weight: 600;
+}
+
+QFrame#policyCard {
+    background-color: $BACKGROUND;
+    border: 1px solid $BORDER;
+    border-radius: 5px;
+}
+
+QLabel#policyCardTitle {
+    color: $PRIMARY;
+    font-size: 11pt;
+    font-weight: 600;
+}
+
+QLabel#policyHardRule {
+    color: #8A4B3D;
+    font-weight: 600;
+}
+
+QFrame#policyStepCard {
+    background-color: $SURFACE;
+    border: 1px solid $BORDER;
+    border-radius: 5px;
+}
+
+QLabel#policyStepNumber {
+    background-color: $PRIMARY_SOFT;
+    color: $PRIMARY;
+    border: 1px solid $BORDER;
+    border-radius: 13px;
+    font-weight: 600;
+}
+
+QLabel#policyStepTitle {
+    color: $TEXT;
+    font-weight: 600;
+}
+
 QScrollBar:vertical {
     background: $BACKGROUND;
     width: 12px;
