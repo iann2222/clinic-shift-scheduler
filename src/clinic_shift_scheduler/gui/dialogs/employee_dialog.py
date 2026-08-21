@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -17,6 +17,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSpinBox,
+    QStyle,
     QVBoxLayout,
     QWidget,
 )
@@ -304,6 +305,26 @@ def _select_data(combo: QComboBox, value: object) -> None:
 
 
 def _shift_spin() -> QSpinBox:
-    spin = QSpinBox()
+    spin = _SelectAllSpinBox()
     spin.setRange(0, 999)
     return spin
+
+
+class _SelectAllSpinBox(QSpinBox):
+    """Select the numeric text on entry without changing arrow behaviour."""
+
+    def focusInEvent(self, event: object) -> None:
+        super().focusInEvent(event)
+        QTimer.singleShot(0, self.selectAll)
+
+    def mousePressEvent(self, event: object) -> None:
+        super().mousePressEvent(event)
+        if (
+            event.button() == Qt.MouseButton.LeftButton
+            and event.position().x()
+            < self.width()
+            - self.style().pixelMetric(
+                QStyle.PixelMetric.PM_SpinBoxArrowButtonWidth
+            )
+        ):
+            self.selectAll()

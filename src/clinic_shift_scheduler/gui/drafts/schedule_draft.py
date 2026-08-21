@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import date
-from uuid import uuid4
+import re
 
 from ...enums import (
     PERIODS_V1,
@@ -114,6 +114,11 @@ class ScheduleDraft:
     leave_requests_declared: bool = True
     unavailable_slots_declared: bool = True
     _revision: int = field(default=0, repr=False, compare=False)
+    _employee_id_high_watermarks: dict[str, int] = field(
+        default_factory=dict,
+        repr=False,
+        compare=False,
+    )
 
     def touch(self) -> None:
         self._revision += 1
@@ -214,19 +219,23 @@ class ScheduleDraft:
             raise ValueError(f"找不到特定日期調整：{value.isoformat()}")
         self.touch()
 
-    def add_employee(self) -> EmployeeDraft:
-        employee_id = self._new_employee_id()
+    def add_employee(
+        self,
+        employment_type: EmploymentType = EmploymentType.FULL_TIME,
+    ) -> EmployeeDraft:
+        is_full_time = employment_type is EmploymentType.FULL_TIME
+        employee_id = self._new_employee_id(employment_type)
         employee = EmployeeDraft(
             employee_id=employee_id,
             name="新員工",
-            employment_type=EmploymentType.FULL_TIME,
-            full_time_class=FullTimeClass.A,
+            employment_type=employment_type,
+            full_time_class=FullTimeClass.A if is_full_time else None,
             full_time_class_declared=True,
             roles=[self.roles[0]],
-            fairness_group="A_GENERAL",
+            fairness_group="A_GENERAL" if is_full_time else "PT_GENERAL",
             shift_mode=ShiftMode.EXACT,
             required_shifts=0,
-            available_slots=None,
+            available_slots=None if is_full_time else [],
         )
         self.employees.append(employee)
         self.touch()
@@ -607,12 +616,19 @@ class ScheduleDraft:
             )
         )
 
-    def _new_employee_id(self) -> str:
-        existing = {employee.employee_id for employee in self.employees}
-        while True:
-            candidate = f"EMP-{uuid4().hex[:8].upper()}"
-            if candidate not in existing:
-                return candidate
+    def _new_employee_id(self, employment_type: EmploymentType) -> str:
+        prefix = "FT" if employment_type is EmploymentType.FULL_TIME else "PT"
+        pattern = re.compile(rf"^{prefix}(\d+)$")
+        existing_numbers = [
+            int(match.group(1))
+            for employee in self.employees
+            if (match := pattern.fullmatch(employee.employee_id)) is not None
+        ]
+        number = max(
+            [*existing_numbers, self._employee_id_high_watermarks.get(prefix, 0)]
+        ) + 1
+        self._employee_id_high_watermarks[prefix] = number
+        return f"{prefix}{number:03d}"
 
     def _assert_employee_date(
         self,

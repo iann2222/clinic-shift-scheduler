@@ -44,16 +44,25 @@ class EmployeeDraftTests(unittest.TestCase):
         self.session = self.application.open_document(WEEKLY_EXAMPLE)
         self.draft = self.session.draft
 
-    def test_new_employee_has_unique_permanent_id_and_valid_defaults(self) -> None:
-        original_ids = {item.employee_id for item in self.draft.employees}
+    def test_new_employee_ids_follow_type_specific_sequences(self) -> None:
+        self.draft.employees = []
+        self.draft.leave_requests = []
+        self.draft.unavailable_slots = []
+        legacy = self.draft.add_employee(EmploymentType.FULL_TIME)
+        # Keep one legacy ID to prove it remains valid but does not affect the
+        # new typed sequences.
+        legacy.employee_id = "EMP-LEGACY"
 
-        employee = self.draft.add_employee()
+        first_full_time = self.draft.add_employee(EmploymentType.FULL_TIME)
+        first_part_time = self.draft.add_employee(EmploymentType.PART_TIME)
+        self.draft.remove_employee(first_full_time.employee_id)
+        next_full_time = self.draft.add_employee(EmploymentType.FULL_TIME)
 
-        self.assertNotIn(employee.employee_id, original_ids)
-        self.assertTrue(employee.employee_id.startswith("EMP-"))
-        self.assertEqual(employee.roles, [self.draft.roles[0]])
-        self.assertEqual(employee.shift_mode, ShiftMode.EXACT)
-        self.assertEqual(employee.required_shifts, 0)
+        self.assertEqual(first_full_time.employee_id, "FT002")
+        self.assertEqual(first_part_time.employee_id, "PT001")
+        self.assertEqual(next_full_time.employee_id, "FT003")
+        self.assertEqual(first_part_time.available_slots, [])
+        self.assertEqual(next_full_time.roles, [self.draft.roles[0]])
         self.assertTrue(self.application.validate(self.draft).is_valid)
 
     def test_shift_mode_transition_clears_incompatible_fields(self) -> None:
@@ -519,6 +528,18 @@ class EmployeeAvailabilityModelTests(unittest.TestCase):
         self.assertTrue(dialog.shift_form.isRowVisible(dialog.minimum_row))
         self.assertFalse(dialog.min_enabled.isHidden())
         self.assertFalse(dialog.max_enabled.isHidden())
+
+    def test_employee_shift_numbers_select_all_when_focused(self) -> None:
+        dialog = EmployeeEditDialog(self.session.draft.roles)
+        self.addCleanup(dialog.close)
+        dialog.show()
+        self.qt_app.processEvents()
+
+        dialog.required_spin.setValue(123)
+        dialog.required_spin.setFocus()
+        self.qt_app.processEvents()
+
+        self.assertEqual(dialog.required_spin.lineEdit().selectedText(), "123")
 
     def test_batch_period_state_updates_multiple_cells_once(self) -> None:
         employee = self.session.draft.employees[0]
