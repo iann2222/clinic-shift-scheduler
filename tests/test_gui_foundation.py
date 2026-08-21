@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QCalendarWidget,
     QDialog,
     QDialogButtonBox,
+    QHeaderView,
     QLabel,
     QMessageBox,
     QPushButton,
@@ -38,7 +39,11 @@ from clinic_shift_scheduler.gui.dialogs import (
 from clinic_shift_scheduler.gui.main import create_application
 from clinic_shift_scheduler.gui.main_window import MainWindow
 from clinic_shift_scheduler.gui.navigation import NAVIGATION_ITEMS, PageId
-from clinic_shift_scheduler.gui.pages import DateOverridePage, WeeklyDemandPage
+from clinic_shift_scheduler.gui.pages import (
+    DateOverridePage,
+    EmployeePage,
+    WeeklyDemandPage,
+)
 from clinic_shift_scheduler.gui.styles.loader import load_application_stylesheet
 from clinic_shift_scheduler.gui.widgets.document_header import DocumentState
 from clinic_shift_scheduler.gui.widgets import (
@@ -91,6 +96,48 @@ class GuiFoundationTests(unittest.TestCase):
         )
         self.assertIsInstance(
             date_override_page.table.itemDelegateForColumn(0), PeriodToggleDelegate
+        )
+
+    def test_employee_table_compacts_class_columns_and_centers_names(self) -> None:
+        page = EmployeePage()
+        self.addCleanup(page.close)
+
+        header = page.table.horizontalHeader()
+        self.assertEqual(page.table.columnWidth(0), 80)
+        self.assertEqual(page.table.columnWidth(1), 80)
+        self.assertEqual(page.table.columnWidth(2), 65)
+        self.assertEqual(page.table.columnWidth(3), 160)
+        self.assertEqual(page.table.columnWidth(4), 160)
+        self.assertEqual(
+            header.sectionResizeMode(1),
+            QHeaderView.ResizeMode.Interactive,
+        )
+        self.assertEqual(
+            header.sectionResizeMode(2),
+            QHeaderView.ResizeMode.Interactive,
+        )
+        self.assertEqual(
+            header.sectionResizeMode(5),
+            QHeaderView.ResizeMode.Stretch,
+        )
+        self.assertEqual(
+            page.model.headerData(
+                0,
+                Qt.Orientation.Horizontal,
+                Qt.ItemDataRole.TextAlignmentRole,
+            ),
+            Qt.AlignmentFlag.AlignCenter,
+        )
+        draft = AuthoringApplication().open_document(
+            REPOSITORY_ROOT / "input/匿名範本/排班輸入_匿名_2026-08.json"
+        ).draft
+        page.bind_draft(draft)
+        self.assertEqual(
+            page.model.data(
+                page.model.index(0, 3),
+                Qt.ItemDataRole.TextAlignmentRole,
+            ),
+            Qt.AlignmentFlag.AlignCenter,
         )
 
     def test_staffing_period_switches_toggle_from_any_column_zero_click(self) -> None:

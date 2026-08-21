@@ -62,7 +62,12 @@ class EmployeePage(InputPage):
         self.model = EmployeeTableModel()
         self.table.setModel(self.model)
         self.table.verticalHeader().setVisible(False)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        for column, width in ((0, 80), (1, 80), (2, 65), (3, 160), (4, 160)):
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Interactive)
+            self.table.setColumnWidth(column, width)
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         layout.addWidget(self.table, 3)
 
         detail_header = QHBoxLayout()

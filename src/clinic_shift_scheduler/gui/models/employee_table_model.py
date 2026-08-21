@@ -101,7 +101,7 @@ class EmployeeTableModel(QAbstractTableModel):
             return values[index.column()]
         if role == Qt.ItemDataRole.UserRole:
             return employee.employee_id
-        if role == Qt.ItemDataRole.TextAlignmentRole and index.column() in (1, 2, 4, 5):
+        if role == Qt.ItemDataRole.TextAlignmentRole and index.column() in (0, 1, 2, 3, 4, 5):
             return Qt.AlignmentFlag.AlignCenter
         return None
 
@@ -111,6 +111,12 @@ class EmployeeTableModel(QAbstractTableModel):
         orientation: Qt.Orientation,
         role: int = Qt.ItemDataRole.DisplayRole,
     ) -> object:
+        if (
+            role == Qt.ItemDataRole.TextAlignmentRole
+            and orientation == Qt.Orientation.Horizontal
+            and section == 0
+        ):
+            return Qt.AlignmentFlag.AlignCenter
         if role != Qt.ItemDataRole.DisplayRole:
             return None
         if orientation == Qt.Orientation.Vertical:
