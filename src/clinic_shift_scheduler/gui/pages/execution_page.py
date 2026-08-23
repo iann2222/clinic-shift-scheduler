@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...events import ExecutionPhase, ProgressEventKind
+from ...time_formatting import format_duration
 from ..navigation import NAVIGATION_ITEMS, PageId
 from .base import InputPage
 
@@ -353,7 +354,11 @@ class ExecutionPage(InputPage):
             )
             self.open_output_button.setEnabled(True)
         total = message.get("timings", {}).get("total_execution_seconds")
-        suffix = "" if total is None else f"，總耗時 {float(total):.1f} 秒"
+        suffix = (
+            ""
+            if total is None
+            else f"，總耗時 {format_duration(float(total))}"
+        )
         self.log.appendPlainText(f"[執行] 正式結果完成{suffix}。")
         self.result_group.show()
         self.scroll_content.updateGeometry()
@@ -382,14 +387,12 @@ class ExecutionPage(InputPage):
             )
 
     def _refresh_elapsed(self) -> None:
-        elapsed_seconds = 0 if not self._elapsed.isValid() else self._elapsed.elapsed() // 1000
-        minutes, seconds = divmod(elapsed_seconds, 60)
-        rendered = (
-            f"{minutes} 分 {seconds} 秒"
-            if minutes
-            else f"{seconds} 秒"
+        elapsed_seconds = (
+            0
+            if not self._elapsed.isValid()
+            else self._elapsed.elapsed() // 1000
         )
-        self.elapsed_label.setText(f"總耗時：{rendered}")
+        self.elapsed_label.setText(f"總耗時：{format_duration(elapsed_seconds)}")
 
     def _repolish_status(self) -> None:
         self.status_label.style().unpolish(self.status_label)

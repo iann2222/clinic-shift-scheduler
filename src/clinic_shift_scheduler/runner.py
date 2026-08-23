@@ -58,7 +58,11 @@ from .optimization import (
 )
 from .optimization_contracts import EquivalentSolutionDiagnosticStatus
 from .solver_contracts import Assignment, FeasibilityStatus, LexicographicResult
-from .time_formatting import format_seconds, format_seconds_with_minutes
+from .time_formatting import (
+    format_duration,
+    format_seconds,
+    format_seconds_with_minutes,
+)
 
 
 CANDIDATE_OUTPUT_DIRECTORY_NAME = "候選班表"
@@ -170,7 +174,7 @@ def _run_with_elapsed_heartbeat(
                 _notify(
                     progress,
                     "嚴格分階段最佳化進行中："
-                    f"已耗時 {elapsed:.0f} 秒",
+                    f"已耗時 {format_duration(elapsed)}",
                     phase=ExecutionPhase.OPTIMIZATION,
                     kind=ProgressEventKind.HEARTBEAT,
                     elapsed_seconds=elapsed,
