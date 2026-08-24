@@ -157,6 +157,7 @@ class _ExecutionContentScrollArea(QScrollArea):
 class ExecutionPage(InputPage):
     run_requested = Signal()
     cancel_requested = Signal()
+    preserve_requested = Signal()
     stop_candidate_requested = Signal()
     open_output_requested = Signal(str)
 
@@ -175,6 +176,9 @@ class ExecutionPage(InputPage):
         self._terminal_received = False
         self._candidate_processing = False
         self._candidate_stop_requested = False
+        self._has_feasible_solution = False
+        self._can_preserve_output = False
+        self._preserve_requested = False
         self._elapsed = QElapsedTimer()
         self._timer = QTimer(self)
         self._timer.setInterval(1000)
@@ -195,15 +199,19 @@ class ExecutionPage(InputPage):
         self.run_button.setObjectName("primaryActionButton")
         self.cancel_button = QPushButton("終止排班")
         self.cancel_button.setEnabled(False)
+        self.preserve_button = QPushButton("終止排班並保留當前最佳班表")
+        self.preserve_button.setEnabled(False)
         self.stop_candidate_button = QPushButton("終止候選處理")
         self.stop_candidate_button.setEnabled(False)
         self.run_button.clicked.connect(self.run_requested.emit)
         self.cancel_button.clicked.connect(self.cancel_requested.emit)
+        self.preserve_button.clicked.connect(self.preserve_requested.emit)
         self.stop_candidate_button.clicked.connect(
             self.stop_candidate_requested.emit
         )
         actions.addWidget(self.run_button)
         actions.addWidget(self.cancel_button)
+        actions.addWidget(self.preserve_button)
         actions.addWidget(self.stop_candidate_button)
         actions.addStretch(1)
         status_layout.addLayout(actions)
@@ -289,6 +297,9 @@ class ExecutionPage(InputPage):
         self._terminal_received = False
         self._candidate_processing = False
         self._candidate_stop_requested = False
+        self._has_feasible_solution = False
+        self._can_preserve_output = False
+        self._preserve_requested = False
         self.status_label.setText("資料準備完成後即可執行排班。")
         self.status_label.setObjectName("mutedText")
         self._repolish_status()
@@ -303,7 +314,10 @@ class ExecutionPage(InputPage):
         self.result_group.hide()
         self.content_scroll.verticalScrollBar().setValue(0)
         self.cancel_button.setEnabled(False)
+        self.preserve_button.setEnabled(False)
+        self.preserve_button.setToolTip("")
         self.stop_candidate_button.setEnabled(False)
+        self.result_group.setTitle("正式結果")
 
     def mark_input_changed(self) -> None:
         if self._running or not self._terminal_received:
@@ -318,6 +332,9 @@ class ExecutionPage(InputPage):
         self._terminal_received = False
         self._candidate_processing = False
         self._candidate_stop_requested = False
+        self._has_feasible_solution = False
+        self._can_preserve_output = False
+        self._preserve_requested = False
         self.log.clear()
         self.result_group.hide()
         self.content_scroll.verticalScrollBar().setValue(0)
@@ -332,6 +349,8 @@ class ExecutionPage(InputPage):
         self._repolish_status()
         self.run_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
+        self.preserve_button.setEnabled(False)
+        self.preserve_button.setToolTip("找到第一份合法班表後即可使用。")
         self.stop_candidate_button.setEnabled(False)
         self._elapsed.start()
         self._timer.start()
@@ -346,6 +365,8 @@ class ExecutionPage(InputPage):
             self._show_progress(message)
         elif message_type == "completed":
             self._show_completed(message)
+        elif message_type == "preserved":
+            self._show_preserved(message)
         elif message_type == "failed":
             self._show_failed(message)
 
@@ -355,9 +376,24 @@ class ExecutionPage(InputPage):
 
     def request_cancelling(self) -> None:
         self.cancel_button.setEnabled(False)
+        self.preserve_button.setEnabled(False)
         self.stop_candidate_button.setEnabled(False)
         self.status_label.setText("正在取消排班，請稍候……")
         self.log.appendPlainText("[執行] 已提出取消要求。")
+
+    def request_preserving(self) -> None:
+        if self._preserve_requested:
+            return
+        self._preserve_requested = True
+        self.cancel_button.setEnabled(False)
+        self.preserve_button.setEnabled(False)
+        self.stop_candidate_button.setEnabled(False)
+        self.status_label.setText(
+            "正在停止後續最佳化，並驗證及輸出目前最佳合法班表……"
+        )
+        self.log.appendPlainText(
+            "[排班] 已提出保留要求；完成獨立驗證後才會建立暫存結果。"
+        )
 
     def request_candidate_stopping(self) -> None:
         if not self._candidate_processing or self._candidate_stop_requested:
@@ -374,6 +410,7 @@ class ExecutionPage(InputPage):
         self._timer.stop()
         self.run_button.setEnabled(self.month_label.text() != "尚未開啟月份")
         self.cancel_button.setEnabled(False)
+        self.preserve_button.setEnabled(False)
         self.stop_candidate_button.setEnabled(False)
         self._candidate_processing = False
         self._refresh_elapsed()
@@ -384,15 +421,31 @@ class ExecutionPage(InputPage):
         rendered = str(message.get("message", ""))
         self.status_label.setText(_solver_progress_text(message) or rendered)
         kind = message.get("kind")
+        details = message.get("details")
+        if isinstance(details, dict):
+            if details.get("has_feasible_solution") is True:
+                self._has_feasible_solution = True
+            if "can_preserve_output" in details:
+                self._can_preserve_output = bool(
+                    details.get("can_preserve_output")
+                )
+                reason = details.get("preservation_unavailable_reason")
+                self.preserve_button.setToolTip(
+                    str(reason)
+                    if reason
+                    else "停止後續最佳化，並輸出已通過硬性規則的目前班表。"
+                )
         if phase == ExecutionPhase.CANDIDATE_SEARCH.value:
             self._candidate_processing = True
             self.cancel_button.setEnabled(False)
+            self.preserve_button.setEnabled(False)
             self.stop_candidate_button.setEnabled(
                 not self._candidate_stop_requested
             )
         elif self._candidate_processing:
             self._candidate_processing = False
             self.cancel_button.setEnabled(False)
+            self.preserve_button.setEnabled(False)
             self.stop_candidate_button.setEnabled(False)
         elif phase in {
             ExecutionPhase.VALIDATION.value,
@@ -402,6 +455,19 @@ class ExecutionPage(InputPage):
             # non-interruptible; the dedicated candidate control becomes
             # available if the optional search starts afterwards.
             self.cancel_button.setEnabled(False)
+            self.preserve_button.setEnabled(False)
+        else:
+            activity = (
+                str(details.get("activity", ""))
+                if isinstance(details, dict)
+                else ""
+            )
+            self._update_preserve_button(
+                phase,
+                optimization_completed=(
+                    activity == "formal_optimization_completed"
+                ),
+            )
         if kind not in {
             ProgressEventKind.HEARTBEAT.value,
             ProgressEventKind.CANDIDATE_COUNT.value,
@@ -411,7 +477,9 @@ class ExecutionPage(InputPage):
     def _show_completed(self, message: dict[str, Any]) -> None:
         self._terminal_received = True
         self._candidate_processing = False
+        self.preserve_button.setEnabled(False)
         self.stop_candidate_button.setEnabled(False)
+        self.result_group.setTitle("正式結果")
         self.status_label.setText("排班完成，正式結果已輸出。")
         self.status_label.setObjectName("documentStatusClean")
         self._repolish_status()
@@ -454,9 +522,74 @@ class ExecutionPage(InputPage):
         self.scroll_content.updateGeometry()
         QTimer.singleShot(0, self._scroll_to_completed_result)
 
+    def _show_preserved(self, message: dict[str, Any]) -> None:
+        self._terminal_received = True
+        self._candidate_processing = False
+        self.cancel_button.setEnabled(False)
+        self.preserve_button.setEnabled(False)
+        self.stop_candidate_button.setEnabled(False)
+        self.status_label.setText(
+            "已保留目前最佳合法班表；正式最佳化尚未完成。"
+        )
+        self.status_label.setObjectName("documentStatusClean")
+        self._repolish_status()
+        status = str(message.get("status", "—"))
+        validation = str(message.get("validation", "—"))
+        self.result_group.setTitle("目前最佳合法班表")
+        self.result_status_label.setText(
+            "合法班表（FEASIBLE，未證明最佳）"
+            if status == "FEASIBLE"
+            else status
+        )
+        self.validation_label.setText(
+            "通過（PASS）" if validation == "PASS" else validation
+        )
+        paths = message.get("paths", {})
+        if not isinstance(paths, dict):
+            paths = {}
+        selected_formats = message.get("selected_formats", ())
+        if not isinstance(selected_formats, (list, tuple)):
+            selected_formats = ()
+        self.output_label.setText(
+            _render_output_paths(
+                paths,
+                selected_formats={str(item) for item in selected_formats},
+            )
+        )
+        self.candidate_label.setText("未執行（暫存結果不搜尋候選班表）")
+        first_path = next(
+            (
+                paths.get(key)
+                for key, _label in _OUTPUT_PATH_LABELS
+                if paths.get(key)
+            ),
+            None,
+        )
+        if first_path:
+            self.open_output_button.setProperty(
+                "output_directory", str(Path(str(first_path)).parent)
+            )
+            self.open_output_button.setEnabled(True)
+        timings = message.get("timings", {})
+        total = (
+            timings.get("total_execution_seconds")
+            if isinstance(timings, dict)
+            else None
+        )
+        suffix = (
+            "" if total is None else f"，總耗時 {format_duration(float(total))}"
+        )
+        self.log.appendPlainText(
+            f"[執行] 已輸出目前最佳合法班表{suffix}；此結果尚未證明最佳。"
+        )
+        self.result_group.show()
+        self.scroll_content.updateGeometry()
+        QTimer.singleShot(0, self._scroll_to_completed_result)
+
     def _show_failed(self, message: dict[str, Any]) -> None:
         self._terminal_received = True
         self._candidate_processing = False
+        self.preserve_button.setEnabled(False)
         self.stop_candidate_button.setEnabled(False)
         kind = str(message.get("kind", "UNKNOWN"))
         cancelled = kind == "CANCELLED"
@@ -488,6 +621,22 @@ class ExecutionPage(InputPage):
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
 
+    def _update_preserve_button(
+        self,
+        phase: str,
+        *,
+        optimization_completed: bool = False,
+    ) -> None:
+        self.preserve_button.setEnabled(
+            self._running
+            and not self._preserve_requested
+            and not self._candidate_processing
+            and not optimization_completed
+            and phase == ExecutionPhase.OPTIMIZATION.value
+            and self._has_feasible_solution
+            and self._can_preserve_output
+        )
+
     def _request_open_output(self) -> None:
         directory = self.open_output_button.property("output_directory")
         if isinstance(directory, str) and directory:
@@ -505,10 +654,20 @@ class ExecutionPage(InputPage):
         bar.setValue(min(max(result_top - context_height, 0), bar.maximum()))
 
 
-def _render_output_paths(paths: dict[str, Any]) -> str:
+def _render_output_paths(
+    paths: dict[str, Any],
+    *,
+    selected_formats: set[str] | None = None,
+) -> str:
     """Make every required formal medium visible, including missing ones."""
 
-    return "\n".join(
-        f"{label}：{paths.get(key) or '未產生'}"
-        for key, label in _OUTPUT_PATH_LABELS
-    )
+    lines: list[str] = []
+    for key, label in _OUTPUT_PATH_LABELS:
+        path = paths.get(key)
+        missing = (
+            "未選擇"
+            if selected_formats is not None and key not in selected_formats
+            else "未產生"
+        )
+        lines.append(f"{label}：{path or missing}")
+    return "\n".join(lines)

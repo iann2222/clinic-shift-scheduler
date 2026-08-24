@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from ...app_config import (
     CandidateDiagnosticSettings,
     DiagnosticTimeSettings,
+    PreservationOutputSettings,
     SchedulerAppConfig,
 )
 
@@ -26,6 +27,7 @@ class ConfigDraft:
     diagnostic_time_ratio: float
     candidate_export_count: int
     candidate_export_formats: list[str]
+    preservation_export_formats: list[str]
     config_version: str
 
     @classmethod
@@ -43,6 +45,9 @@ class ConfigDraft:
             candidate_export_count=config.candidate_diagnostic.export_count,
             candidate_export_formats=list(
                 config.candidate_diagnostic.export_formats
+            ),
+            preservation_export_formats=list(
+                config.preservation_output.export_formats
             ),
             config_version=config.config_version,
         )
@@ -75,6 +80,9 @@ class ConfigDraft:
             overwrite=self.overwrite,
             progress_update_seconds=self.progress_update_seconds,
             candidate_diagnostic=diagnostic,
+            preservation_output=PreservationOutputSettings(
+                export_formats=tuple(self.preservation_export_formats),
+            ),
             config_version=self.config_version,
         )
 

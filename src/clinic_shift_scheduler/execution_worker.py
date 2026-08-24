@@ -20,6 +20,7 @@ from .application import (
 from .events import (
     CancellationToken,
     ExecutionPhase,
+    PreservationToken,
     ProgressEvent,
     ProgressEventKind,
 )
@@ -27,6 +28,7 @@ from .execution_protocol import (
     completion_message,
     encode_execution_message,
     failure_message,
+    preserved_completion_message,
     progress_message,
 )
 
@@ -50,10 +52,17 @@ def run_worker(
     intermediate_directory: Path,
     cancel_file: Path | None,
     stdout: BinaryIO,
+    preserve_file: Path | None = None,
 ) -> int:
     writer = _ProtocolWriter(stdout)
     cancellation = CancellationToken()
-    monitor_stop, monitor = _start_cancel_monitor(cancel_file, cancellation)
+    preservation = PreservationToken()
+    monitor_stop, monitor = _start_control_monitor(
+        cancel_file,
+        preserve_file,
+        cancellation,
+        preservation,
+    )
     writer.write(
         encode_execution_message("started", input_path=str(input_path))
     )
@@ -81,6 +90,7 @@ def run_worker(
                 progress=emit,
                 diagnostic_progress=emit_diagnostic,
                 cancellation=cancellation,
+                preservation=preservation,
             ),
         )
     except ScheduleApplicationError as error:
@@ -104,7 +114,10 @@ def run_worker(
         return 1
 
     else:
-        writer.write(completion_message(result))
+        if result.output.preservation_info is None:
+            writer.write(completion_message(result))
+        else:
+            writer.write(preserved_completion_message(result))
         return 0
     finally:
         monitor_stop.set()
@@ -119,6 +132,7 @@ def main(arguments: list[str] | None = None) -> int:
     parser.add_argument("--output-directory", required=True, type=Path)
     parser.add_argument("--intermediate-directory", required=True, type=Path)
     parser.add_argument("--cancel-file", type=Path)
+    parser.add_argument("--preserve-file", type=Path)
     options = parser.parse_args(arguments)
     return run_worker(
         config_path=options.config.resolve(),
@@ -129,21 +143,31 @@ def main(arguments: list[str] | None = None) -> int:
             None if options.cancel_file is None else options.cancel_file.resolve()
         ),
         stdout=sys.stdout.buffer,
+        preserve_file=(
+            None
+            if options.preserve_file is None
+            else options.preserve_file.resolve()
+        ),
     )
 
 
-def _start_cancel_monitor(
+def _start_control_monitor(
     cancel_file: Path | None,
+    preserve_file: Path | None,
     cancellation: CancellationToken,
+    preservation: PreservationToken,
 ) -> tuple[threading.Event, threading.Thread | None]:
     stop = threading.Event()
-    if cancel_file is None:
+    if cancel_file is None and preserve_file is None:
         return stop, None
 
     def monitor() -> None:
         while not stop.wait(0.05):
-            if cancel_file.exists():
+            if cancel_file is not None and cancel_file.exists():
                 cancellation.cancel()
+                return
+            if preserve_file is not None and preserve_file.exists():
+                preservation.request()
                 return
 
     thread = threading.Thread(
@@ -153,6 +177,20 @@ def _start_cancel_monitor(
     )
     thread.start()
     return stop, thread
+
+
+def _start_cancel_monitor(
+    cancel_file: Path | None,
+    cancellation: CancellationToken,
+) -> tuple[threading.Event, threading.Thread | None]:
+    """Backward-compatible test seam for the original single control."""
+
+    return _start_control_monitor(
+        cancel_file,
+        None,
+        cancellation,
+        PreservationToken(),
+    )
 
 
 def _gui_diagnostic_event(event: ProgressEvent) -> ProgressEvent:

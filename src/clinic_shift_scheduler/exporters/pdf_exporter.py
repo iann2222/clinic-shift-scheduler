@@ -21,7 +21,7 @@ from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
-from .excel_exporter import WORKSHEET_NAMES
+from .excel_exporter import PROVISIONAL_WORKSHEET_NAMES, WORKSHEET_NAMES
 from .files import FormalExportError, prepare_target
 
 
@@ -121,8 +121,13 @@ def _key_value(sheet: Worksheet, label: str) -> Any | None:
     return None
 
 
-def _validate_formal_workbook(workbook: Any) -> tuple[Worksheet, Worksheet]:
-    if tuple(workbook.sheetnames) != WORKSHEET_NAMES:
+def _validate_workbook(
+    workbook: Any,
+    *,
+    provisional: bool = False,
+) -> tuple[Worksheet, Worksheet]:
+    expected_names = PROVISIONAL_WORKSHEET_NAMES if provisional else WORKSHEET_NAMES
+    if tuple(workbook.sheetnames) != expected_names:
         raise FormalExportError(
             "PDF export requires the complete formal Excel workbook structure"
         )
@@ -135,8 +140,11 @@ def _validate_formal_workbook(workbook: Any) -> tuple[Worksheet, Worksheet]:
             "PDF export requires a valid individual pattern summary sheet"
         )
     solver = workbook[_SOLVER_SHEET]
-    if _key_value(solver, "正式狀態") != "OPTIMAL":
-        raise FormalExportError("PDF export requires Excel formal status OPTIMAL")
+    required_status = "FEASIBLE" if provisional else "OPTIMAL"
+    if _key_value(solver, "正式狀態") != required_status:
+        raise FormalExportError(
+            f"PDF export requires Excel status {required_status}"
+        )
     if _key_value(solver, "Validation") != "PASS":
         raise FormalExportError("PDF export requires Excel validation PASS")
     return schedule, summary
@@ -314,10 +322,13 @@ def _individual_summary_table(sheet: Worksheet) -> Table:
     return table
 
 
-def _render_pdf(source: Path, target: Path) -> None:
+def _render_pdf(source: Path, target: Path, *, provisional: bool = False) -> None:
     workbook = load_workbook(source, read_only=False, data_only=True)
     try:
-        schedule, summary = _validate_formal_workbook(workbook)
+        schedule, summary = _validate_workbook(
+            workbook,
+            provisional=provisional,
+        )
         title = workbook.properties.title or f"{source.stem} 月班表"
         _register_cjk_font()
         document = SimpleDocTemplate(
@@ -329,7 +340,11 @@ def _render_pdf(source: Path, target: Path) -> None:
             bottomMargin=5 * mm,
             title=f"{title}（本月班表）",
             author="clinic-shift-scheduler",
-            subject="正式月班表列印版",
+            subject=(
+                "目前最佳合法班表（尚未完成最佳化）"
+                if provisional
+                else "正式月班表列印版"
+            ),
         )
         title_style = ParagraphStyle(
             name="schedule-title",
@@ -339,15 +354,36 @@ def _render_pdf(source: Path, target: Path) -> None:
             alignment=TA_CENTER,
             spaceAfter=0,
         )
-        document.build(
-            [
-                Paragraph(f"{title}（本月班表）", title_style),
-                Spacer(1, 2 * mm),
+        story = [Paragraph(f"{title}（本月班表）", title_style)]
+        if provisional:
+            warning_style = ParagraphStyle(
+                name="provisional-warning",
+                fontName=_CJK_FONT_BOLD,
+                fontSize=8,
+                leading=10,
+                alignment=TA_CENTER,
+                textColor=colors.HexColor("#9A3412"),
+                spaceAfter=0,
+            )
+            story.extend(
+                (
+                    Paragraph(
+                        "尚未完成全部最佳化，不代表正式最佳結果",
+                        warning_style,
+                    ),
+                    Spacer(1, 1 * mm),
+                )
+            )
+        else:
+            story.append(Spacer(1, 2 * mm))
+        story.extend(
+            (
                 _schedule_table(schedule),
                 Spacer(1, 3 * mm),
                 _individual_summary_table(summary),
-            ]
+            )
         )
+        document.build(story)
     finally:
         workbook.close()
 
@@ -375,6 +411,34 @@ def export_schedule_pdf_from_excel(
         ) as stream:
             temporary = Path(stream.name)
         _render_pdf(source, temporary)
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+    return target
+
+
+def export_provisional_schedule_pdf_from_excel(
+    excel_path: str | Path,
+    *,
+    output_path: str | Path | None = None,
+    overwrite: bool = False,
+) -> Path:
+    source = Path(excel_path)
+    if not source.is_file():
+        raise FileNotFoundError(f"provisional Excel file not found: {source}")
+    target = Path(output_path) if output_path is not None else source.with_suffix(".pdf")
+    prepare_target(target, overwrite=overwrite)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{target.stem}.",
+            suffix=".pdf",
+            dir=target.parent,
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+        _render_pdf(source, temporary, provisional=True)
         os.replace(temporary, target)
     finally:
         if temporary is not None and temporary.exists():

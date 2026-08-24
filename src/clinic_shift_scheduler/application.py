@@ -23,6 +23,7 @@ from .authoring_application import (
 from .application_contracts import (
     DEFAULT_INTERMEDIATE_DIRECTORY,
     CandidateExportConfig,
+    ProvisionalExportConfig,
 )
 from .errors import InputValidationError
 from .events import (
@@ -30,11 +31,12 @@ from .events import (
     DiagnosticIssue,
     ExecutionPhase,
     ProgressCallback,
+    PreservationToken,
 )
 from .optimization_contracts import EquivalentSolutionDiagnosticConfig
 
 if TYPE_CHECKING:
-    from .runner import ScheduleRunResult
+    from .runner import PreservedScheduleRunResult, ScheduleRunResult
 
 
 class ScheduleApplicationFailureKind(StrEnum):
@@ -75,6 +77,9 @@ class ScheduleApplicationRequest:
     candidate_export_config: CandidateExportConfig = field(
         default_factory=CandidateExportConfig
     )
+    provisional_export_config: ProvisionalExportConfig = field(
+        default_factory=ProvisionalExportConfig
+    )
     progress_interval_seconds: float = DEFAULT_PROGRESS_UPDATE_SECONDS
 
 
@@ -85,6 +90,7 @@ class ScheduleApplicationCallbacks:
     progress: ProgressCallback | None = None
     diagnostic_progress: ProgressCallback | None = None
     cancellation: CancellationToken | None = None
+    preservation: PreservationToken | None = None
 
 
 def request_from_app_config(
@@ -118,6 +124,9 @@ def request_from_app_config(
             max_candidates=config.candidate_diagnostic.export_count,
             formats=config.candidate_diagnostic.export_formats,
         ),
+        provisional_export_config=ProvisionalExportConfig(
+            formats=config.preservation_output.export_formats,
+        ),
         progress_interval_seconds=config.progress_update_seconds,
     )
 
@@ -125,7 +134,7 @@ def request_from_app_config(
 def run_schedule_application(
     request: ScheduleApplicationRequest,
     callbacks: ScheduleApplicationCallbacks | None = None,
-) -> ScheduleRunResult:
+) -> ScheduleRunResult | PreservedScheduleRunResult:
     """Execute the shared scheduling workflow without presentation concerns."""
 
     from .exporters import FormalExportError
@@ -140,10 +149,12 @@ def run_schedule_application(
             overwrite=request.overwrite,
             equivalent_solution_diagnostic_config=request.diagnostic_config,
             candidate_export_config=request.candidate_export_config,
+            provisional_export_config=request.provisional_export_config,
             progress_interval_seconds=request.progress_interval_seconds,
             progress=callbacks.progress,
             diagnostic_progress=callbacks.diagnostic_progress,
             cancellation=callbacks.cancellation,
+            preservation=callbacks.preservation,
         )
     except (
         InputValidationError,

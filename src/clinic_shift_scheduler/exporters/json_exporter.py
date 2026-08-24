@@ -15,14 +15,20 @@ from ..output import FormalScheduleOutput, to_primitive
 from .files import (
     DEFAULT_OUTPUT_DIRECTORY,
     build_output_paths,
+    build_provisional_output_paths,
     prepare_target,
     require_formal_result,
+    require_provisional_result,
     schedule_month,
 )
 
 
 RESULT_CONTRACT_NAME = "clinic-shift-scheduler-formal-result"
 RESULT_CONTRACT_VERSION = "1.11"
+PROVISIONAL_RESULT_CONTRACT_NAME = (
+    "clinic-shift-scheduler-provisional-result"
+)
+PROVISIONAL_RESULT_CONTRACT_VERSION = "1.0"
 
 
 def _validation_document(output: FormalScheduleOutput) -> dict[str, Any]:
@@ -119,6 +125,104 @@ def export_result_json(
         output_directory,
         stem=filename_stem,
     ).json
+    prepare_target(target, overwrite=overwrite)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            prefix=f".{target.stem}.",
+            suffix=".tmp",
+            dir=target.parent,
+            delete=False,
+        ) as stream:
+            json.dump(document, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+            temporary = Path(stream.name)
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+    return target
+
+
+def build_provisional_result_document(
+    data: NormalizedScheduleInput,
+    output: FormalScheduleOutput,
+    *,
+    generated_at: datetime | None = None,
+) -> dict[str, Any]:
+    """Build a separate contract for a validated but unfinished schedule."""
+
+    require_provisional_result(output)
+    timestamp = generated_at or datetime.now(UTC)
+    if timestamp.tzinfo is None:
+        raise ValueError("generated_at must be timezone-aware")
+    overall = output.overall_statistics
+    assert overall is not None
+    assignments = sorted(
+        output.assignments,
+        key=lambda item: (
+            item.date,
+            PERIODS_V1.index(item.period),
+            item.role,
+            item.employee_id,
+        ),
+    )
+    completed_stages = [
+        item.stage.value for item in output.optimization_stages
+    ]
+    return {
+        "contract": {
+            "name": PROVISIONAL_RESULT_CONTRACT_NAME,
+            "version": PROVISIONAL_RESULT_CONTRACT_VERSION,
+        },
+        "result_kind": "provisional",
+        "input_schema_version": data.source.schema_version,
+        "generated_at": timestamp.astimezone(UTC).isoformat().replace(
+            "+00:00", "Z"
+        ),
+        "month": schedule_month(data),
+        "status": output.status.value,
+        "warning": "尚未完成全部最佳化，不代表正式最佳結果",
+        "preservation": to_primitive(output.preservation_info),
+        "completed_stages": completed_stages,
+        "execution_timing": to_primitive(output.execution_timing),
+        "optimization_telemetry": to_primitive(output.optimization_telemetry),
+        "objective_vector": dict(overall.objective_vector),
+        "validation": _validation_document(output),
+        "stage_records": to_primitive(output.optimization_stages),
+        "preference_benchmarks": to_primitive(output.preference_benchmarks),
+        "class_pattern_locks": to_primitive(output.class_pattern_locks),
+        "assignments": to_primitive(assignments),
+        "statistics": {
+            "individual": to_primitive(output.individual_statistics),
+            "category": to_primitive(output.category_statistics),
+            "class_preferences": to_primitive(
+                output.class_preference_statistics
+            ),
+            "fairness_groups": to_primitive(output.fairness_group_statistics),
+            "overall": to_primitive(overall),
+        },
+        "monthly_schedule": _schedule_document(output),
+    }
+
+
+def export_provisional_result_json(
+    data: NormalizedScheduleInput,
+    output: FormalScheduleOutput,
+    *,
+    output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY,
+    overwrite: bool = False,
+    generated_at: datetime | None = None,
+) -> Path:
+    document = build_provisional_result_document(
+        data,
+        output,
+        generated_at=generated_at,
+    )
+    target = build_provisional_output_paths(data, output_directory).json
     prepare_target(target, overwrite=overwrite)
     temporary: Path | None = None
     try:

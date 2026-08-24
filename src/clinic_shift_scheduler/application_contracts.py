@@ -34,3 +34,24 @@ class CandidateExportConfig:
             )
         if self.max_candidates and not self.formats:
             raise ValueError("candidate export formats cannot be empty")
+
+
+@dataclass(frozen=True, slots=True)
+class ProvisionalExportConfig:
+    """Media selected when preserving a validated partial schedule."""
+
+    formats: tuple[str, ...] = ("json", "excel", "pdf")
+
+    def __post_init__(self) -> None:
+        if not self.formats:
+            raise ValueError("provisional export formats cannot be empty")
+        if len(set(self.formats)) != len(self.formats):
+            raise ValueError("provisional export formats cannot contain duplicates")
+        unsupported = sorted(
+            set(self.formats) - SUPPORTED_CANDIDATE_EXPORT_FORMATS
+        )
+        if unsupported:
+            raise ValueError(
+                "unsupported provisional export formats: "
+                + ", ".join(unsupported)
+            )

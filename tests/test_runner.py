@@ -21,11 +21,16 @@ from clinic_shift_scheduler import (
     EquivalentSolutionDiagnosticStatus,
     ExecutionPhase,
     FeasibilityStatus,
+    PreservedScheduleRunResult,
+    PreservationToken,
     ProgressEvent,
     ProgressEventKind,
+    ProvisionalExportConfig,
+    ResultValidationStatus,
     RESULT_CONTRACT_VERSION,
     SchedulerAppConfig,
     ScheduleRunError,
+    ScheduleRunResult,
     run_schedule_file,
 )
 import clinic_shift_scheduler.cli as cli_module
@@ -63,6 +68,90 @@ class ScheduleRunnerTests(unittest.TestCase):
             "operation_cancelled",
         )
 
+    def test_preservation_exports_only_selected_validated_provisional_media(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            input_path = root / "input.json"
+            input_path.write_text(
+                json.dumps(minimal_valid_input(), ensure_ascii=False),
+                encoding="utf-8",
+            )
+            preservation = PreservationToken()
+
+            def preserve_after_hard(event: ProgressEvent) -> None:
+                if (
+                    event.kind is ProgressEventKind.STEP_COMPLETED
+                    and event.details.get("formal_stage") == "hard_feasibility"
+                ):
+                    preservation.request()
+
+            result = run_schedule_file(
+                input_path,
+                output_directory=root / "output",
+                intermediate_directory=root / "runtime" / "expanded-input",
+                provisional_export_config=ProvisionalExportConfig(
+                    formats=("json",)
+                ),
+                preservation=preservation,
+                progress=preserve_after_hard,
+                progress_interval_seconds=0.01,
+            )
+
+            self.assertIsInstance(result, PreservedScheduleRunResult)
+            assert isinstance(result, PreservedScheduleRunResult)
+            self.assertEqual(result.output.status, FeasibilityStatus.FEASIBLE)
+            assert result.output.validation_report is not None
+            self.assertEqual(
+                result.output.validation_report.status,
+                ResultValidationStatus.PASS,
+            )
+            self.assertIsNotNone(result.json_path)
+            assert result.json_path is not None
+            document = json.loads(result.json_path.read_text(encoding="utf-8"))
+            self.assertEqual(document["result_kind"], "provisional")
+            self.assertEqual(document["status"], "FEASIBLE")
+            self.assertIsNone(result.excel_path)
+            self.assertIsNone(result.pdf_path)
+            self.assertFalse(
+                (root / "output" / "候選班表").exists()
+            )
+
+    def test_existing_provisional_target_does_not_stop_formal_optimization(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            input_path = root / "input.json"
+            input_path.write_text(
+                json.dumps(minimal_valid_input(), ensure_ascii=False),
+                encoding="utf-8",
+            )
+            output_directory = root / "output"
+            output_directory.mkdir()
+            existing = (
+                output_directory
+                / "排班暫存結果_2024-10.feasible-v1.json"
+            )
+            existing.write_text("keep", encoding="utf-8")
+            preservation = PreservationToken()
+            preservation.request()
+
+            result = run_schedule_file(
+                input_path,
+                output_directory=output_directory,
+                intermediate_directory=root / "runtime" / "expanded-input",
+                provisional_export_config=ProvisionalExportConfig(
+                    formats=("json",)
+                ),
+                preservation=preservation,
+                overwrite=False,
+            )
+
+            self.assertIsInstance(result, ScheduleRunResult)
+            self.assertEqual(result.output.status, FeasibilityStatus.OPTIMAL)
+            self.assertEqual(existing.read_text(encoding="utf-8"), "keep")
     def test_interactive_console_overwrites_heartbeat_line(self) -> None:
         class InteractiveBuffer(StringIO):
             def isatty(self) -> bool:

@@ -106,10 +106,12 @@ class ScheduleApplicationTests(unittest.TestCase):
             overwrite=request.overwrite,
             equivalent_solution_diagnostic_config=request.diagnostic_config,
             candidate_export_config=request.candidate_export_config,
+            provisional_export_config=request.provisional_export_config,
             progress_interval_seconds=request.progress_interval_seconds,
             progress=progress,
             diagnostic_progress=diagnostic_progress,
             cancellation=None,
+            preservation=None,
         )
 
     def test_application_service_categorizes_lower_level_failures(self) -> None:

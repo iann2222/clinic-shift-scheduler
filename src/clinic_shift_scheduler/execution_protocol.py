@@ -95,6 +95,57 @@ def completion_message(result: Any) -> bytes:
     )
 
 
+def preserved_completion_message(result: Any) -> bytes:
+    """Report a validated FEASIBLE schedule saved before formal completion."""
+
+    output = result.output
+    validation = output.validation_report
+    overall = output.overall_statistics
+    paths = {
+        name: str(path)
+        for name, path in (
+            ("json", result.json_path),
+            ("excel", result.excel_path),
+            ("pdf", result.pdf_path),
+        )
+        if path is not None
+    }
+    preservation = output.preservation_info
+    return encode_execution_message(
+        "preserved",
+        status=output.status.value,
+        validation=(
+            None if validation is None else validation.status.value
+        ),
+        warning="尚未完成全部最佳化，不代表正式最佳結果",
+        objective_vector=(
+            {} if overall is None else dict(overall.objective_vector)
+        ),
+        completed_stage_count=len(output.optimization_stages),
+        selected_formats=list(result.selected_formats),
+        preservation=(
+            None
+            if preservation is None
+            else {
+                "activity": preservation.activity,
+                "formal_stage": preservation.formal_stage,
+                "preference_rank": preservation.preference_rank,
+                "full_time_class": preservation.full_time_class,
+                "used_current_incumbent": (
+                    preservation.used_current_incumbent
+                ),
+            }
+        ),
+        paths=paths,
+        timings={
+            "optimization_seconds": result.optimization_seconds,
+            "validation_seconds": result.validation_seconds,
+            "export_seconds": result.export_seconds,
+            "total_execution_seconds": result.total_execution_seconds,
+        },
+    )
+
+
 class ExecutionMessageDecoder:
     """Incrementally decode UTF-8 JSON lines produced by one worker."""
 

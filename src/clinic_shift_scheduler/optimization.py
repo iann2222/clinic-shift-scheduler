@@ -27,6 +27,7 @@ from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period, ShiftMode
 from .events import (
     CancellationToken,
     ExecutionPhase,
+    PreservationToken,
     ProgressCallback,
     ProgressEvent,
     ProgressEventKind,
@@ -82,6 +83,7 @@ from .solver_contracts import (
     LexicographicResult,
     OptimizationTelemetry,
     PersonDayKey,
+    SchedulePreservationInfo,
 )
 
 
@@ -1304,6 +1306,7 @@ def _solve_once(
     config: LexicographicSolverConfig,
     cancellation: CancellationToken | None = None,
     *,
+    preservation: PreservationToken | None = None,
     progress: ProgressCallback | None = None,
     progress_context: _SolveProgressContext | None = None,
     progress_interval_seconds: float = 5.0,
@@ -1347,17 +1350,21 @@ def _solve_once(
             daemon=True,
         )
         reporter.start()
-    if cancellation is not None:
+    if cancellation is not None or preservation is not None:
 
-        def stop_when_cancelled() -> None:
+        def stop_when_requested() -> None:
             while not finished.is_set():
-                if cancellation.wait(0.05):
+                if cancellation is not None and cancellation.is_cancelled:
                     solver.stop_search()
                     return
+                if preservation is not None and preservation.is_requested:
+                    solver.stop_search()
+                    return
+                finished.wait(0.05)
 
         monitor = threading.Thread(
-            target=stop_when_cancelled,
-            name="cp-sat-cancellation-monitor",
+            target=stop_when_requested,
+            name="cp-sat-stop-monitor",
             daemon=True,
         )
         monitor.start()
@@ -1536,6 +1543,7 @@ def _empty_result(
     precheck: PrecheckResult,
     stages: tuple[OptimizationStageResult, ...] = (),
     optimization_telemetry: OptimizationTelemetry | None = None,
+    preservation_info: SchedulePreservationInfo | None = None,
 ) -> LexicographicResult:
     return LexicographicResult(
         status=status,
@@ -1550,6 +1558,7 @@ def _empty_result(
         precheck=precheck,
         implemented_objective_prefix_optimal=False,
         optimization_telemetry=optimization_telemetry,
+        preservation_info=preservation_info,
     )
 
 
@@ -1564,6 +1573,7 @@ def _result_from_snapshot(
     implemented_objective_prefix_optimal: bool = False,
     locked_model: OptimizationModel | None = None,
     optimization_telemetry: OptimizationTelemetry | None = None,
+    preservation_info: SchedulePreservationInfo | None = None,
 ) -> LexicographicResult:
     return LexicographicResult(
         status=status,
@@ -1578,6 +1588,7 @@ def _result_from_snapshot(
         precheck=precheck,
         implemented_objective_prefix_optimal=implemented_objective_prefix_optimal,
         optimization_telemetry=optimization_telemetry,
+        preservation_info=preservation_info,
         _locked_model=locked_model,
     )
 
@@ -1589,6 +1600,7 @@ def _discover_preference_benchmarks(
     config: LexicographicSolverConfig,
     cancellation: CancellationToken | None = None,
     *,
+    preservation: PreservationToken | None = None,
     progress: ProgressCallback | None = None,
     progress_interval_seconds: float = 5.0,
     optimization_started_at: float | None = None,
@@ -1604,6 +1616,8 @@ def _discover_preference_benchmarks(
     results: list[PreferenceBenchmarkResult] = []
     last_run: _SolverRun | None = None
     for benchmark_index, definition in enumerate(definitions, start=1):
+        if preservation is not None and preservation.is_requested:
+            break
         rank_label = "一" if rank is PreferenceRank.FIRST else "二"
         direction = (
             ObjectiveDirection.MAXIMIZE
@@ -1672,13 +1686,14 @@ def _discover_preference_benchmarks(
             built.feasibility.model.maximize(expression)
         else:
             built.feasibility.model.minimize(expression)
-        if cancellation is None and progress is None:
+        if cancellation is None and progress is None and preservation is None:
             run = _solve_once(built.feasibility.model, config)
         else:
             run = _solve_once(
                 built.feasibility.model,
                 config,
                 cancellation,
+                preservation=preservation,
                 progress=progress,
                 progress_context=context,
                 progress_interval_seconds=progress_interval_seconds,
@@ -1737,6 +1752,7 @@ def solve_lexicographic(
     *,
     precheck_result: PrecheckResult | None = None,
     cancellation: CancellationToken | None = None,
+    preservation: PreservationToken | None = None,
     progress: ProgressCallback | None = None,
     progress_interval_seconds: float = 5.0,
 ) -> LexicographicResult:
@@ -1800,6 +1816,27 @@ def solve_lexicographic(
             },
         )
 
+    def preservation_requested() -> bool:
+        return preservation is not None and preservation.is_requested
+
+    def preservation_info(
+        activity: str,
+        *,
+        stage: OptimizationStage | None = None,
+        rank: PreferenceRank | None = None,
+        full_time_class: FullTimeClass | None = None,
+        used_current_incumbent: bool = False,
+    ) -> SchedulePreservationInfo:
+        return SchedulePreservationInfo(
+            activity=activity,
+            formal_stage=None if stage is None else stage.value,
+            preference_rank=None if rank is None else rank.value,
+            full_time_class=(
+                None if full_time_class is None else full_time_class.value
+            ),
+            used_current_incumbent=used_current_incumbent,
+        )
+
     hard_context = _formal_progress_context(
         OptimizationStage.HARD_FEASIBILITY,
         optimization_started_at=optimization_started_at,
@@ -1808,13 +1845,14 @@ def solve_lexicographic(
         time_to_first_feasible_schedule=None,
     )
     _emit_activity_event(progress, hard_context, ProgressEventKind.STEP_STARTED)
-    if cancellation is None and progress is None:
+    if cancellation is None and progress is None and preservation is None:
         hard_run = _solve_once(built.feasibility.model, config)
     else:
         hard_run = _solve_once(
             built.feasibility.model,
             config,
             cancellation,
+            preservation=preservation,
             progress=progress,
             progress_context=hard_context,
             progress_interval_seconds=progress_interval_seconds,
@@ -1866,6 +1904,14 @@ def solve_lexicographic(
             precheck,
             tuple(stages),
             current_telemetry(),
+            (
+                preservation_info(
+                    "formal_stage",
+                    stage=OptimizationStage.HARD_FEASIBILITY,
+                )
+                if preservation_requested()
+                else None
+            ),
         )
 
     time_to_first_feasible_schedule = perf_counter() - optimization_started_at
@@ -1888,12 +1934,41 @@ def solve_lexicographic(
     )
     snapshot = _snapshot(data, built, hard_run.solver)
     last_solver: cp_model.CpSolver | None = hard_run.solver
+    if preservation_requested():
+        return _result_from_snapshot(
+            FeasibilityStatus.FEASIBLE,
+            snapshot,
+            stages,
+            precheck,
+            implemented_objective_prefix_optimal=True,
+            optimization_telemetry=current_telemetry(),
+            preservation_info=preservation_info(
+                "formal_stage",
+                stage=OptimizationStage.HARD_FEASIBILITY,
+                used_current_incumbent=True,
+            ),
+        )
 
     def execute_specs(
         specs: tuple[_ObjectiveSpec, ...] | list[_ObjectiveSpec],
     ) -> LexicographicResult | None:
         nonlocal last_solver, snapshot
         for objective in specs:
+            if preservation_requested():
+                return _result_from_snapshot(
+                    FeasibilityStatus.FEASIBLE,
+                    snapshot,
+                    stages,
+                    precheck,
+                    preference_benchmarks=tuple(benchmarks),
+                    class_pattern_locks=tuple(class_pattern_locks),
+                    implemented_objective_prefix_optimal=True,
+                    optimization_telemetry=current_telemetry(),
+                    preservation_info=preservation_info(
+                        "stage_boundary",
+                        stage=objective.stage,
+                    ),
+                )
             context = _formal_progress_context(
                 objective.stage,
                 optimization_started_at=optimization_started_at,
@@ -1920,18 +1995,34 @@ def solve_lexicographic(
                     ),
                     context,
                 )
+                if preservation_requested():
+                    return _result_from_snapshot(
+                        FeasibilityStatus.FEASIBLE,
+                        snapshot,
+                        stages,
+                        precheck,
+                        preference_benchmarks=tuple(benchmarks),
+                        class_pattern_locks=tuple(class_pattern_locks),
+                        implemented_objective_prefix_optimal=True,
+                        optimization_telemetry=current_telemetry(),
+                        preservation_info=preservation_info(
+                            "formal_stage",
+                            stage=objective.stage,
+                        ),
+                    )
                 continue
             if objective.direction is ObjectiveDirection.MAXIMIZE:
                 built.feasibility.model.maximize(objective.expression)
             else:
                 built.feasibility.model.minimize(objective.expression)
-            if cancellation is None and progress is None:
+            if cancellation is None and progress is None and preservation is None:
                 run = _solve_once(built.feasibility.model, config)
             else:
                 run = _solve_once(
                     built.feasibility.model,
                     config,
                     cancellation,
+                    preservation=preservation,
                     progress=progress,
                     progress_context=context,
                     progress_interval_seconds=progress_interval_seconds,
@@ -1958,7 +2049,24 @@ def solve_lexicographic(
                 )
                 snapshot = _snapshot(data, built, run.solver)
                 last_solver = run.solver
+                if preservation_requested():
+                    return _result_from_snapshot(
+                        FeasibilityStatus.FEASIBLE,
+                        snapshot,
+                        stages,
+                        precheck,
+                        preference_benchmarks=tuple(benchmarks),
+                        class_pattern_locks=tuple(class_pattern_locks),
+                        implemented_objective_prefix_optimal=True,
+                        optimization_telemetry=current_telemetry(),
+                        preservation_info=preservation_info(
+                            "formal_stage",
+                            stage=objective.stage,
+                            used_current_incumbent=True,
+                        ),
+                    )
                 continue
+            used_current_incumbent = False
             if run.raw_status == cp_model.FEASIBLE:
                 objective_value = int(run.solver.value(objective.expression))
                 append_completed_stage(
@@ -1978,6 +2086,7 @@ def solve_lexicographic(
                 )
                 snapshot = _snapshot(data, built, run.solver)
                 last_solver = run.solver
+                used_current_incumbent = True
             else:
                 append_completed_stage(
                     OptimizationStageResult(
@@ -2005,7 +2114,19 @@ def solve_lexicographic(
                 precheck,
                 preference_benchmarks=tuple(benchmarks),
                 class_pattern_locks=tuple(class_pattern_locks),
+                implemented_objective_prefix_optimal=(
+                    preservation_requested() and not used_current_incumbent
+                ),
                 optimization_telemetry=current_telemetry(),
+                preservation_info=(
+                    preservation_info(
+                        "formal_stage",
+                        stage=objective.stage,
+                        used_current_incumbent=used_current_incumbent,
+                    )
+                    if preservation_requested()
+                    else None
+                ),
             )
         return None
 
@@ -2025,18 +2146,77 @@ def solve_lexicographic(
         ),
     }
     for rank in PreferenceRank:
+        if preservation_requested():
+            return _result_from_snapshot(
+                FeasibilityStatus.FEASIBLE,
+                snapshot,
+                stages,
+                precheck,
+                preference_benchmarks=tuple(benchmarks),
+                class_pattern_locks=tuple(class_pattern_locks),
+                implemented_objective_prefix_optimal=True,
+                optimization_telemetry=current_telemetry(),
+                preservation_info=preservation_info(
+                    "stage_boundary",
+                    stage=PREFERENCE_REGRET_STAGES[rank][0],
+                    rank=rank,
+                ),
+            )
         discovered, last_run = _discover_preference_benchmarks(
             data,
             built,
             rank,
             config,
             cancellation,
+            preservation=preservation,
             progress=progress,
             progress_interval_seconds=progress_interval_seconds,
             optimization_started_at=optimization_started_at,
             formal_stages_completed=formal_stages_completed,
             time_to_first_feasible_schedule=time_to_first_feasible_schedule,
         )
+        if preservation_requested():
+            completed_discovered = tuple(
+                item
+                for item in discovered
+                if item.status
+                in (
+                    OptimizationStageStatus.OPTIMAL,
+                    OptimizationStageStatus.SKIPPED_CONSTANT,
+                )
+            )
+            benchmarks.extend(completed_discovered)
+            interrupted = next(
+                (
+                    item
+                    for item in discovered
+                    if item.status
+                    not in (
+                        OptimizationStageStatus.OPTIMAL,
+                        OptimizationStageStatus.SKIPPED_CONSTANT,
+                    )
+                ),
+                None,
+            )
+            return _result_from_snapshot(
+                FeasibilityStatus.FEASIBLE,
+                snapshot,
+                stages,
+                precheck,
+                preference_benchmarks=tuple(benchmarks),
+                class_pattern_locks=tuple(class_pattern_locks),
+                implemented_objective_prefix_optimal=True,
+                optimization_telemetry=current_telemetry(),
+                preservation_info=preservation_info(
+                    "preference_benchmark",
+                    rank=rank,
+                    full_time_class=(
+                        None
+                        if interrupted is None
+                        else interrupted.full_time_class
+                    ),
+                ),
+            )
         benchmarks.extend(discovered)
         if any(
             item.status

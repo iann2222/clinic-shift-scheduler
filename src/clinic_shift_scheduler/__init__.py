@@ -17,19 +17,19 @@ def _exports(module: str, *names: str) -> None:
     _EXPORTS.update({name: (module, name) for name in names})
 
 
-_exports("app_config", "APP_CONFIG_VERSION", "CandidateDiagnosticSettings", "DiagnosticTimeSettings", "SchedulerAppConfig", "SchedulerConfigDocument", "load_scheduler_config", "load_scheduler_config_document", "parse_scheduler_config", "parse_scheduler_config_document", "write_scheduler_config_document")
+_exports("app_config", "APP_CONFIG_VERSION", "CandidateDiagnosticSettings", "DiagnosticTimeSettings", "PreservationOutputSettings", "SchedulerAppConfig", "SchedulerConfigDocument", "load_scheduler_config", "load_scheduler_config_document", "parse_scheduler_config", "parse_scheduler_config_document", "write_scheduler_config_document")
 _exports("authoring", "WEEKLY_AUTHORING_VERSION", "expand_weekly_template", "load_weekly_authoring_document", "parse_weekly_authoring", "validate_and_normalize_weekly", "write_weekly_authoring_document")
 _exports("authoring_models", "AuthoringAvailableSlot", "AuthoringEmployee", "AuthoringLeaveRequest", "AuthoringUnavailableSlot", "DateOverrideRule", "StaffingPlan", "WeeklyAuthoringDocument", "WeeklyDemandRule", "WeeklyPeriod")
 _exports("application", "ScheduleApplicationCallbacks", "ScheduleApplicationError", "ScheduleApplicationFailureKind", "ScheduleApplicationRequest", "request_from_app_config", "run_schedule_application")
 _exports("authoring_application", "AuthoringApplication", "AuthoringFileExistsError", "AuthoringSession", "AuthoringValidationResult", "default_month_filename")
 _exports("config_application", "ConfigApplication", "ConfigSession", "ConfigValidationResult")
-_exports("application_contracts", "CandidateExportConfig")
+_exports("application_contracts", "CandidateExportConfig", "ProvisionalExportConfig")
 _exports("class_preferences", "ClassPreferenceDefinition", "ClassPreferenceMetric", "PreferenceDirection", "PreferenceRank", "class_opportunity_days")
 _exports("optimization_policy", "CLASS_PREFERENCES", "FORMAL_OBJECTIVE_STAGES", "FORMAL_STAGE_POLICIES", "FORMAL_STAGE_SEQUENCE", "FormalStagePolicy")
 _exports("errors", "InputValidationError", "ValidationIssue")
-_exports("events", "CancellationToken", "DiagnosticIssue", "DiagnosticSeverity", "ExecutionPhase", "OperationCancelledError", "ProgressCallback", "ProgressEvent", "ProgressEventKind")
-_exports("exporters", "DEFAULT_OUTPUT_DIRECTORY", "RESULT_CONTRACT_NAME", "RESULT_CONTRACT_VERSION", "WORKSHEET_NAMES", "ExportFileExistsError", "FormalExportError", "OutputPaths", "build_output_paths", "build_result_document", "build_workbook", "export_result_excel", "export_result_json", "export_schedule_pdf_from_excel")
-_exports("solver_contracts", "Assignment", "FeasibilityResult", "FeasibilitySolverConfig", "FeasibilityStatus", "LexicographicResult", "OptimizationTelemetry")
+_exports("events", "CancellationToken", "DiagnosticIssue", "DiagnosticSeverity", "ExecutionPhase", "OperationCancelledError", "PreservationToken", "ProgressCallback", "ProgressEvent", "ProgressEventKind")
+_exports("exporters", "DEFAULT_OUTPUT_DIRECTORY", "PROVISIONAL_RESULT_CONTRACT_NAME", "PROVISIONAL_RESULT_CONTRACT_VERSION", "PROVISIONAL_WORKSHEET_NAMES", "RESULT_CONTRACT_NAME", "RESULT_CONTRACT_VERSION", "WORKSHEET_NAMES", "ExportFileExistsError", "FormalExportError", "OutputPaths", "build_output_paths", "build_provisional_output_paths", "build_provisional_result_document", "build_provisional_workbook", "build_result_document", "build_workbook", "export_provisional_result_excel", "export_provisional_result_json", "export_provisional_schedule_pdf_from_excel", "export_result_excel", "export_result_json", "export_schedule_pdf_from_excel")
+_exports("solver_contracts", "Assignment", "FeasibilityResult", "FeasibilitySolverConfig", "FeasibilityStatus", "LexicographicResult", "OptimizationTelemetry", "SchedulePreservationInfo")
 _exports("daily_patterns", "DailyPattern")
 _exports("feasibility", "build_feasibility_model", "solve_feasibility")
 _exports("models", "NormalizedScheduleInput", "ScheduleInput")
@@ -39,7 +39,7 @@ _exports("output", "CategoryStatistics", "ClassPreferenceStatistics", "Execution
 _exports("precheck", "PrecheckDiagnostic", "PrecheckDiagnosticCode", "PrecheckResult", "PrecheckStatus", "run_prechecks")
 _exports("result_metrics", "EmployeeResultMetrics", "RecomputedScheduleMetrics", "recompute_schedule_metrics")
 _exports("result_validation", "ResultValidationIssue", "ResultValidationStatus", "ValidationReport", "validate_schedule_result")
-_exports("runner", "CandidateScheduleExport", "ScheduleRunError", "ScheduleRunResult", "run_schedule_file")
+_exports("runner", "CandidateScheduleExport", "PreservedScheduleRunResult", "ScheduleRunError", "ScheduleRunResult", "run_schedule_file")
 _exports("validation", "validate_and_normalize")
 
 __all__ = [
@@ -102,9 +102,13 @@ __all__ = [
     "PreferenceBenchmarkResult",
     "PreferenceDirection",
     "PreferenceRank",
+    "PreservedScheduleRunResult",
+    "PreservationOutputSettings",
+    "PreservationToken",
     "ProgressEvent",
     "ProgressEventKind",
     "ProgressCallback",
+    "ProvisionalExportConfig",
     "PrecheckDiagnostic",
     "PrecheckDiagnosticCode",
     "PrecheckResult",
@@ -113,6 +117,9 @@ __all__ = [
     "RecomputedScheduleMetrics",
     "RESULT_CONTRACT_NAME",
     "RESULT_CONTRACT_VERSION",
+    "PROVISIONAL_RESULT_CONTRACT_NAME",
+    "PROVISIONAL_RESULT_CONTRACT_VERSION",
+    "PROVISIONAL_WORKSHEET_NAMES",
     "WORKSHEET_NAMES",
     "ResultValidationIssue",
     "ResultValidationStatus",
@@ -127,6 +134,7 @@ __all__ = [
     "SchedulerConfigDocument",
     "ScheduleRunError",
     "ScheduleRunResult",
+    "SchedulePreservationInfo",
     "FormalScheduleOutput",
     "FormalStagePolicy",
     "FORMAL_OBJECTIVE_STAGES",
@@ -146,6 +154,9 @@ __all__ = [
     "class_opportunity_days",
     "build_optimization_model",
     "build_output_paths",
+    "build_provisional_output_paths",
+    "build_provisional_result_document",
+    "build_provisional_workbook",
     "diagnose_equivalent_solutions",
     "default_month_filename",
     "build_result_document",
@@ -153,6 +164,9 @@ __all__ = [
     "expand_weekly_template",
     "export_result_json",
     "export_result_excel",
+    "export_provisional_result_json",
+    "export_provisional_result_excel",
+    "export_provisional_schedule_pdf_from_excel",
     "export_schedule_pdf_from_excel",
     "finalize_schedule_output",
     "recompute_schedule_metrics",

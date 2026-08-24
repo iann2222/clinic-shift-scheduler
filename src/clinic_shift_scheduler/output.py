@@ -47,6 +47,7 @@ from .solver_contracts import (
     FeasibilityStatus,
     LexicographicResult,
     OptimizationTelemetry,
+    SchedulePreservationInfo,
 )
 
 
@@ -233,6 +234,7 @@ class FormalScheduleOutput:
     preference_benchmarks: tuple[PreferenceBenchmarkResult, ...]
     class_pattern_locks: tuple[ClassPatternLockResult, ...]
     optimization_telemetry: OptimizationTelemetry | None = None
+    preservation_info: SchedulePreservationInfo | None = None
     execution_timing: ExecutionTiming | None = None
 
     @property
@@ -689,6 +691,7 @@ def finalize_schedule_output(
             preference_benchmarks=result.preference_benchmarks,
             class_pattern_locks=result.class_pattern_locks,
             optimization_telemetry=result.optimization_telemetry,
+            preservation_info=result.preservation_info,
         )
 
     report = validate_schedule_result(
@@ -697,6 +700,7 @@ def finalize_schedule_output(
         result.stages,
         result.preference_benchmarks,
         result.class_pattern_locks,
+        require_complete_optimization=(result.preservation_info is None),
     )
     if not report.is_valid:
         return FormalScheduleOutput(
@@ -713,6 +717,7 @@ def finalize_schedule_output(
             preference_benchmarks=result.preference_benchmarks,
             class_pattern_locks=result.class_pattern_locks,
             optimization_telemetry=result.optimization_telemetry,
+            preservation_info=result.preservation_info,
         )
 
     stage_by_name = {item.stage: item for item in result.stages}
@@ -747,6 +752,7 @@ def finalize_schedule_output(
         preference_benchmarks=result.preference_benchmarks,
         class_pattern_locks=result.class_pattern_locks,
         optimization_telemetry=result.optimization_telemetry,
+        preservation_info=result.preservation_info,
     )
 
 

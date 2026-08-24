@@ -7,6 +7,7 @@ from clinic_shift_scheduler.input_contracts import (
     CANONICAL_TOP_LEVEL_FIELDS,
     CONFIG_CANDIDATE_FIELDS,
     CONFIG_DIAGNOSTIC_TIME_FIELDS,
+    CONFIG_PRESERVATION_FIELDS,
     CONFIG_ROOT_FIELDS,
     CONFIG_SETTINGS_FIELDS,
     EMPLOYEE_FIELDS,
@@ -69,6 +70,10 @@ class SchemaTests(unittest.TestCase):
         self.assertEqual(
             set(config["$defs"]["diagnosticTime"]["properties"]),
             CONFIG_DIAGNOSTIC_TIME_FIELDS,
+        )
+        self.assertEqual(
+            set(config["$defs"]["preservationOutput"]["properties"]),
+            CONFIG_PRESERVATION_FIELDS,
         )
         json.dumps(weekly)
         json.dumps(config)

@@ -60,6 +60,9 @@ class SchedulerAppConfigTests(unittest.TestCase):
             "輸入檔名": "排班輸入_2026-08.json",
             "覆寫既有結果": True,
             "進度更新秒數": 5,
+            "當前最佳班表輸出": {
+                "輸出格式": ["JSON", "PDF"],
+            },
             "候選診斷": {
                 "啟用": True,
                 "搜尋上限": 100,
@@ -78,6 +81,10 @@ class SchedulerAppConfigTests(unittest.TestCase):
 
         self.assertEqual(config.input_file, "排班輸入_2026-08.json")
         self.assertEqual(config.progress_update_seconds, 5)
+        self.assertEqual(
+            config.preservation_output.export_formats,
+            ("json", "pdf"),
+        )
         self.assertEqual(config.candidate_diagnostic.time.mode, "定值")
         self.assertEqual(config.candidate_diagnostic.time.fixed_seconds, 30)
         self.assertEqual(config.candidate_diagnostic.export_count, 3)

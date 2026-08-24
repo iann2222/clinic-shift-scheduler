@@ -88,6 +88,10 @@ class GuiExecutionTests(unittest.TestCase):
 
         self.assertEqual(page.config_label.text(), str(config_path))
         self.assertEqual(page.cancel_button.text(), "終止排班")
+        self.assertEqual(
+            page.preserve_button.text(),
+            "終止排班並保留當前最佳班表",
+        )
         self.assertEqual(page.elapsed_label.text(), "總耗時：0 秒")
         self.assertIs(page.status_group.parentWidget(), page.surface)
         self.assertIs(page.document_group.parentWidget(), page.scroll_content)
@@ -100,6 +104,7 @@ class GuiExecutionTests(unittest.TestCase):
         self.assertFalse(page.result_group.isVisible())
         page.begin()
         self.assertTrue(page.cancel_button.isEnabled())
+        self.assertFalse(page.preserve_button.isEnabled())
         self.assertFalse(page.stop_candidate_button.isEnabled())
         self.assertTrue(page.result_group.isHidden())
 
@@ -131,6 +136,12 @@ class GuiExecutionTests(unittest.TestCase):
     def test_execution_page_renders_structured_solver_progress(self) -> None:
         page = ExecutionPage()
         self.addCleanup(page.close)
+        page.bind_document(
+            month="2026-08",
+            path=Path("D:/clinic/input/schedule.json"),
+            config_path=Path("D:/clinic/config.json"),
+        )
+        page.begin()
 
         page.show_message(
             {
@@ -141,6 +152,7 @@ class GuiExecutionTests(unittest.TestCase):
                 "details": {
                     "activity": "formal_stage",
                     "has_feasible_solution": True,
+                    "can_preserve_output": True,
                     "user_step_index": 5,
                     "user_step_total": 10,
                     "user_step_title": "平衡正職個人的班型比例",
@@ -168,6 +180,38 @@ class GuiExecutionTests(unittest.TestCase):
         self.assertIn("最佳界 421", rendered)
         self.assertIn("gap 3.9%", rendered)
         self.assertNotIn("fallback", rendered)
+        self.assertTrue(page.preserve_button.isEnabled())
+
+    def test_preserved_result_is_labeled_feasible_and_not_formal(self) -> None:
+        page = ExecutionPage()
+        self.addCleanup(page.close)
+        page.bind_document(
+            month="2026-08",
+            path=Path("D:/clinic/input/schedule.json"),
+            config_path=Path("D:/clinic/config.json"),
+        )
+        page.begin()
+
+        page.show_message(
+            {
+                "type": "preserved",
+                "status": "FEASIBLE",
+                "validation": "PASS",
+                "selected_formats": ["json", "pdf"],
+                "paths": {
+                    "json": "output/partial.json",
+                    "pdf": "output/partial.pdf",
+                },
+                "timings": {"total_execution_seconds": 30.0},
+            }
+        )
+
+        self.assertEqual(page.result_group.title(), "目前最佳合法班表")
+        self.assertIn("未證明最佳", page.result_status_label.text())
+        self.assertEqual(page.validation_label.text(), "通過（PASS）")
+        self.assertIn("Excel：未選擇", page.output_label.text())
+        self.assertIn("尚未完成", page.status_label.text())
+        self.assertFalse(page.result_group.isHidden())
 
     def test_completed_page_reveals_all_outputs_and_scrolls_to_result(self) -> None:
         page = ExecutionPage()

@@ -10,6 +10,7 @@ from typing import AbstractSet, Any, Mapping
 from .input_contracts import (
     CONFIG_CANDIDATE_FIELDS,
     CONFIG_DIAGNOSTIC_TIME_FIELDS,
+    CONFIG_PRESERVATION_FIELDS,
     CONFIG_ROOT_FIELDS,
     CONFIG_SETTINGS_FIELDS,
 )
@@ -29,6 +30,7 @@ DEFAULT_DIAGNOSTIC_TIME_MODE = "比例"
 DEFAULT_DIAGNOSTIC_TIME_RATIO = 0.2
 DEFAULT_CANDIDATE_EXPORT_COUNT = 3
 DEFAULT_CANDIDATE_EXPORT_FORMATS = ("json", "excel", "pdf")
+DEFAULT_PRESERVATION_EXPORT_FORMATS = ("json", "excel", "pdf")
 
 _EXPORT_FORMAT_LABELS = {
     "json": "JSON",
@@ -138,10 +140,32 @@ class CandidateDiagnosticSettings:
 
 
 @dataclass(frozen=True, slots=True)
+class PreservationOutputSettings:
+    export_formats: tuple[str, ...] = DEFAULT_PRESERVATION_EXPORT_FORMATS
+
+    def __post_init__(self) -> None:
+        if not self.export_formats:
+            raise ValueError("當前最佳班表輸出.輸出格式至少選擇一種")
+        if len(set(self.export_formats)) != len(self.export_formats):
+            raise ValueError("當前最佳班表輸出.輸出格式不可重複")
+        unsupported = sorted(
+            set(self.export_formats) - SUPPORTED_CANDIDATE_EXPORT_FORMATS
+        )
+        if unsupported:
+            raise ValueError(
+                "當前最佳班表輸出.輸出格式包含不支援的值："
+                + ", ".join(unsupported)
+            )
+
+
+@dataclass(frozen=True, slots=True)
 class SchedulerAppConfig:
     input_file: str
     overwrite: bool = DEFAULT_OVERWRITE_EXISTING_RESULTS
     progress_update_seconds: float = DEFAULT_PROGRESS_UPDATE_SECONDS
+    preservation_output: PreservationOutputSettings = field(
+        default_factory=PreservationOutputSettings
+    )
     candidate_diagnostic: CandidateDiagnosticSettings = field(
         default_factory=CandidateDiagnosticSettings
     )
@@ -194,6 +218,12 @@ def scheduler_config_to_user_settings(
         "輸入檔名": config.input_file,
         "覆寫既有結果": config.overwrite,
         "進度更新秒數": config.progress_update_seconds,
+        "當前最佳班表輸出": {
+            "輸出格式": [
+                _EXPORT_FORMAT_LABELS[item]
+                for item in config.preservation_output.export_formats
+            ]
+        },
         "候選診斷": {
             "啟用": config.candidate_diagnostic.enabled,
             "搜尋上限": config.candidate_diagnostic.search_limit,
@@ -305,6 +335,24 @@ def _collect_config_structure_issues(
         if "輸入檔名" not in section:
             add("missing_field", f"{path}.輸入檔名", "此欄位為必填")
         candidate = section.get("候選診斷")
+        preservation = section.get("當前最佳班表輸出")
+        if preservation is not None and not isinstance(preservation, Mapping):
+            add(
+                "invalid_type",
+                f"{path}.當前最佳班表輸出",
+                "必須是 JSON object",
+            )
+        elif isinstance(preservation, Mapping):
+            for key in sorted(
+                key
+                for key in set(preservation) - CONFIG_PRESERVATION_FIELDS
+                if not (key.startswith("__") and key.endswith("__"))
+            ):
+                add(
+                    "unknown_field",
+                    f"{path}.當前最佳班表輸出.{key}",
+                    "當前最佳班表輸出含有未知欄位",
+                )
         if candidate is not None and not isinstance(candidate, Mapping):
             add("invalid_type", f"{path}.候選診斷", "必須是 JSON object")
         elif isinstance(candidate, Mapping):
@@ -363,6 +411,32 @@ def _parse_scheduler_config(payload: Mapping[str, Any]) -> SchedulerAppConfig:
 
     defaults = default_scheduler_config(settings["輸入檔名"])
     candidate_defaults = defaults.candidate_diagnostic
+    preservation_defaults = defaults.preservation_output
+    preservation_payload = _require_object(
+        settings.get("當前最佳班表輸出", {}),
+        "當前最佳班表輸出",
+    )
+    _reject_unknown_fields(
+        preservation_payload,
+        CONFIG_PRESERVATION_FIELDS,
+        "當前最佳班表輸出",
+    )
+    raw_preservation_formats = preservation_payload.get(
+        "輸出格式",
+        [
+            _EXPORT_FORMAT_LABELS[item]
+            for item in preservation_defaults.export_formats
+        ],
+    )
+    if not isinstance(raw_preservation_formats, list) or not all(
+        isinstance(item, str) for item in raw_preservation_formats
+    ):
+        raise ValueError("當前最佳班表輸出.輸出格式必須是字串陣列")
+    preservation_output = PreservationOutputSettings(
+        export_formats=tuple(
+            item.lower() for item in raw_preservation_formats
+        )
+    )
     candidate_payload = _require_object(
         settings.get("候選診斷", {}),
         "候選診斷",
@@ -435,6 +509,7 @@ def _parse_scheduler_config(payload: Mapping[str, Any]) -> SchedulerAppConfig:
         progress_update_seconds=settings.get(
             "進度更新秒數", defaults.progress_update_seconds
         ),
+        preservation_output=preservation_output,
         candidate_diagnostic=diagnostic,
     )
 

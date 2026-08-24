@@ -28,12 +28,17 @@ from typing import Any, TypeVar
 from .application_contracts import (
     DEFAULT_INTERMEDIATE_DIRECTORY,
     CandidateExportConfig,
+    ProvisionalExportConfig,
 )
 from .authoring import WEEKLY_AUTHORING_VERSION, expand_weekly_template
 from .exporters import (
     DEFAULT_OUTPUT_DIRECTORY,
+    build_provisional_output_paths,
     export_result_excel,
     export_result_json,
+    export_provisional_result_excel,
+    export_provisional_result_json,
+    export_provisional_schedule_pdf_from_excel,
     export_schedule_pdf_from_excel,
 )
 from .events import (
@@ -41,6 +46,7 @@ from .events import (
     DiagnosticIssue,
     ExecutionPhase,
     OperationCancelledError,
+    PreservationToken,
     ProgressCallback,
     ProgressEvent,
     ProgressEventKind,
@@ -114,6 +120,23 @@ class ScheduleRunResult:
     total_execution_seconds: float
 
 
+@dataclass(frozen=True, slots=True)
+class PreservedScheduleRunResult:
+    """Validated FEASIBLE output saved after a user preservation request."""
+
+    output: FormalScheduleOutput
+    precheck: PrecheckResult
+    intermediate_input_path: Path
+    json_path: Path | None
+    excel_path: Path | None
+    pdf_path: Path | None
+    selected_formats: tuple[str, ...]
+    optimization_seconds: float
+    validation_seconds: float
+    export_seconds: float
+    total_execution_seconds: float
+
+
 def _notify(
     callback: ProgressCallback | None,
     message: str,
@@ -142,8 +165,13 @@ def _notify(
 class _OptimizationProgressRelay:
     """Forward rich optimizer events and track when fallback is unnecessary."""
 
-    def __init__(self, callback: ProgressCallback | None) -> None:
+    def __init__(
+        self,
+        callback: ProgressCallback | None,
+        extra_details: Mapping[str, Any] | None = None,
+    ) -> None:
         self._callback = callback
+        self._extra_details = dict(extra_details or {})
         self._lock = threading.Lock()
         self._last_progress_at: float | None = None
 
@@ -151,7 +179,12 @@ class _OptimizationProgressRelay:
         with self._lock:
             self._last_progress_at = perf_counter()
         if self._callback is not None:
-            self._callback(event)
+            self._callback(
+                replace(
+                    event,
+                    details={**dict(event.details), **self._extra_details},
+                )
+            )
 
     def seconds_since_progress(self) -> float | None:
         with self._lock:
@@ -376,6 +409,80 @@ def _export_candidate_schedules(
     return tuple(exports)
 
 
+def _selected_provisional_paths(
+    data: NormalizedScheduleInput,
+    output_directory: str | Path,
+    formats: tuple[str, ...],
+) -> dict[str, Path]:
+    paths = build_provisional_output_paths(data, output_directory)
+    available = {
+        "json": paths.json,
+        "excel": paths.excel,
+        "pdf": paths.pdf,
+    }
+    return {name: available[name] for name in formats}
+
+
+def _export_preserved_schedule(
+    data: NormalizedScheduleInput,
+    output: FormalScheduleOutput,
+    *,
+    output_directory: str | Path,
+    formats: tuple[str, ...],
+    overwrite: bool,
+) -> tuple[Path | None, Path | None, Path | None]:
+    """Persist only the requested provisional media from one result model."""
+
+    json_path: Path | None = None
+    excel_path: Path | None = None
+    pdf_path: Path | None = None
+    if "json" in formats:
+        json_path = export_provisional_result_json(
+            data,
+            output,
+            output_directory=output_directory,
+            overwrite=overwrite,
+        )
+
+    generated_excel: Path | None = None
+    if "excel" in formats:
+        generated_excel = export_provisional_result_excel(
+            data,
+            output,
+            output_directory=output_directory,
+            overwrite=overwrite,
+        )
+        excel_path = generated_excel
+
+    if "pdf" in formats:
+        target = build_provisional_output_paths(data, output_directory).pdf
+        if generated_excel is not None:
+            pdf_path = export_provisional_schedule_pdf_from_excel(
+                generated_excel,
+                output_path=target,
+                overwrite=overwrite,
+            )
+        else:
+            output_root = Path(output_directory)
+            output_root.mkdir(parents=True, exist_ok=True)
+            with tempfile.TemporaryDirectory(
+                prefix=".provisional-pdf-",
+                dir=output_root,
+            ) as temporary_directory:
+                temporary_excel = export_provisional_result_excel(
+                    data,
+                    output,
+                    output_directory=temporary_directory,
+                    overwrite=True,
+                )
+                pdf_path = export_provisional_schedule_pdf_from_excel(
+                    temporary_excel,
+                    output_path=target,
+                    overwrite=overwrite,
+                )
+    return json_path, excel_path, pdf_path
+
+
 def run_schedule_file(
     input_path: str | Path,
     *,
@@ -386,14 +493,19 @@ def run_schedule_file(
         EquivalentSolutionDiagnosticConfig | None
     ) = None,
     candidate_export_config: CandidateExportConfig | None = None,
+    provisional_export_config: ProvisionalExportConfig | None = None,
     progress_interval_seconds: float = 5.0,
     progress: ProgressCallback | None = None,
     diagnostic_progress: ProgressCallback | None = None,
     cancellation: CancellationToken | None = None,
-) -> ScheduleRunResult:
+    preservation: PreservationToken | None = None,
+) -> ScheduleRunResult | PreservedScheduleRunResult:
     """Run input loading through validated JSON, Excel, and PDF exports."""
 
     resolved_candidate_export = candidate_export_config or CandidateExportConfig()
+    resolved_provisional_export = (
+        provisional_export_config or ProvisionalExportConfig()
+    )
     if (
         equivalent_solution_diagnostic_config is None
         and resolved_candidate_export.max_candidates
@@ -466,6 +578,26 @@ def run_schedule_file(
     )
     validation_normalization_seconds = perf_counter() - step_started
 
+    provisional_paths = _selected_provisional_paths(
+        data,
+        output_directory,
+        resolved_provisional_export.formats,
+    )
+    provisional_conflicts = tuple(
+        path for path in provisional_paths.values() if path.exists()
+    )
+    can_preserve_output = overwrite or not provisional_conflicts
+    preservation_details: dict[str, Any] = {
+        "can_preserve_output": can_preserve_output,
+        "preservation_formats": list(resolved_provisional_export.formats),
+    }
+    if provisional_conflicts:
+        preservation_details["preservation_unavailable_reason"] = (
+            "暫存結果檔案已存在，且目前未允許覆寫："
+            + "、".join(str(path) for path in provisional_conflicts)
+        )
+    active_preservation = preservation if can_preserve_output else None
+
     check_cancelled()
     _notify(
         progress,
@@ -490,12 +622,16 @@ def run_schedule_file(
         kind=ProgressEventKind.STEP_STARTED,
     )
     try:
-        optimization_progress = _OptimizationProgressRelay(progress)
+        optimization_progress = _OptimizationProgressRelay(
+            progress,
+            preservation_details,
+        )
         solver_result, optimization_seconds = _run_with_elapsed_heartbeat(
             lambda: solve_lexicographic(
                 data,
                 precheck_result=precheck,
                 cancellation=cancellation,
+                preservation=active_preservation,
                 progress=optimization_progress,
                 progress_interval_seconds=progress_interval_seconds,
             ),
@@ -542,6 +678,79 @@ def run_schedule_file(
     output = replace(output, execution_timing=execution_timing)
 
     report = output.validation_report
+    if solver_result.preservation_info is not None:
+        if (
+            output.status is not FeasibilityStatus.FEASIBLE
+            or report is None
+            or not report.is_valid
+        ):
+            validation = "NONE" if report is None else report.status.value
+            raise ScheduleRunError(
+                "current schedule cannot be preserved: "
+                f"status={output.status.value}, validation={validation}"
+            )
+        if not can_preserve_output:
+            reason = str(
+                preservation_details.get(
+                    "preservation_unavailable_reason",
+                    "provisional output is unavailable",
+                )
+            )
+            raise ScheduleRunError(reason)
+
+        _notify(
+            progress,
+            "已停止後續最佳化；驗證通過，正在輸出目前最佳合法班表",
+            phase=ExecutionPhase.OUTPUT,
+            kind=ProgressEventKind.STEP_STARTED,
+            details=preservation_details,
+        )
+        step_started = perf_counter()
+        json_path, excel_path, pdf_path = _export_preserved_schedule(
+            data,
+            output,
+            output_directory=output_directory,
+            formats=resolved_provisional_export.formats,
+            overwrite=overwrite,
+        )
+        export_seconds = perf_counter() - step_started
+        total_execution_seconds = perf_counter() - started
+        exported = tuple(
+            path
+            for path in (json_path, excel_path, pdf_path)
+            if path is not None
+        )
+        _notify(
+            progress,
+            "\n".join(
+                (
+                    "完成：FEASIBLE + validation PASS（尚未完成全部最佳化）",
+                    "已保留目前最佳合法班表：",
+                    *(f"  {path}" for path in exported),
+                    (
+                        "[排班耗時] 完整排班時間（從讀檔到暫存輸出）："
+                        f"{format_seconds_with_minutes(total_execution_seconds)}"
+                    ),
+                )
+            ),
+            phase=ExecutionPhase.OUTPUT,
+            kind=ProgressEventKind.STEP_COMPLETED,
+            details=preservation_details,
+        )
+        return PreservedScheduleRunResult(
+            output=output,
+            precheck=precheck,
+            intermediate_input_path=intermediate_input_path,
+            json_path=json_path,
+            excel_path=excel_path,
+            pdf_path=pdf_path,
+            selected_formats=resolved_provisional_export.formats,
+            optimization_seconds=optimization_seconds,
+            validation_seconds=result_validation_and_build_seconds,
+            export_seconds=export_seconds,
+            total_execution_seconds=total_execution_seconds,
+        )
+
     if (
         output.status is not FeasibilityStatus.OPTIMAL
         or report is None

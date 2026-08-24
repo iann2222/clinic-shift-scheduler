@@ -149,6 +149,9 @@ class MainWindow(QMainWindow):
         )
         self.execution_page.run_requested.connect(self._start_schedule)
         self.execution_page.cancel_requested.connect(self._cancel_schedule)
+        self.execution_page.preserve_requested.connect(
+            self._preserve_current_schedule
+        )
         self.execution_page.stop_candidate_requested.connect(
             self._stop_candidate_processing
         )
@@ -600,6 +603,26 @@ class MainWindow(QMainWindow):
             return
         self.execution_page.request_cancelling()
         self.execution_controller.cancel()
+
+    def _preserve_current_schedule(self) -> None:
+        if not self.execution_controller.is_running:
+            return
+        if not ask_yes_no(
+            self,
+            "保留目前最佳合法班表",
+            "這會停止後續最佳化，並嘗試輸出目前找到的最佳合法班表。\n"
+            "結果會標示為 FEASIBLE，代表已通過硬性規則，但尚未證明為正式最佳結果。\n\n"
+            "確定要繼續嗎？",
+        ):
+            return
+        if self.execution_controller.preserve_current_best():
+            self.execution_page.request_preserving()
+            return
+        show_warning(
+            self,
+            "無法提出保留要求",
+            "排班可能已進入不可保留的階段，或控制檔案無法建立。",
+        )
 
     def _stop_candidate_processing(self) -> None:
         if not self.execution_controller.is_running:

@@ -57,9 +57,11 @@ CONFIG_SETTINGS_FIELDS = frozenset(
         "輸入檔名",
         "覆寫既有結果",
         "進度更新秒數",
+        "當前最佳班表輸出",
         "候選診斷",
     }
 )
+CONFIG_PRESERVATION_FIELDS = frozenset({"輸出格式"})
 CONFIG_CANDIDATE_FIELDS = frozenset(
     {
         "啟用",

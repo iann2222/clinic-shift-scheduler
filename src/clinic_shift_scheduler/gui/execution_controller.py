@@ -36,9 +36,11 @@ class ExecutionController(QObject):
         self._decoder = _worker_stdout_decoder()
         self._terminal_message_received = False
         self._cancel_requested = False
+        self._preserve_requested = False
         self._generation = 0
         self._finished_emitted = False
         self._cancel_file: Path | None = None
+        self._preserve_file: Path | None = None
 
     @property
     def is_running(self) -> bool:
@@ -70,17 +72,24 @@ class ExecutionController(QObject):
         self._decoder = _worker_stdout_decoder()
         self._terminal_message_received = False
         self._cancel_requested = False
+        self._preserve_requested = False
         self._generation += 1
         self._finished_emitted = False
         control_directory = intermediate_directory.parent / "worker-control"
         control_directory.mkdir(parents=True, exist_ok=True)
         self._cancel_file = control_directory / f"{uuid4().hex}.cancel"
+        self._preserve_file = control_directory / f"{uuid4().hex}.preserve"
         self.process.setWorkingDirectory(str(self.application_root))
         arguments.append(f"--cancel-file={self._cancel_file.resolve()}")
+        arguments.append(f"--preserve-file={self._preserve_file.resolve()}")
         self.process.start(program, arguments)
 
     def cancel(self) -> None:
-        if not self.is_running or self._cancel_requested:
+        if (
+            not self.is_running
+            or self._cancel_requested
+            or self._preserve_requested
+        ):
             return
         self._cancel_requested = True
         if self._cancel_file is not None:
@@ -94,10 +103,30 @@ class ExecutionController(QObject):
             lambda: self._force_stop_if_same_run(generation),
         )
 
+    def preserve_current_best(self) -> bool:
+        """Request graceful stop while retaining the best legal schedule."""
+
+        if (
+            not self.is_running
+            or self._cancel_requested
+            or self._preserve_requested
+            or self._preserve_file is None
+        ):
+            return False
+        try:
+            self._preserve_file.write_text("preserve\n", encoding="utf-8")
+        except OSError:
+            return False
+        self._preserve_requested = True
+        return True
+
     def stop_for_shutdown(self) -> None:
         if not self.is_running:
             return
-        self.cancel()
+        if self._preserve_requested:
+            self.process.kill()
+        else:
+            self.cancel()
         if not self.process.waitForFinished(3000):
             self.process.kill()
             self.process.waitForFinished(3000)
@@ -114,7 +143,7 @@ class ExecutionController(QObject):
             )
             return
         for message in messages:
-            if message["type"] in {"completed", "failed"}:
+            if message["type"] in {"completed", "preserved", "failed"}:
                 self._terminal_message_received = True
             self.message_received.emit(message)
 
@@ -137,14 +166,17 @@ class ExecutionController(QObject):
     ) -> None:
         self._read_stdout()
         self._read_stderr()
-        self._remove_cancel_file()
+        self._remove_control_files()
         if not self._terminal_message_received:
-            kind = "CANCELLED" if self._cancel_requested else "WORKER_EXITED"
-            message = (
-                "排班已取消。"
-                if self._cancel_requested
-                else f"排班程序提前結束（exit code {exit_code}）。"
-            )
+            if self._cancel_requested:
+                kind = "CANCELLED"
+                message = "排班已取消。"
+            elif self._preserve_requested:
+                kind = "PRESERVATION_FAILED"
+                message = "未能完成目前最佳班表的驗證與輸出。"
+            else:
+                kind = "WORKER_EXITED"
+                message = f"排班程序提前結束（exit code {exit_code}）。"
             self.message_received.emit(
                 {
                     "protocol": "clinic-shift-scheduler.execution-v1",
@@ -158,7 +190,7 @@ class ExecutionController(QObject):
 
     def _process_error(self, error: QProcess.ProcessError) -> None:
         if error == QProcess.ProcessError.FailedToStart:
-            self._remove_cancel_file()
+            self._remove_control_files()
             self._emit_protocol_failure(
                 f"無法啟動排班程序：{self.process.errorString()}"
             )
@@ -192,10 +224,13 @@ class ExecutionController(QObject):
         self._finished_emitted = True
         self.finished.emit(exit_code)
 
-    def _remove_cancel_file(self) -> None:
+    def _remove_control_files(self) -> None:
         if self._cancel_file is not None:
             self._cancel_file.unlink(missing_ok=True)
             self._cancel_file = None
+        if self._preserve_file is not None:
+            self._preserve_file.unlink(missing_ok=True)
+            self._preserve_file = None
 
 
 def _is_ortools_dll_load_noise(line: str) -> bool:

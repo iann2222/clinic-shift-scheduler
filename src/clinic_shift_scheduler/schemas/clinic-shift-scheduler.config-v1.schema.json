@@ -21,7 +21,21 @@
         "輸入檔名": {"type": "string", "pattern": "^[^/\\\\]+\\.json$"},
         "覆寫既有結果": {"type": "boolean"},
         "進度更新秒數": {"type": "number", "exclusiveMinimum": 0},
+        "當前最佳班表輸出": {"$ref": "#/$defs/preservationOutput"},
         "候選診斷": {"$ref": "#/$defs/candidate"}
+      }
+    },
+    "preservationOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "patternProperties": {"^__.*__$": {}},
+      "properties": {
+        "輸出格式": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"enum": ["JSON", "Excel", "PDF"]}
+        }
       }
     },
     "candidate": {

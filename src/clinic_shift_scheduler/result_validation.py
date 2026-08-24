@@ -72,6 +72,8 @@ def validate_schedule_result(
     stages: tuple[OptimizationStageResult, ...],
     preference_benchmarks: tuple[PreferenceBenchmarkResult, ...] = (),
     class_pattern_locks: tuple[ClassPatternLockResult, ...] = (),
+    *,
+    require_complete_optimization: bool = True,
 ) -> ValidationReport:
     """Validate without reading any CP-SAT variable or solver-derived pattern."""
 
@@ -334,11 +336,19 @@ def validate_schedule_result(
                 )
 
     stage_sequence = tuple(item.stage for item in stages)
-    if stage_sequence != FORMAL_STAGE_SEQUENCE:
+    expected_stage_sequence = FORMAL_STAGE_SEQUENCE[: len(stage_sequence)]
+    if stage_sequence != expected_stage_sequence or (
+        require_complete_optimization
+        and stage_sequence != FORMAL_STAGE_SEQUENCE
+    ):
         add(
             "optimization_stages",
             "optimization_stage_sequence_mismatch",
-            "formal optimization stages are missing, duplicated, or out of order",
+            (
+                "formal optimization stages are missing, duplicated, or out of order"
+                if require_complete_optimization
+                else "partial optimization stages are not a valid formal prefix"
+            ),
         )
     for stage_result in stages:
         policy = FORMAL_STAGE_POLICY_BY_STAGE.get(stage_result.stage)
@@ -356,14 +366,23 @@ def validate_schedule_result(
     expected_benchmark_keys = {
         (item.full_time_class, item.rank) for item in CLASS_PREFERENCES
     }
-    if (
-        len(preference_benchmarks) != len(CLASS_PREFERENCES)
-        or set(benchmark_by_key) != expected_benchmark_keys
-    ):
+    benchmark_structure_invalid = (
+        len(benchmark_by_key) != len(preference_benchmarks)
+        or not set(benchmark_by_key).issubset(expected_benchmark_keys)
+        or (
+            require_complete_optimization
+            and set(benchmark_by_key) != expected_benchmark_keys
+        )
+    )
+    if benchmark_structure_invalid:
         add(
             "preference_benchmarks",
             "preference_benchmark_structure_mismatch",
-            "formal result requires one A and B benchmark for each preference rank",
+            (
+                "formal result requires one A and B benchmark for each preference rank"
+                if require_complete_optimization
+                else "partial result contains duplicated or unknown preference benchmarks"
+            ),
         )
     for benchmark in preference_benchmarks:
         definition = next(
@@ -407,11 +426,12 @@ def validate_schedule_result(
         key = (benchmark.full_time_class, benchmark.rank)
         actual = recomputed.class_preference_actual_values[key]
         if benchmark.locked_actual_value is None:
-            add(
-                "preference_benchmarks",
-                "preference_locked_actual_missing",
-                "formal preference benchmark is missing its locked actual value",
-            )
+            if require_complete_optimization:
+                add(
+                    "preference_benchmarks",
+                    "preference_locked_actual_missing",
+                    "formal preference benchmark is missing its locked actual value",
+                )
         elif actual != benchmark.locked_actual_value:
             add(
                 "preference_benchmarks",
@@ -437,14 +457,23 @@ def validate_schedule_result(
         (item.full_time_class, item.metric): item
         for item in class_pattern_locks
     }
-    if (
-        len(class_pattern_locks) != len(expected_pattern_locks)
-        or set(pattern_lock_by_key) != expected_pattern_locks
-    ):
+    pattern_lock_structure_invalid = (
+        len(pattern_lock_by_key) != len(class_pattern_locks)
+        or not set(pattern_lock_by_key).issubset(expected_pattern_locks)
+        or (
+            require_complete_optimization
+            and set(pattern_lock_by_key) != expected_pattern_locks
+        )
+    )
+    if pattern_lock_structure_invalid:
         add(
             "class_pattern_locks",
             "class_pattern_lock_structure_mismatch",
-            "formal result requires A single-day and B triple-day class locks",
+            (
+                "formal result requires A single-day and B triple-day class locks"
+                if require_complete_optimization
+                else "partial result contains duplicated or unknown class pattern locks"
+            ),
         )
     for key, item in pattern_lock_by_key.items():
         full_time_class, _metric = key

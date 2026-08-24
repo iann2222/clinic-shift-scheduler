@@ -21,8 +21,10 @@ from ..output import FormalScheduleOutput, RatioValue, ScheduleCellKind
 from .files import (
     DEFAULT_OUTPUT_DIRECTORY,
     build_output_paths,
+    build_provisional_output_paths,
     prepare_target,
     require_formal_result,
+    require_provisional_result,
     schedule_month,
 )
 
@@ -34,6 +36,7 @@ WORKSHEET_NAMES = (
     "類別與公平性統計",
     "求解與驗證資訊",
 )
+PROVISIONAL_WORKSHEET_NAMES = ("暫存結果說明",) + WORKSHEET_NAMES
 
 _DARK_BLUE = "1F4E78"
 _HEADER_BLUE = "C5DFF0"
@@ -868,10 +871,65 @@ def build_workbook(
     return workbook
 
 
-def _validate_saved_workbook(path: Path) -> None:
+def build_provisional_workbook(
+    data: NormalizedScheduleInput,
+    output: FormalScheduleOutput,
+) -> Workbook:
+    """Build a visibly provisional workbook from a validated FEASIBLE result."""
+
+    require_provisional_result(output)
+    workbook = Workbook()
+    workbook.properties.title = f"{schedule_month(data)} 目前最佳合法班表"
+    workbook.properties.subject = "Unfinished clinic schedule optimization"
+    workbook.properties.creator = "clinic-shift-scheduler"
+    workbook.properties.description = (
+        "Validated FEASIBLE schedule; formal optimization is incomplete."
+    )
+    _build_schedule_sheet(workbook, output)
+    _build_individual_summary_sheet(workbook, output)
+    _build_individual_detail_sheet(workbook, output)
+    _build_group_sheet(workbook, output)
+    _build_solver_sheet(workbook, data, output)
+
+    notice = workbook.create_sheet("暫存結果說明", 0)
+    notice.sheet_view.showGridLines = False
+    notice.merge_cells("A1:F2")
+    notice["A1"] = "目前最佳合法班表"
+    notice["A1"].font = Font(size=20, bold=True, color="FFFFFF")
+    notice["A1"].fill = PatternFill("solid", fgColor="B45309")
+    notice["A1"].alignment = Alignment(
+        horizontal="center", vertical="center"
+    )
+    notice.merge_cells("A4:F6")
+    notice["A4"] = (
+        "此班表已通過全部硬性規則驗證，但尚未完成全部最佳化，"
+        "不代表正式最佳結果。"
+    )
+    notice["A4"].font = Font(size=14, bold=True, color="7C2D12")
+    notice["A4"].alignment = Alignment(
+        horizontal="center", vertical="center", wrap_text=True
+    )
+    notice["A8"] = "結果狀態"
+    notice["B8"] = output.status.value
+    notice["A9"] = "Validation"
+    notice["B9"] = output.validation_report.status.value
+    notice["A10"] = "已完成正式階段"
+    notice["B10"] = len(output.optimization_stages)
+    notice.column_dimensions["A"].width = 22
+    notice.column_dimensions["B"].width = 28
+    for column in ("C", "D", "E", "F"):
+        notice.column_dimensions[column].width = 14
+    notice.freeze_panes = "A8"
+    return workbook
+
+
+def _validate_saved_workbook(path: Path, *, provisional: bool = False) -> None:
     workbook = load_workbook(path, read_only=True, data_only=False)
     try:
-        if tuple(workbook.sheetnames) != WORKSHEET_NAMES:
+        expected_names = (
+            PROVISIONAL_WORKSHEET_NAMES if provisional else WORKSHEET_NAMES
+        )
+        if tuple(workbook.sheetnames) != expected_names:
             raise ValueError("exported workbook has an unexpected worksheet structure")
         schedule = workbook["月班表"]
         if schedule["A1"].value != "日期" or schedule["A2"].value != "星期":
@@ -909,6 +967,36 @@ def export_result_excel(
         workbook.save(temporary)
         workbook.close()
         _validate_saved_workbook(temporary)
+        os.replace(temporary, target)
+    finally:
+        workbook.close()
+        if temporary is not None and temporary.exists():
+            temporary.unlink()
+    return target
+
+
+def export_provisional_result_excel(
+    data: NormalizedScheduleInput,
+    output: FormalScheduleOutput,
+    *,
+    output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY,
+    overwrite: bool = False,
+) -> Path:
+    workbook = build_provisional_workbook(data, output)
+    target = build_provisional_output_paths(data, output_directory).excel
+    prepare_target(target, overwrite=overwrite)
+    temporary: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            prefix=f".{target.stem}.",
+            suffix=".xlsx",
+            dir=target.parent,
+            delete=False,
+        ) as stream:
+            temporary = Path(stream.name)
+        workbook.save(temporary)
+        workbook.close()
+        _validate_saved_workbook(temporary, provisional=True)
         os.replace(temporary, target)
     finally:
         workbook.close()

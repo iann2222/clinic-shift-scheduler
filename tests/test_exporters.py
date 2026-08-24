@@ -15,12 +15,18 @@ from clinic_shift_scheduler import (
     ExportFileExistsError,
     FeasibilityStatus,
     FormalExportError,
+    OptimizationStage,
+    PreservationToken,
+    PROVISIONAL_WORKSHEET_NAMES,
     RESULT_CONTRACT_NAME,
     RESULT_CONTRACT_VERSION,
     WORKSHEET_NAMES,
     build_output_paths,
     build_result_document,
     build_workbook,
+    export_provisional_result_excel,
+    export_provisional_result_json,
+    export_provisional_schedule_pdf_from_excel,
     export_result_excel,
     export_result_json,
     export_schedule_pdf_from_excel,
@@ -28,6 +34,7 @@ from clinic_shift_scheduler import (
     solve_lexicographic,
     validate_and_normalize,
 )
+from clinic_shift_scheduler.events import ProgressEventKind
 
 from tests.fixtures import minimal_valid_input
 
@@ -48,6 +55,60 @@ class JsonExporterTests(unittest.TestCase):
         self.assertEqual(paths.json, Path("output/排班結果_2024-10.result-v1.json"))
         self.assertEqual(paths.excel, Path("output/排班結果_2024-10.result-v1.xlsx"))
         self.assertEqual(paths.pdf, Path("output/排班結果_2024-10.result-v1.pdf"))
+
+    def test_provisional_json_excel_and_pdf_are_visibly_separate(self) -> None:
+        preservation = PreservationToken()
+
+        def preserve_after_hard(event: object) -> None:
+            if (
+                getattr(event, "kind", None)
+                is ProgressEventKind.STEP_COMPLETED
+                and getattr(event, "details", {}).get("formal_stage")
+                == OptimizationStage.HARD_FEASIBILITY.value
+            ):
+                preservation.request()
+
+        result = solve_lexicographic(
+            self.data,
+            preservation=preservation,
+            progress=preserve_after_hard,
+            progress_interval_seconds=0.01,
+        )
+        output = finalize_schedule_output(self.data, result)
+        self.assertEqual(output.status, FeasibilityStatus.FEASIBLE)
+
+        with tempfile.TemporaryDirectory() as directory:
+            json_path = export_provisional_result_json(
+                self.data,
+                output,
+                output_directory=directory,
+            )
+            excel_path = export_provisional_result_excel(
+                self.data,
+                output,
+                output_directory=directory,
+            )
+            pdf_path = export_provisional_schedule_pdf_from_excel(excel_path)
+            document = json.loads(json_path.read_text(encoding="utf-8"))
+            workbook = load_workbook(excel_path, read_only=True)
+            try:
+                self.assertEqual(
+                    tuple(workbook.sheetnames),
+                    PROVISIONAL_WORKSHEET_NAMES,
+                )
+                self.assertIn(
+                    "尚未完成全部最佳化",
+                    workbook["暫存結果說明"]["A4"].value,
+                )
+            finally:
+                workbook.close()
+            pdf_text = "\n".join(
+                page.extract_text() or "" for page in PdfReader(pdf_path).pages
+            )
+
+        self.assertEqual(document["status"], "FEASIBLE")
+        self.assertIn("尚未完成全部最佳化", document["warning"])
+        self.assertIn("尚未完成全部最佳化", pdf_text)
 
     def test_result_document_contains_the_versioned_formal_contract(self) -> None:
         generated_at = datetime(2024, 10, 2, 3, 4, 5, tzinfo=UTC)

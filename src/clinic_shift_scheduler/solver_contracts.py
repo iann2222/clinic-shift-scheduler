@@ -86,6 +86,17 @@ class OptimizationTelemetry:
 
 
 @dataclass(frozen=True, slots=True)
+class SchedulePreservationInfo:
+    """Where a user stopped optimization to keep the best legal snapshot."""
+
+    activity: str
+    formal_stage: str | None = None
+    preference_rank: str | None = None
+    full_time_class: str | None = None
+    used_current_incumbent: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class LexicographicResult:
     status: FeasibilityStatus
     assignments: tuple[Assignment, ...]
@@ -99,6 +110,7 @@ class LexicographicResult:
     precheck: PrecheckResult
     implemented_objective_prefix_optimal: bool
     optimization_telemetry: OptimizationTelemetry | None = None
+    preservation_info: SchedulePreservationInfo | None = None
     _locked_model: Any | None = field(default=None, repr=False, compare=False)
 
     @property

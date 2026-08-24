@@ -18,9 +18,11 @@ from clinic_shift_scheduler import (
     ObjectiveDirection,
     OptimizationStage,
     OptimizationStageStatus,
+    PreservationToken,
     PreferenceRank,
     ResultValidationStatus,
     recompute_schedule_metrics,
+    finalize_schedule_output,
     run_prechecks,
     solve_lexicographic,
     validate_and_normalize,
@@ -144,6 +146,100 @@ def stage(result, name: OptimizationStage):
 
 
 class LexicographicOptimizationTests(unittest.TestCase):
+    def test_preservation_after_hard_feasibility_returns_valid_partial_result(
+        self,
+    ) -> None:
+        data = validate_and_normalize(one_day_input(
+            [
+                full_time(
+                    "A1",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=1,
+                )
+            ],
+            ("morning",),
+        ))
+        preservation = PreservationToken()
+
+        def preserve_after_hard(event: object) -> None:
+            details = getattr(event, "details", {})
+            if (
+                getattr(event, "kind", None)
+                is ProgressEventKind.STEP_COMPLETED
+                and details.get("formal_stage")
+                == OptimizationStage.HARD_FEASIBILITY.value
+            ):
+                preservation.request()
+
+        result = solve_lexicographic(
+            data,
+            preservation=preservation,
+            progress=preserve_after_hard,
+            progress_interval_seconds=0.01,
+        )
+        output = finalize_schedule_output(data, result)
+
+        self.assertEqual(result.status, FeasibilityStatus.FEASIBLE)
+        self.assertIsNotNone(result.preservation_info)
+        self.assertEqual(
+            [item.stage for item in result.stages],
+            [OptimizationStage.HARD_FEASIBILITY],
+        )
+        self.assertEqual(output.status, FeasibilityStatus.FEASIBLE)
+        self.assertIsNotNone(output.validation_report)
+        assert output.validation_report is not None
+        self.assertEqual(
+            output.validation_report.status,
+            ResultValidationStatus.PASS,
+        )
+
+    def test_preservation_during_benchmark_uses_stable_formal_snapshot(
+        self,
+    ) -> None:
+        data = validate_and_normalize(one_day_input(
+            [
+                full_time(
+                    "A1",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=1,
+                )
+            ],
+            ("morning",),
+        ))
+        preservation = PreservationToken()
+
+        def preserve_at_benchmark(event: object) -> None:
+            details = getattr(event, "details", {})
+            if (
+                getattr(event, "kind", None)
+                is ProgressEventKind.STEP_STARTED
+                and details.get("activity") == "preference_benchmark"
+            ):
+                preservation.request()
+
+        result = solve_lexicographic(
+            data,
+            preservation=preservation,
+            progress=preserve_at_benchmark,
+            progress_interval_seconds=0.01,
+        )
+        output = finalize_schedule_output(data, result)
+
+        assert result.preservation_info is not None
+        self.assertEqual(
+            result.preservation_info.activity,
+            "preference_benchmark",
+        )
+        self.assertFalse(result.preservation_info.used_current_incumbent)
+        self.assertEqual(output.status, FeasibilityStatus.FEASIBLE)
+        assert output.validation_report is not None
+        self.assertEqual(
+            output.validation_report.status,
+            ResultValidationStatus.PASS,
+        )
+
     def test_progress_reporting_preserves_result_and_distinguishes_benchmarks(
         self,
     ) -> None:

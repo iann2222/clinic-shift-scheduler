@@ -54,6 +54,17 @@ def build_output_paths(
     )
 
 
+def build_provisional_output_paths(
+    data: NormalizedScheduleInput,
+    output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY,
+) -> OutputPaths:
+    return build_output_paths(
+        data,
+        output_directory,
+        stem=f"排班暫存結果_{schedule_month(data)}.feasible-v1",
+    )
+
+
 def require_formal_result(output: FormalScheduleOutput) -> None:
     report = output.validation_report
     if (
@@ -64,6 +75,21 @@ def require_formal_result(output: FormalScheduleOutput) -> None:
     ):
         raise FormalExportError(
             "formal files require OPTIMAL status, PASS validation, and a schedule"
+        )
+
+
+def require_provisional_result(output: FormalScheduleOutput) -> None:
+    report = output.validation_report
+    if (
+        output.status is not FeasibilityStatus.FEASIBLE
+        or not output.has_formal_schedule
+        or report is None
+        or report.status is not ResultValidationStatus.PASS
+        or output.preservation_info is None
+    ):
+        raise FormalExportError(
+            "provisional files require FEASIBLE status, PASS validation, "
+            "a schedule, and preservation metadata"
         )
 
 

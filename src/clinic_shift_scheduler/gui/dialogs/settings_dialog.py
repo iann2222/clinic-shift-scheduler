@@ -120,6 +120,15 @@ class SettingsDialog(QDialog):
         self.progress_seconds.setSingleStep(1.0)
         self.progress_seconds_field = UnitInput(self.progress_seconds, "秒")
         form.addRow("進度更新間隔：", self.progress_seconds_field)
+        preservation_formats = QHBoxLayout()
+        self.preservation_json = VisibleCheckBox("JSON")
+        self.preservation_excel = VisibleCheckBox("Excel")
+        self.preservation_pdf = VisibleCheckBox("PDF")
+        preservation_formats.addWidget(self.preservation_json)
+        preservation_formats.addWidget(self.preservation_excel)
+        preservation_formats.addWidget(self.preservation_pdf)
+        preservation_formats.addStretch(1)
+        form.addRow("保留目前班表格式：", preservation_formats)
         layout.addWidget(group)
         notice = QLabel(
             "這裡只設定正式排班程式下次執行時使用的參數；"
@@ -297,6 +306,10 @@ class SettingsDialog(QDialog):
         self.input_file.setText(draft.input_file)
         self.overwrite.setChecked(draft.overwrite)
         self.progress_seconds.setValue(draft.progress_update_seconds)
+        preservation_selected = set(draft.preservation_export_formats)
+        self.preservation_json.setChecked("json" in preservation_selected)
+        self.preservation_excel.setChecked("excel" in preservation_selected)
+        self.preservation_pdf.setChecked("pdf" in preservation_selected)
         self.candidate_enabled.setChecked(draft.candidate_enabled)
         self.search_limit.setValue(draft.candidate_search_limit)
         self.time_mode.setCurrentIndex(max(self.time_mode.findData(draft.diagnostic_time_mode), 0))
@@ -331,6 +344,15 @@ class SettingsDialog(QDialog):
         draft.input_file = self.input_file.text().strip()
         draft.overwrite = self.overwrite.isChecked()
         draft.progress_update_seconds = self.progress_seconds.value()
+        draft.preservation_export_formats = [
+            value
+            for value, checkbox in (
+                ("json", self.preservation_json),
+                ("excel", self.preservation_excel),
+                ("pdf", self.preservation_pdf),
+            )
+            if checkbox.isChecked()
+        ]
         draft.candidate_enabled = self.candidate_enabled.isChecked()
         draft.candidate_search_limit = self.search_limit.value()
         draft.diagnostic_time_mode = self.time_mode.currentData()
