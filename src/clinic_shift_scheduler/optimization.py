@@ -24,7 +24,13 @@ from .class_preferences import (
 )
 from .daily_patterns import PATTERN_PERIODS, DailyPattern
 from .enums import EmploymentType, FullTimeClass, PERIODS_V1, Period, ShiftMode
-from .events import CancellationToken
+from .events import (
+    CancellationToken,
+    ExecutionPhase,
+    ProgressCallback,
+    ProgressEvent,
+    ProgressEventKind,
+)
 from .feasibility import (
     FeasibilityModel,
     build_feasibility_model,
@@ -50,7 +56,9 @@ from .optimization_policy import (
     CLASS_REMAINING_PATTERN_METRICS,
     COMMON_GROUP_FAIRNESS_WEIGHTS,
     FORMAL_OBJECTIVE_STAGES,
+    FORMAL_STAGE_POLICIES,
     FORMAL_STAGE_POLICY_BY_STAGE,
+    FORMAL_STAGE_SEQUENCE,
     FULL_TIME_PATTERN_METRICS,
     GROUP_FAIRNESS_EMPLOYMENT_TYPES,
     GROUP_FAIRNESS_METRICS,
@@ -59,6 +67,7 @@ from .optimization_policy import (
     PREFERENCE_REGRET_STAGES,
     SUNDAY_FAIRNESS_METRICS,
     SUNDAY_FAIRNESS_STAGES,
+    USER_FACING_OPTIMIZATION_FLOW,
 )
 from .precheck import PrecheckResult, PrecheckStatus, run_prechecks
 from .ratio_fairness import (
@@ -71,6 +80,7 @@ from .solver_contracts import (
     Assignment,
     FeasibilityStatus,
     LexicographicResult,
+    OptimizationTelemetry,
     PersonDayKey,
 )
 
@@ -144,6 +154,108 @@ class _SolverRun:
     raw_status: int
     raw_status_name: str
     wall_time_seconds: float
+    best_objective_bound: float | None = None
+    num_conflicts: int | None = None
+    num_branches: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class _SolveProgressContext:
+    activity: str
+    label: str
+    direction: ObjectiveDirection
+    current: int
+    total: int
+    optimization_started_at: float
+    details: Mapping[str, object]
+
+
+class _SolverProgressState:
+    """Small lock-protected state updated by native CP-SAT callbacks."""
+
+    def __init__(self, direction: ObjectiveDirection) -> None:
+        self._direction = direction
+        self._lock = threading.Lock()
+        self._started_at = perf_counter()
+        self._incumbent: float | None = None
+        self._best_bound: float | None = None
+        self._solutions_found = 0
+        self._last_solution_at: float | None = None
+        self._last_bound_update_at: float | None = None
+
+    def record_solution(self, objective_value: float | None) -> None:
+        now = perf_counter()
+        with self._lock:
+            self._solutions_found += 1
+            improved = self._incumbent is None
+            if objective_value is not None and self._incumbent is not None:
+                improved = (
+                    objective_value > self._incumbent
+                    if self._direction is ObjectiveDirection.MAXIMIZE
+                    else objective_value < self._incumbent
+                )
+            if improved:
+                self._last_solution_at = now
+            self._incumbent = objective_value
+
+    def record_bound(self, best_bound: float) -> None:
+        now = perf_counter()
+        with self._lock:
+            if self._best_bound != best_bound:
+                self._best_bound = best_bound
+                self._last_bound_update_at = now
+
+    def snapshot(self) -> dict[str, int | float | None]:
+        now = perf_counter()
+        with self._lock:
+            incumbent = self._incumbent
+            best_bound = self._best_bound
+            absolute_gap = (
+                None
+                if incumbent is None or best_bound is None
+                else abs(incumbent - best_bound)
+            )
+            relative_gap = (
+                None
+                if absolute_gap is None
+                else absolute_gap / max(abs(incumbent), 1.0)
+            )
+            return {
+                "incumbent": incumbent,
+                "best_bound": best_bound,
+                "absolute_gap": absolute_gap,
+                "relative_gap": relative_gap,
+                "solutions_found": self._solutions_found,
+                "stage_elapsed_seconds": now - self._started_at,
+                "seconds_since_last_solution": (
+                    None
+                    if self._last_solution_at is None
+                    else now - self._last_solution_at
+                ),
+                "seconds_since_bound_update": (
+                    None
+                    if self._last_bound_update_at is None
+                    else now - self._last_bound_update_at
+                ),
+            }
+
+
+class _IncumbentProgressCallback(cp_model.CpSolverSolutionCallback):
+    def __init__(
+        self,
+        state: _SolverProgressState,
+        *,
+        has_objective: bool,
+    ) -> None:
+        super().__init__()
+        self._state = state
+        self._has_objective = has_objective
+
+    def on_solution_callback(self) -> None:
+        objective_value = (
+            float(self.objective_value) if self._has_objective else None
+        )
+        self._state.record_solution(objective_value)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1137,11 +1249,67 @@ def _formal_objective_specs(
     return result
 
 
+def _safe_solver_stat(solver: cp_model.CpSolver, name: str) -> int | None:
+    try:
+        value = getattr(solver, name)
+        return int(value() if callable(value) else value)
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return None
+
+
+def _safe_solver_float(
+    solver: cp_model.CpSolver,
+    name: str,
+) -> float | None:
+    try:
+        value = getattr(solver, name)
+        return float(value() if callable(value) else value)
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return None
+
+
+def _emit_solver_progress(
+    callback: ProgressCallback | None,
+    context: _SolveProgressContext | None,
+    state: _SolverProgressState,
+) -> None:
+    if callback is None or context is None:
+        return
+    details = dict(context.details)
+    details.update(state.snapshot())
+    details["activity"] = context.activity
+    details["total_elapsed_seconds"] = (
+        perf_counter() - context.optimization_started_at
+    )
+    try:
+        callback(
+            ProgressEvent(
+                phase=ExecutionPhase.OPTIMIZATION,
+                kind=ProgressEventKind.HEARTBEAT,
+                message=context.label,
+                elapsed_seconds=float(details["total_elapsed_seconds"]),
+                current=context.current,
+                total=context.total,
+                details=details,
+            )
+        )
+    except Exception:
+        # Progress is observational. A disconnected UI must not change the
+        # mathematical result or interrupt a long-running solve.
+        return
+
+
 def _solve_once(
     model: cp_model.CpModel,
     config: LexicographicSolverConfig,
     cancellation: CancellationToken | None = None,
+    *,
+    progress: ProgressCallback | None = None,
+    progress_context: _SolveProgressContext | None = None,
+    progress_interval_seconds: float = 5.0,
 ) -> _SolverRun:
+    if progress_interval_seconds <= 0:
+        raise ValueError("progress_interval_seconds must be greater than 0")
     if cancellation is not None:
         cancellation.raise_if_cancelled()
     solver = cp_model.CpSolver()
@@ -1150,7 +1318,35 @@ def _solve_once(
     if config.max_time_seconds_per_stage is not None:
         solver.parameters.max_time_in_seconds = config.max_time_seconds_per_stage
     monitor: threading.Thread | None = None
+    reporter: threading.Thread | None = None
     finished = threading.Event()
+    direction = (
+        ObjectiveDirection.NONE
+        if progress_context is None
+        else progress_context.direction
+    )
+    state = _SolverProgressState(direction)
+    has_objective = direction is not ObjectiveDirection.NONE
+    solution_callback = _IncumbentProgressCallback(
+        state,
+        has_objective=has_objective,
+    )
+    if has_objective:
+        solver.best_bound_callback = state.record_bound
+
+    if progress is not None and progress_context is not None:
+        _emit_solver_progress(progress, progress_context, state)
+
+        def report_progress() -> None:
+            while not finished.wait(progress_interval_seconds):
+                _emit_solver_progress(progress, progress_context, state)
+
+        reporter = threading.Thread(
+            target=report_progress,
+            name="cp-sat-progress-reporter",
+            daemon=True,
+        )
+        reporter.start()
     if cancellation is not None:
 
         def stop_when_cancelled() -> None:
@@ -1166,11 +1362,19 @@ def _solve_once(
         )
         monitor.start()
     try:
-        raw_status = solver.solve(model)
+        raw_status = solver.solve(model, solution_callback)
     finally:
         finished.set()
         if monitor is not None:
             monitor.join(timeout=0.1)
+        if reporter is not None:
+            reporter.join(timeout=progress_interval_seconds)
+        if has_objective:
+            try:
+                state.record_bound(float(solver.best_objective_bound))
+            except (AttributeError, RuntimeError):
+                pass
+        _emit_solver_progress(progress, progress_context, state)
     try:
         wall_time = solver.wall_time
     except RuntimeError:  # Supports deterministic mocked UNKNOWN tests.
@@ -1180,6 +1384,13 @@ def _solve_once(
         raw_status=raw_status,
         raw_status_name=solver.status_name(raw_status),
         wall_time_seconds=wall_time,
+        best_objective_bound=(
+            None
+            if not has_objective
+            else _safe_solver_float(solver, "best_objective_bound")
+        ),
+        num_conflicts=_safe_solver_stat(solver, "num_conflicts"),
+        num_branches=_safe_solver_stat(solver, "num_branches"),
     )
 
 
@@ -1214,10 +1425,117 @@ def _snapshot(
     )
 
 
+def _user_step_details(stage: OptimizationStage) -> dict[str, object]:
+    for index, step in enumerate(USER_FACING_OPTIMIZATION_FLOW, start=1):
+        if stage in step.stages:
+            return {
+                "user_step_index": index,
+                "user_step_total": len(USER_FACING_OPTIMIZATION_FLOW),
+                "user_step_title": step.title,
+            }
+    raise RuntimeError(f"formal stage has no user-facing step: {stage.value}")
+
+
+def _formal_progress_context(
+    stage: OptimizationStage,
+    *,
+    optimization_started_at: float,
+    has_feasible_solution: bool,
+    completed_stages: int,
+    time_to_first_feasible_schedule: float | None,
+) -> _SolveProgressContext:
+    stage_index = FORMAL_STAGE_SEQUENCE.index(stage) + 1
+    policy = FORMAL_STAGE_POLICY_BY_STAGE[stage]
+    details: dict[str, object] = {
+        "formal_stage": stage.value,
+        "formal_stage_name": policy.display_name,
+        "formal_stage_index": stage_index,
+        "formal_stage_total": len(FORMAL_STAGE_POLICIES),
+        "formal_stages_completed": completed_stages,
+        "has_feasible_solution": has_feasible_solution,
+    }
+    if time_to_first_feasible_schedule is not None:
+        details["time_to_first_feasible_schedule"] = (
+            time_to_first_feasible_schedule
+        )
+    details.update(_user_step_details(stage))
+    return _SolveProgressContext(
+        activity="formal_stage",
+        label=(
+            f"正式流程 {stage_index}/{len(FORMAL_STAGE_POLICIES)}："
+            f"{policy.display_name}"
+        ),
+        direction=policy.direction,
+        current=stage_index,
+        total=len(FORMAL_STAGE_POLICIES),
+        optimization_started_at=optimization_started_at,
+        details=MappingProxyType(details),
+    )
+
+
+def _emit_activity_event(
+    callback: ProgressCallback | None,
+    context: _SolveProgressContext,
+    kind: ProgressEventKind,
+    *,
+    message: str | None = None,
+    extra_details: Mapping[str, object] | None = None,
+) -> None:
+    if callback is None:
+        return
+    details = dict(context.details)
+    if extra_details is not None:
+        details.update(extra_details)
+    details["activity"] = context.activity
+    details["total_elapsed_seconds"] = (
+        perf_counter() - context.optimization_started_at
+    )
+    callback(
+        ProgressEvent(
+            phase=ExecutionPhase.OPTIMIZATION,
+            kind=kind,
+            message=message or context.label,
+            elapsed_seconds=float(details["total_elapsed_seconds"]),
+            current=context.current,
+            total=context.total,
+            details=details,
+        )
+    )
+
+
+def _problem_telemetry(
+    data: NormalizedScheduleInput,
+    built: OptimizationModel,
+) -> OptimizationTelemetry:
+    employees = tuple(data.source.employees)
+    full_time_count = sum(
+        item.employment_type is EmploymentType.FULL_TIME for item in employees
+    )
+    qualified_capacity = sum(
+        len(item.roles) * len(data.dates) * len(PERIODS_V1)
+        for item in employees
+    )
+    assignment_variables = len(built.feasibility.x)
+    return OptimizationTelemetry(
+        days=len(data.dates),
+        employees=len(employees),
+        full_time_employees=full_time_count,
+        part_time_employees=len(employees) - full_time_count,
+        assignment_variables=assignment_variables,
+        availability_ratio=(
+            assignment_variables / qualified_capacity
+            if qualified_capacity
+            else 0.0
+        ),
+        demand_units=sum(data.demands.values()),
+    )
+
+
 def _empty_result(
     status: FeasibilityStatus,
     precheck: PrecheckResult,
     stages: tuple[OptimizationStageResult, ...] = (),
+    optimization_telemetry: OptimizationTelemetry | None = None,
 ) -> LexicographicResult:
     return LexicographicResult(
         status=status,
@@ -1231,6 +1549,7 @@ def _empty_result(
         class_pattern_locks=(),
         precheck=precheck,
         implemented_objective_prefix_optimal=False,
+        optimization_telemetry=optimization_telemetry,
     )
 
 
@@ -1244,6 +1563,7 @@ def _result_from_snapshot(
     class_pattern_locks: tuple[ClassPatternLockResult, ...] = (),
     implemented_objective_prefix_optimal: bool = False,
     locked_model: OptimizationModel | None = None,
+    optimization_telemetry: OptimizationTelemetry | None = None,
 ) -> LexicographicResult:
     return LexicographicResult(
         status=status,
@@ -1257,6 +1577,7 @@ def _result_from_snapshot(
         class_pattern_locks=class_pattern_locks,
         precheck=precheck,
         implemented_objective_prefix_optimal=implemented_objective_prefix_optimal,
+        optimization_telemetry=optimization_telemetry,
         _locked_model=locked_model,
     )
 
@@ -1267,14 +1588,57 @@ def _discover_preference_benchmarks(
     rank: PreferenceRank,
     config: LexicographicSolverConfig,
     cancellation: CancellationToken | None = None,
+    *,
+    progress: ProgressCallback | None = None,
+    progress_interval_seconds: float = 5.0,
+    optimization_started_at: float | None = None,
+    formal_stages_completed: int = 0,
+    time_to_first_feasible_schedule: float | None = None,
 ) -> tuple[tuple[PreferenceBenchmarkResult, ...], _SolverRun | None]:
     """Prove independent per-class ideals without locking either class first."""
 
+    optimization_started_at = optimization_started_at or perf_counter()
+    definitions = tuple(
+        item for item in CLASS_PREFERENCES if item.rank is rank
+    )
     results: list[PreferenceBenchmarkResult] = []
     last_run: _SolverRun | None = None
-    for definition in CLASS_PREFERENCES:
-        if definition.rank is not rank:
-            continue
+    for benchmark_index, definition in enumerate(definitions, start=1):
+        rank_label = "一" if rank is PreferenceRank.FIRST else "二"
+        direction = (
+            ObjectiveDirection.MAXIMIZE
+            if definition.direction is PreferenceDirection.MAXIMIZE
+            else ObjectiveDirection.MINIMIZE
+        )
+        upcoming_stage = PREFERENCE_REGRET_STAGES[rank][0]
+        details: dict[str, object] = {
+            "rank": rank.value,
+            "full_time_class": definition.full_time_class.value,
+            "benchmark_index": benchmark_index,
+            "benchmark_total": len(definitions),
+            "formal_stages_completed": formal_stages_completed,
+            "formal_stage_total": len(FORMAL_STAGE_POLICIES),
+            "has_feasible_solution": True,
+        }
+        if time_to_first_feasible_schedule is not None:
+            details["time_to_first_feasible_schedule"] = (
+                time_to_first_feasible_schedule
+            )
+        details.update(_user_step_details(upcoming_stage))
+        context = _SolveProgressContext(
+            activity="preference_benchmark",
+            label=(
+                f"計算 {definition.full_time_class.value} 類"
+                f"第{rank_label}偏好基準 "
+                f"({benchmark_index}/{len(definitions)})"
+            ),
+            direction=direction,
+            current=benchmark_index,
+            total=len(definitions),
+            optimization_started_at=optimization_started_at,
+            details=MappingProxyType(details),
+        )
+        _emit_activity_event(progress, context, ProgressEventKind.STEP_STARTED)
         opportunity_days = class_opportunity_days(
             data, definition.full_time_class
         )
@@ -1293,6 +1657,13 @@ def _discover_preference_benchmarks(
                     wall_time_seconds=0.0,
                 )
             )
+            _emit_activity_event(
+                progress,
+                context,
+                ProgressEventKind.STEP_COMPLETED,
+                message=f"{context.label}：無可比較機會，已略過",
+                extra_details={"benchmark_status": "SKIPPED_CONSTANT"},
+            )
             continue
         expression = built.class_preference_values[
             (definition.full_time_class, rank)
@@ -1301,11 +1672,17 @@ def _discover_preference_benchmarks(
             built.feasibility.model.maximize(expression)
         else:
             built.feasibility.model.minimize(expression)
-        run = (
-            _solve_once(built.feasibility.model, config)
-            if cancellation is None
-            else _solve_once(built.feasibility.model, config, cancellation)
-        )
+        if cancellation is None and progress is None:
+            run = _solve_once(built.feasibility.model, config)
+        else:
+            run = _solve_once(
+                built.feasibility.model,
+                config,
+                cancellation,
+                progress=progress,
+                progress_context=context,
+                progress_interval_seconds=progress_interval_seconds,
+            )
         last_run = run
         status = (
             OptimizationStageStatus.OPTIMAL
@@ -1335,6 +1712,20 @@ def _discover_preference_benchmarks(
                 wall_time_seconds=run.wall_time_seconds,
             )
         )
+        _emit_activity_event(
+            progress,
+            context,
+            ProgressEventKind.STEP_COMPLETED,
+            message=f"{context.label}：{status.value}",
+            extra_details={
+                "benchmark_status": status.value,
+                "benchmark_ideal_value": ideal_value,
+                "best_objective_bound": run.best_objective_bound,
+                "num_conflicts": run.num_conflicts,
+                "num_branches": run.num_branches,
+                "stage_elapsed_seconds": run.wall_time_seconds,
+            },
+        )
         if status is not OptimizationStageStatus.OPTIMAL:
             break
     return tuple(results), last_run
@@ -1346,25 +1737,90 @@ def solve_lexicographic(
     *,
     precheck_result: PrecheckResult | None = None,
     cancellation: CancellationToken | None = None,
+    progress: ProgressCallback | None = None,
+    progress_interval_seconds: float = 5.0,
 ) -> LexicographicResult:
     """Solve revised class-specific preferences with fair normalized regrets."""
 
+    if progress_interval_seconds <= 0:
+        raise ValueError("progress_interval_seconds must be greater than 0")
     config = config or LexicographicSolverConfig()
     precheck = precheck_result or run_prechecks(data)
     if precheck.status is PrecheckStatus.PRECHECK_INFEASIBLE:
         return _empty_result(FeasibilityStatus.PRECHECK_INFEASIBLE, precheck)
 
+    optimization_started_at = perf_counter()
     built = build_optimization_model(data)
+    base_telemetry = _problem_telemetry(data, built)
     stages: list[OptimizationStageResult] = []
     benchmarks: list[PreferenceBenchmarkResult] = []
     class_pattern_locks: list[ClassPatternLockResult] = []
-    hard_run = (
-        _solve_once(built.feasibility.model, config)
-        if cancellation is None
-        else _solve_once(built.feasibility.model, config, cancellation)
+    formal_stages_completed = 0
+    time_to_first_feasible_schedule: float | None = None
+
+    def current_telemetry(*, proven: bool = False) -> OptimizationTelemetry:
+        elapsed = perf_counter() - optimization_started_at
+        return replace(
+            base_telemetry,
+            time_to_first_feasible_schedule=time_to_first_feasible_schedule,
+            time_to_proven_formal_optimum=elapsed if proven else None,
+            total_optimization_seconds=elapsed,
+        )
+
+    def append_completed_stage(
+        stage_result: OptimizationStageResult,
+        context: _SolveProgressContext,
+    ) -> None:
+        nonlocal formal_stages_completed
+        stages.append(stage_result)
+        formal_stages_completed += 1
+        _emit_activity_event(
+            progress,
+            context,
+            ProgressEventKind.STEP_COMPLETED,
+            message=(
+                f"正式流程已完成 {formal_stages_completed}/"
+                f"{len(FORMAL_STAGE_POLICIES)}："
+                f"{FORMAL_STAGE_POLICY_BY_STAGE[stage_result.stage].display_name}"
+            ),
+            extra_details={
+                "formal_stages_completed": formal_stages_completed,
+                "has_feasible_solution": (
+                    time_to_first_feasible_schedule is not None
+                ),
+                "time_to_first_feasible_schedule": (
+                    time_to_first_feasible_schedule
+                ),
+                "stage_status": stage_result.status.value,
+                "objective_value": stage_result.objective_value,
+                "best_objective_bound": stage_result.best_objective_bound,
+                "num_conflicts": stage_result.num_conflicts,
+                "num_branches": stage_result.num_branches,
+                "stage_elapsed_seconds": stage_result.wall_time_seconds,
+            },
+        )
+
+    hard_context = _formal_progress_context(
+        OptimizationStage.HARD_FEASIBILITY,
+        optimization_started_at=optimization_started_at,
+        has_feasible_solution=False,
+        completed_stages=formal_stages_completed,
+        time_to_first_feasible_schedule=None,
     )
+    _emit_activity_event(progress, hard_context, ProgressEventKind.STEP_STARTED)
+    if cancellation is None and progress is None:
+        hard_run = _solve_once(built.feasibility.model, config)
+    else:
+        hard_run = _solve_once(
+            built.feasibility.model,
+            config,
+            cancellation,
+            progress=progress,
+            progress_context=hard_context,
+            progress_interval_seconds=progress_interval_seconds,
+        )
     if hard_run.raw_status == cp_model.INFEASIBLE:
-        stages.append(
+        append_completed_stage(
             OptimizationStageResult(
                 stage=OptimizationStage.HARD_FEASIBILITY,
                 direction=FORMAL_STAGE_POLICY_BY_STAGE[
@@ -1375,13 +1831,20 @@ def solve_lexicographic(
                 raw_solver_status=hard_run.raw_status_name,
                 wall_time_seconds=hard_run.wall_time_seconds,
                 locked=False,
-            )
+                best_objective_bound=hard_run.best_objective_bound,
+                num_conflicts=hard_run.num_conflicts,
+                num_branches=hard_run.num_branches,
+            ),
+            hard_context,
         )
         return _empty_result(
-            FeasibilityStatus.INFEASIBLE, precheck, tuple(stages)
+            FeasibilityStatus.INFEASIBLE,
+            precheck,
+            tuple(stages),
+            current_telemetry(),
         )
     if hard_run.raw_status not in (cp_model.FEASIBLE, cp_model.OPTIMAL):
-        stages.append(
+        append_completed_stage(
             OptimizationStageResult(
                 stage=OptimizationStage.HARD_FEASIBILITY,
                 direction=FORMAL_STAGE_POLICY_BY_STAGE[
@@ -1392,13 +1855,21 @@ def solve_lexicographic(
                 raw_solver_status=hard_run.raw_status_name,
                 wall_time_seconds=hard_run.wall_time_seconds,
                 locked=False,
-            )
+                best_objective_bound=hard_run.best_objective_bound,
+                num_conflicts=hard_run.num_conflicts,
+                num_branches=hard_run.num_branches,
+            ),
+            hard_context,
         )
         return _empty_result(
-            FeasibilityStatus.UNKNOWN, precheck, tuple(stages)
+            FeasibilityStatus.UNKNOWN,
+            precheck,
+            tuple(stages),
+            current_telemetry(),
         )
 
-    stages.append(
+    time_to_first_feasible_schedule = perf_counter() - optimization_started_at
+    append_completed_stage(
         OptimizationStageResult(
             stage=OptimizationStage.HARD_FEASIBILITY,
             direction=FORMAL_STAGE_POLICY_BY_STAGE[
@@ -1409,7 +1880,11 @@ def solve_lexicographic(
             raw_solver_status=hard_run.raw_status_name,
             wall_time_seconds=hard_run.wall_time_seconds,
             locked=False,
-        )
+            best_objective_bound=hard_run.best_objective_bound,
+            num_conflicts=hard_run.num_conflicts,
+            num_branches=hard_run.num_branches,
+        ),
+        hard_context,
     )
     snapshot = _snapshot(data, built, hard_run.solver)
     last_solver: cp_model.CpSolver | None = hard_run.solver
@@ -1419,8 +1894,20 @@ def solve_lexicographic(
     ) -> LexicographicResult | None:
         nonlocal last_solver, snapshot
         for objective in specs:
+            context = _formal_progress_context(
+                objective.stage,
+                optimization_started_at=optimization_started_at,
+                has_feasible_solution=True,
+                completed_stages=formal_stages_completed,
+                time_to_first_feasible_schedule=(
+                    time_to_first_feasible_schedule
+                ),
+            )
+            _emit_activity_event(
+                progress, context, ProgressEventKind.STEP_STARTED
+            )
             if objective.constant_value is not None:
-                stages.append(
+                append_completed_stage(
                     OptimizationStageResult(
                         stage=objective.stage,
                         direction=objective.direction,
@@ -1430,24 +1917,31 @@ def solve_lexicographic(
                         wall_time_seconds=0.0,
                         locked=False,
                         constant_proof=objective.constant_proof,
-                    )
+                    ),
+                    context,
                 )
                 continue
             if objective.direction is ObjectiveDirection.MAXIMIZE:
                 built.feasibility.model.maximize(objective.expression)
             else:
                 built.feasibility.model.minimize(objective.expression)
-            run = (
-                _solve_once(built.feasibility.model, config)
-                if cancellation is None
-                else _solve_once(built.feasibility.model, config, cancellation)
-            )
+            if cancellation is None and progress is None:
+                run = _solve_once(built.feasibility.model, config)
+            else:
+                run = _solve_once(
+                    built.feasibility.model,
+                    config,
+                    cancellation,
+                    progress=progress,
+                    progress_context=context,
+                    progress_interval_seconds=progress_interval_seconds,
+                )
             if run.raw_status == cp_model.OPTIMAL:
                 objective_value = int(run.solver.value(objective.expression))
                 built.feasibility.model.add(
                     objective.expression == objective_value
                 )
-                stages.append(
+                append_completed_stage(
                     OptimizationStageResult(
                         stage=objective.stage,
                         direction=objective.direction,
@@ -1456,14 +1950,18 @@ def solve_lexicographic(
                         raw_solver_status=run.raw_status_name,
                         wall_time_seconds=run.wall_time_seconds,
                         locked=True,
-                    )
+                        best_objective_bound=run.best_objective_bound,
+                        num_conflicts=run.num_conflicts,
+                        num_branches=run.num_branches,
+                    ),
+                    context,
                 )
                 snapshot = _snapshot(data, built, run.solver)
                 last_solver = run.solver
                 continue
             if run.raw_status == cp_model.FEASIBLE:
                 objective_value = int(run.solver.value(objective.expression))
-                stages.append(
+                append_completed_stage(
                     OptimizationStageResult(
                         stage=objective.stage,
                         direction=objective.direction,
@@ -1472,12 +1970,16 @@ def solve_lexicographic(
                         raw_solver_status=run.raw_status_name,
                         wall_time_seconds=run.wall_time_seconds,
                         locked=False,
-                    )
+                        best_objective_bound=run.best_objective_bound,
+                        num_conflicts=run.num_conflicts,
+                        num_branches=run.num_branches,
+                    ),
+                    context,
                 )
                 snapshot = _snapshot(data, built, run.solver)
                 last_solver = run.solver
             else:
-                stages.append(
+                append_completed_stage(
                     OptimizationStageResult(
                         stage=objective.stage,
                         direction=objective.direction,
@@ -1490,7 +1992,11 @@ def solve_lexicographic(
                         raw_solver_status=run.raw_status_name,
                         wall_time_seconds=run.wall_time_seconds,
                         locked=False,
-                    )
+                        best_objective_bound=run.best_objective_bound,
+                        num_conflicts=run.num_conflicts,
+                        num_branches=run.num_branches,
+                    ),
+                    context,
                 )
             return _result_from_snapshot(
                 FeasibilityStatus.FEASIBLE,
@@ -1499,6 +2005,7 @@ def solve_lexicographic(
                 precheck,
                 preference_benchmarks=tuple(benchmarks),
                 class_pattern_locks=tuple(class_pattern_locks),
+                optimization_telemetry=current_telemetry(),
             )
         return None
 
@@ -1519,7 +2026,16 @@ def solve_lexicographic(
     }
     for rank in PreferenceRank:
         discovered, last_run = _discover_preference_benchmarks(
-            data, built, rank, config, cancellation
+            data,
+            built,
+            rank,
+            config,
+            cancellation,
+            progress=progress,
+            progress_interval_seconds=progress_interval_seconds,
+            optimization_started_at=optimization_started_at,
+            formal_stages_completed=formal_stages_completed,
+            time_to_first_feasible_schedule=time_to_first_feasible_schedule,
         )
         benchmarks.extend(discovered)
         if any(
@@ -1542,6 +2058,7 @@ def solve_lexicographic(
                 precheck,
                 preference_benchmarks=tuple(benchmarks),
                 class_pattern_locks=tuple(class_pattern_locks),
+                optimization_telemetry=current_telemetry(),
             )
         built = _attach_preference_regret_model(
             data, built, tuple(benchmarks), rank
@@ -1600,6 +2117,33 @@ def solve_lexicographic(
     incomplete = execute_specs(remaining_specs)
     if incomplete is not None:
         return incomplete
+    proven_telemetry = current_telemetry(proven=True)
+    if progress is not None:
+        progress(
+            ProgressEvent(
+                phase=ExecutionPhase.OPTIMIZATION,
+                kind=ProgressEventKind.INFORMATION,
+                message="正式 16 階段皆已完成並證明最佳值",
+                elapsed_seconds=proven_telemetry.total_optimization_seconds,
+                current=len(FORMAL_STAGE_POLICIES),
+                total=len(FORMAL_STAGE_POLICIES),
+                details={
+                    "activity": "formal_optimization_completed",
+                    "formal_stages_completed": len(FORMAL_STAGE_POLICIES),
+                    "formal_stage_total": len(FORMAL_STAGE_POLICIES),
+                    "has_feasible_solution": True,
+                    "time_to_first_feasible_schedule": (
+                        time_to_first_feasible_schedule
+                    ),
+                    "time_to_proven_formal_optimum": (
+                        proven_telemetry.time_to_proven_formal_optimum
+                    ),
+                    "total_elapsed_seconds": (
+                        proven_telemetry.total_optimization_seconds
+                    ),
+                },
+            )
+        )
     return _result_from_snapshot(
         FeasibilityStatus.FEASIBLE,
         snapshot,
@@ -1609,6 +2153,7 @@ def solve_lexicographic(
         class_pattern_locks=tuple(class_pattern_locks),
         implemented_objective_prefix_optimal=True,
         locked_model=built,
+        optimization_telemetry=proven_telemetry,
     )
 
 

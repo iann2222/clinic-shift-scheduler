@@ -61,12 +61,16 @@ class JsonExporterTests(unittest.TestCase):
             document["contract"],
             {"name": RESULT_CONTRACT_NAME, "version": RESULT_CONTRACT_VERSION},
         )
-        self.assertEqual(RESULT_CONTRACT_VERSION, "1.10")
+        self.assertEqual(RESULT_CONTRACT_VERSION, "1.11")
         self.assertEqual(document["input_schema_version"], "v1")
         self.assertEqual(document["generated_at"], "2024-10-02T03:04:05Z")
         self.assertEqual(document["month"], "2024-10")
         self.assertEqual(document["status"], "OPTIMAL")
         self.assertIsNone(document["execution_timing"])
+        self.assertIsNotNone(document["optimization_telemetry"])
+        self.assertGreater(
+            document["optimization_telemetry"]["assignment_variables"], 0
+        )
         self.assertEqual(document["validation"]["status"], "PASS")
         self.assertNotIn("recomputed", document["validation"])
         self.assertEqual(
@@ -74,6 +78,9 @@ class JsonExporterTests(unittest.TestCase):
             document["statistics"]["overall"]["objective_vector"],
         )
         self.assertEqual(len(document["stage_records"]), 16)
+        self.assertIn("best_objective_bound", document["stage_records"][0])
+        self.assertIn("num_conflicts", document["stage_records"][0])
+        self.assertIn("num_branches", document["stage_records"][0])
         self.assertEqual(len(document["preference_benchmarks"]), 4)
         self.assertTrue(
             all(

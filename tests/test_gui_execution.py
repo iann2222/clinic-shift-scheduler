@@ -128,6 +128,47 @@ class GuiExecutionTests(unittest.TestCase):
         self.assertFalse(page.stop_candidate_button.isEnabled())
         page.process_finished()
 
+    def test_execution_page_renders_structured_solver_progress(self) -> None:
+        page = ExecutionPage()
+        self.addCleanup(page.close)
+
+        page.show_message(
+            {
+                "type": "progress",
+                "phase": ExecutionPhase.OPTIMIZATION.value,
+                "kind": ProgressEventKind.HEARTBEAT.value,
+                "message": "fallback",
+                "details": {
+                    "activity": "formal_stage",
+                    "has_feasible_solution": True,
+                    "user_step_index": 5,
+                    "user_step_total": 10,
+                    "user_step_title": "平衡正職個人的班型比例",
+                    "formal_stage_index": 6,
+                    "formal_stage_total": 16,
+                    "formal_stage_name": "正職個人班型比例最大 gap",
+                    "formal_stages_completed": 5,
+                    "incumbent": 438.0,
+                    "best_bound": 421.0,
+                    "relative_gap": 17 / 438,
+                    "stage_elapsed_seconds": 138.0,
+                    "seconds_since_last_solution": 17.0,
+                    "seconds_since_bound_update": 4.0,
+                    "total_elapsed_seconds": 342.0,
+                },
+            }
+        )
+
+        rendered = page.status_label.text()
+        self.assertIn("已找到合法班表 ✓", rendered)
+        self.assertIn("第 5/10 步", rendered)
+        self.assertIn("正式流程已完成 5/16", rendered)
+        self.assertIn("目前 6/16", rendered)
+        self.assertIn("目前目標 438", rendered)
+        self.assertIn("最佳界 421", rendered)
+        self.assertIn("gap 3.9%", rendered)
+        self.assertNotIn("fallback", rendered)
+
     def test_completed_page_reveals_all_outputs_and_scrolls_to_result(self) -> None:
         page = ExecutionPage()
         self.addCleanup(page.close)

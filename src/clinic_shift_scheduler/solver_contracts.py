@@ -70,6 +70,22 @@ class FeasibilityResult:
 
 
 @dataclass(frozen=True, slots=True)
+class OptimizationTelemetry:
+    """Non-sensitive problem-shape and wall-clock data for one optimization."""
+
+    days: int
+    employees: int
+    full_time_employees: int
+    part_time_employees: int
+    assignment_variables: int
+    availability_ratio: float
+    demand_units: int
+    time_to_first_feasible_schedule: float | None = None
+    time_to_proven_formal_optimum: float | None = None
+    total_optimization_seconds: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class LexicographicResult:
     status: FeasibilityStatus
     assignments: tuple[Assignment, ...]
@@ -82,6 +98,7 @@ class LexicographicResult:
     class_pattern_locks: tuple[ClassPatternLockResult, ...]
     precheck: PrecheckResult
     implemented_objective_prefix_optimal: bool
+    optimization_telemetry: OptimizationTelemetry | None = None
     _locked_model: Any | None = field(default=None, repr=False, compare=False)
 
     @property

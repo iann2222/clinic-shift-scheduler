@@ -123,6 +123,7 @@ def _notify(
     elapsed_seconds: float | None = None,
     current: int | None = None,
     total: int | None = None,
+    details: Mapping[str, Any] | None = None,
 ) -> None:
     if callback is not None:
         callback(
@@ -133,7 +134,32 @@ def _notify(
                 elapsed_seconds=elapsed_seconds,
                 current=current,
                 total=total,
+                details={} if details is None else dict(details),
             )
+        )
+
+
+class _OptimizationProgressRelay:
+    """Forward rich optimizer events and track when fallback is unnecessary."""
+
+    def __init__(self, callback: ProgressCallback | None) -> None:
+        self._callback = callback
+        self._lock = threading.Lock()
+        self._last_progress_at: float | None = None
+
+    def __call__(self, event: ProgressEvent) -> None:
+        with self._lock:
+            self._last_progress_at = perf_counter()
+        if self._callback is not None:
+            self._callback(event)
+
+    def seconds_since_progress(self) -> float | None:
+        with self._lock:
+            last_progress_at = self._last_progress_at
+        return (
+            None
+            if last_progress_at is None
+            else perf_counter() - last_progress_at
         )
 
 
@@ -158,6 +184,7 @@ def _run_with_elapsed_heartbeat(
     *,
     interval_seconds: float = 5.0,
     cancellation: CancellationToken | None = None,
+    rich_progress_relay: _OptimizationProgressRelay | None = None,
 ) -> tuple[T, float]:
     """Run a blocking operation while periodically reporting elapsed time."""
 
@@ -170,6 +197,16 @@ def _run_with_elapsed_heartbeat(
 
         def report_elapsed() -> None:
             while not stop.wait(interval_seconds):
+                seconds_since_rich = (
+                    None
+                    if rich_progress_relay is None
+                    else rich_progress_relay.seconds_since_progress()
+                )
+                if (
+                    seconds_since_rich is not None
+                    and seconds_since_rich < interval_seconds * 1.5
+                ):
+                    continue
                 elapsed = perf_counter() - started
                 _notify(
                     progress,
@@ -453,15 +490,19 @@ def run_schedule_file(
         kind=ProgressEventKind.STEP_STARTED,
     )
     try:
+        optimization_progress = _OptimizationProgressRelay(progress)
         solver_result, optimization_seconds = _run_with_elapsed_heartbeat(
             lambda: solve_lexicographic(
                 data,
                 precheck_result=precheck,
                 cancellation=cancellation,
+                progress=optimization_progress,
+                progress_interval_seconds=progress_interval_seconds,
             ),
             progress,
             interval_seconds=progress_interval_seconds,
             cancellation=cancellation,
+            rich_progress_relay=optimization_progress,
         )
     except OperationCancelledError:
         check_cancelled()
@@ -487,6 +528,16 @@ def run_schedule_file(
             result_validation_and_build_seconds
         ),
         scheduling_pipeline_seconds=scheduling_pipeline_seconds,
+        time_to_first_feasible_schedule=(
+            None
+            if solver_result.optimization_telemetry is None
+            else solver_result.optimization_telemetry.time_to_first_feasible_schedule
+        ),
+        time_to_proven_formal_optimum=(
+            None
+            if solver_result.optimization_telemetry is None
+            else solver_result.optimization_telemetry.time_to_proven_formal_optimum
+        ),
     )
     output = replace(output, execution_timing=execution_timing)
 

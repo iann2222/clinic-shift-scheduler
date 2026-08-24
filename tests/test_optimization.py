@@ -27,6 +27,7 @@ from clinic_shift_scheduler import (
     validate_schedule_result,
 )
 from clinic_shift_scheduler.enums import Period
+from clinic_shift_scheduler.events import ProgressEventKind
 
 from tests.fixtures import synthetic_schedule_input
 from clinic_shift_scheduler.ratio_fairness import (
@@ -143,6 +144,95 @@ def stage(result, name: OptimizationStage):
 
 
 class LexicographicOptimizationTests(unittest.TestCase):
+    def test_progress_reporting_preserves_result_and_distinguishes_benchmarks(
+        self,
+    ) -> None:
+        payload = one_day_input(
+            [
+                full_time(
+                    "A1",
+                    full_time_class="A",
+                    shift_mode="EXACT",
+                    required=1,
+                    fairness_group="A_SHARED",
+                ),
+                full_time(
+                    "B1",
+                    full_time_class="B",
+                    shift_mode="EXACT",
+                    required=1,
+                    fairness_group="B_SHARED",
+                ),
+            ],
+            ("morning", "afternoon"),
+        )
+        data = validate_and_normalize(payload)
+        baseline = solve_lexicographic(data)
+        events = []
+
+        observed = solve_lexicographic(
+            data,
+            progress=events.append,
+            progress_interval_seconds=0.001,
+        )
+
+        self.assertEqual(observed.assignments, baseline.assignments)
+        self.assertEqual(
+            tuple((item.stage, item.objective_value) for item in observed.stages),
+            tuple((item.stage, item.objective_value) for item in baseline.stages),
+        )
+        benchmark_events = [
+            event
+            for event in events
+            if event.details.get("activity") == "preference_benchmark"
+        ]
+        self.assertTrue(benchmark_events)
+        self.assertTrue(
+            all("benchmark_index" in event.details for event in benchmark_events)
+        )
+        benchmark_solver_updates = [
+            event
+            for event in benchmark_events
+            if event.kind is ProgressEventKind.HEARTBEAT
+            and event.details.get("incumbent") is not None
+        ]
+        self.assertTrue(benchmark_solver_updates)
+        self.assertTrue(
+            all(event.details.get("best_bound") is not None
+                for event in benchmark_solver_updates)
+        )
+        self.assertTrue(
+            all(int(event.details["solutions_found"]) >= 1
+                for event in benchmark_solver_updates)
+        )
+        hard_completed = next(
+            event
+            for event in events
+            if event.kind is ProgressEventKind.STEP_COMPLETED
+            and event.details.get("formal_stage")
+            == OptimizationStage.HARD_FEASIBILITY.value
+        )
+        self.assertTrue(hard_completed.details["has_feasible_solution"])
+        self.assertEqual(hard_completed.current, 1)
+        self.assertEqual(hard_completed.total, len(FORMAL_STAGE_SEQUENCE))
+        self.assertEqual(
+            {event.details.get("formal_stage_total") for event in events
+             if event.details.get("activity") == "formal_stage"},
+            {len(FORMAL_STAGE_SEQUENCE)},
+        )
+        telemetry = observed.optimization_telemetry
+        self.assertIsNotNone(telemetry)
+        assert telemetry is not None
+        self.assertIsNotNone(telemetry.time_to_first_feasible_schedule)
+        self.assertIsNotNone(telemetry.time_to_proven_formal_optimum)
+        self.assertGreaterEqual(
+            telemetry.time_to_proven_formal_optimum,
+            telemetry.time_to_first_feasible_schedule,
+        )
+        self.assertGreater(telemetry.assignment_variables, 0)
+        self.assertIsInstance(observed.stages[0].num_conflicts, int)
+        self.assertIsInstance(observed.stages[0].num_branches, int)
+
     def test_supplied_precheck_is_reused_without_running_it_again(self) -> None:
         data = validate_and_normalize(
             one_day_input(

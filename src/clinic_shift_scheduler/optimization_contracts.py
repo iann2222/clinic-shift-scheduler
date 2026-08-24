@@ -161,6 +161,9 @@ class OptimizationStageResult:
     wall_time_seconds: float
     locked: bool
     constant_proof: ConstantProof | None = None
+    best_objective_bound: float | None = None
+    num_conflicts: int | None = None
+    num_branches: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

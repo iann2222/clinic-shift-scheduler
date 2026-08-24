@@ -224,7 +224,7 @@ v1 的求解控制器必須完全依第七章十一層順序執行，不得另�
 
 每階段應記錄目標名稱、方向、最佳值、求解狀態、求解時間及是否鎖定。只有所有必要目標階段均為 `OPTIMAL` 或 `SKIPPED_CONSTANT`，且獨立驗證器通過時，整體結果才可標示為 `OPTIMAL`。若已找到合法班表但某階段未證明最佳，整體狀態為 `FEASIBLE`；若求解器未找到解也未證明無解，則為 `UNKNOWN`。
 
-嚴格分階段最佳化執行期間，操作介面預設每 5 秒顯示一次自本段開始後的累積經過時間；互動式終端必須覆寫同一進度行，完成時清除該行並顯示本段總耗時，輸出重新導向到檔案或非互動式 log 時則保留逐行紀錄，使使用者能確認長時間求解仍在運作。CP-SAT 各階段的搜尋空間與證明難度不相等，v1 不以階段數推算百分比，也不得顯示缺乏可靠數學依據的預估完成比例。此心跳訊息只屬執行狀態顯示，不影響模型、求解器參數、正式 stage records 或最佳化結果。
+嚴格分階段最佳化執行期間，操作介面預設每 5 秒更新目前使用者步驟、正式流程 stage、累積時間及可取得的 incumbent、best objective bound、gap、解改善與 bound 更新時間；未取得的欄位不得虛構顯示。正式流程以「目前第幾個／共十六個 stage」呈現，另可對應十一層政策整理出的十個人類可讀步驟，但兩者都不得換算為時間百分比。第三、四層開始前所做的 A／B conditional preference benchmark 是正式 stage 之外的額外求解，必須獨立標示 benchmark rank、類別及其自身進度，不得占用正式十六階段的 index。硬性可行性成功後可標示已取得合法班表，並分別記錄首次合法班表時間與全部正式最佳值證明時間。互動式終端以覆寫同一行呈現求解心跳，非互動式 log 保留逐行紀錄；若 richer solver progress 暫時不可用，才退回只顯示累積時間的 heartbeat。CP-SAT 各階段的搜尋空間與證明難度不相等，v1 不顯示假的百分比或精準 ETA。所有進度與 telemetry 只屬觀測資訊，不得影響模型、求解器參數、cancellation、正式 stage locks 或最佳化結果。
 
 允許前一階段最佳值退讓、使用權重交換目標或產生多組取捨方案的功能，統一列為未來的 optional comparison mode。該模式不屬於 v1 正式排班邏輯，不得影響 v1 預設結果、正式驗收或 `OPTIMAL` 的判定。
 
@@ -254,7 +254,7 @@ TARGET 兼職以相對自身目標的偏差比例在相同 `fairness_group` 內�
 
 正式 Excel 工作表依一般使用者的閱讀順序固定為：「月班表」、「個人班型摘要」、「個人詳細統計」、「類別與公平性統計」、「求解與驗證資訊」。其中「個人班型摘要」只呈現姓名、類別、總班次、出勤日，以及連續雙班、單節日、早上加晚上拆班、三節班各自的日數／出勤日，另以兩個整數欄位分別列出「週日節數」與「週日出勤天數」；班型比例均顯示為 `X / Y（Z%）`，例如 `17 / 19（89.5%）`，出勤日為 0 時顯示 `0 / 0（N/A）`。完整職務、時段、請假、可排容量及其他比例仍保留在「個人詳細統計」，不得因新增摘要頁而刪除。
 
-正式 JSON 使用獨立版本化的 result contract。自本規則起 contract version 為 `1.10`。`objective_vector` 包含十六筆 stage records 中除硬性可行性外的十五個正式目標值，新增 `part_time_target_max_regret` 與 `part_time_target_total_regret`，並移除舊的 `full_time_target_deviation`。個人統計另保存 TARGET 的目標值、絕對偏差及相對偏差 basis points；兼職群組統計保存 TARGET 相對偏差與群組 gap。四筆 `preference_benchmarks` 與兩筆 `class_pattern_locks` 的既有契約維持不變。
+正式 JSON 使用獨立版本化的 result contract，目前 contract version 為 `1.11`。`objective_vector` 包含十六筆 stage records 中除硬性可行性外的十五個正式目標值；`part_time_target_max_regret`、`part_time_target_total_regret` 與既有偏好 benchmark／class lock 語意維持不變。`1.11` 只增加求解觀測資訊：每個實際求解 stage 可保存 best objective bound、conflicts 與 branches，另保存不含姓名的問題規模、首次取得合法班表時間、證明完整正式最佳值時間與最佳化總時間；不得以這些資料改變 objective、正式狀態或驗證結果。個人統計仍保存 TARGET 的目標值、絕對偏差及相對偏差 basis points；兼職群組統計仍保存 TARGET 相對偏差與群組 gap。
 
 正式 PDF 是由已完成驗證的正式 Excel 直接產生的單頁 A4 橫向列印版，上方為「月班表」，下方直接接續 Excel「個人班型摘要」的完整表格；摘要表不另加區塊標題，但保留欄位表頭。PDF 表格使用較深色且較粗的框線與粗體文字，時段、週末、休診及摘要表頭底色保持可辨識的中等對比，兼顧螢幕閱讀與列印。為維持單頁列印寬度，PDF 摘要可將 Excel 的「週日出勤天數」欄標題縮寫為「週日天數」，並將姓名欄寬縮為約 11 mm；這只是媒介呈現，統計數值與 Excel／JSON 欄位不變。PDF 不包含個人詳細統計、公平性統計或求解資訊。PDF exporter 只能讀取 Excel 已有的班表與摘要內容及呈現資訊，不得重新計算排班規則、最佳化目標或統計；來源 Excel 必須為完整 `OPTIMAL` 且 validation `PASS`，否則不得產生正式 PDF。正式檔名為 `排班結果_YYYY-MM.result-v1.pdf`，與同月份 JSON／Excel 共用名稱主幹，預設禁止覆寫。
 

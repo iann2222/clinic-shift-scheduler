@@ -29,7 +29,7 @@ _exports("optimization_policy", "CLASS_PREFERENCES", "FORMAL_OBJECTIVE_STAGES", 
 _exports("errors", "InputValidationError", "ValidationIssue")
 _exports("events", "CancellationToken", "DiagnosticIssue", "DiagnosticSeverity", "ExecutionPhase", "OperationCancelledError", "ProgressCallback", "ProgressEvent", "ProgressEventKind")
 _exports("exporters", "DEFAULT_OUTPUT_DIRECTORY", "RESULT_CONTRACT_NAME", "RESULT_CONTRACT_VERSION", "WORKSHEET_NAMES", "ExportFileExistsError", "FormalExportError", "OutputPaths", "build_output_paths", "build_result_document", "build_workbook", "export_result_excel", "export_result_json", "export_schedule_pdf_from_excel")
-_exports("solver_contracts", "Assignment", "FeasibilityResult", "FeasibilitySolverConfig", "FeasibilityStatus", "LexicographicResult")
+_exports("solver_contracts", "Assignment", "FeasibilityResult", "FeasibilitySolverConfig", "FeasibilityStatus", "LexicographicResult", "OptimizationTelemetry")
 _exports("daily_patterns", "DailyPattern")
 _exports("feasibility", "build_feasibility_model", "solve_feasibility")
 _exports("models", "NormalizedScheduleInput", "ScheduleInput")
@@ -95,6 +95,7 @@ __all__ = [
     "OptimizationStage",
     "OptimizationStageResult",
     "OptimizationStageStatus",
+    "OptimizationTelemetry",
     "OutputPaths",
     "OverallStatistics",
     "OptimizationModel",

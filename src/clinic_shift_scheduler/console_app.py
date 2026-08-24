@@ -29,6 +29,35 @@ def _terminal_width(text: str) -> int:
     )
 
 
+def _solver_progress_message(event: ProgressEvent) -> str:
+    details = event.details
+    activity = details.get("activity")
+    if event.kind is not ProgressEventKind.HEARTBEAT or activity not in {
+        "formal_stage",
+        "preference_benchmark",
+    }:
+        return event.message
+    parts = [event.message]
+    if details.get("has_feasible_solution") is True:
+        parts.append("已有合法班表 ✓")
+    incumbent = details.get("incumbent")
+    best_bound = details.get("best_bound")
+    if incumbent is not None:
+        parts.append(f"目標 {float(incumbent):g}")
+    if best_bound is not None:
+        parts.append(f"最佳界 {float(best_bound):g}")
+    relative_gap = details.get("relative_gap")
+    if relative_gap is not None:
+        parts.append(f"gap {float(relative_gap) * 100:.1f}%")
+    stage_elapsed = details.get("stage_elapsed_seconds")
+    if stage_elapsed is not None:
+        parts.append(f"本階段 {format_seconds(float(stage_elapsed))}")
+    total_elapsed = details.get("total_elapsed_seconds")
+    if total_elapsed is not None:
+        parts.append(f"總耗時 {format_seconds(float(total_elapsed))}")
+    return "｜".join(parts)
+
+
 class ConsoleProgressPrinter:
     """Print heartbeat messages in place on interactive terminals."""
 
@@ -52,7 +81,7 @@ class ConsoleProgressPrinter:
             self._active_width = 0
 
     def __call__(self, event: ProgressEvent) -> None:
-        message = event.message
+        message = _solver_progress_message(event)
         if (
             self._step_started_suffix
             and event.phase is ExecutionPhase.CANDIDATE_SEARCH

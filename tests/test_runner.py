@@ -135,6 +135,34 @@ class ScheduleRunnerTests(unittest.TestCase):
         self.assertIn("按 Ctrl+C 可只終止候選處理", stream.getvalue())
         self.assertNotIn("中止此診斷", stream.getvalue())
 
+    def test_console_renders_structured_solver_progress(self) -> None:
+        stream = StringIO()
+        printer = console_module.ConsoleProgressPrinter("[排班]", stream)
+
+        printer(
+            ProgressEvent(
+                phase=ExecutionPhase.OPTIMIZATION,
+                kind=ProgressEventKind.HEARTBEAT,
+                message="正式流程 6/16：正職班型公平",
+                details={
+                    "activity": "formal_stage",
+                    "has_feasible_solution": True,
+                    "incumbent": 438.0,
+                    "best_bound": 421.0,
+                    "relative_gap": 17 / 438,
+                    "stage_elapsed_seconds": 138.0,
+                    "total_elapsed_seconds": 342.0,
+                },
+            )
+        )
+
+        rendered = stream.getvalue()
+        self.assertIn("正式流程 6/16", rendered)
+        self.assertIn("已有合法班表 ✓", rendered)
+        self.assertIn("目標 438", rendered)
+        self.assertIn("最佳界 421", rendered)
+        self.assertIn("gap 3.9%", rendered)
+
     def test_cli_defaults_follow_typed_application_defaults(self) -> None:
         defaults = SchedulerAppConfig(input_file="schedule.json")
         args = cli_module._parser().parse_args(["schedule.json"])
@@ -177,6 +205,35 @@ class ScheduleRunnerTests(unittest.TestCase):
         self.assertGreaterEqual(elapsed, 0.03)
         self.assertTrue(any(event.kind is ProgressEventKind.HEARTBEAT for event in events))
         self.assertIn("最佳化完成", events[-1].message)
+
+    def test_rich_optimizer_progress_suppresses_elapsed_only_fallback(self) -> None:
+        events: list[ProgressEvent] = []
+        relay = runner_module._OptimizationProgressRelay(events.append)
+
+        def operation() -> str:
+            for _ in range(3):
+                relay(
+                    ProgressEvent(
+                        phase=ExecutionPhase.OPTIMIZATION,
+                        kind=ProgressEventKind.HEARTBEAT,
+                        message="structured solver progress",
+                        details={"activity": "formal_stage"},
+                    )
+                )
+                sleep(0.008)
+            return "done"
+
+        result, _elapsed = runner_module._run_with_elapsed_heartbeat(
+            operation,
+            events.append,
+            interval_seconds=0.01,
+            rich_progress_relay=relay,
+        )
+
+        self.assertEqual(result, "done")
+        self.assertFalse(
+            any("嚴格分階段最佳化進行中" in event.message for event in events)
+        )
 
     def test_total_elapsed_format_includes_minutes_without_sixty_seconds(self) -> None:
         self.assertEqual(
@@ -415,8 +472,8 @@ class ScheduleRunnerTests(unittest.TestCase):
             self.assertGreaterEqual(timing.scheduling_pipeline_seconds, 0)
 
             document = json.loads(result.json_path.read_text(encoding="utf-8"))
-            self.assertEqual(document["contract"]["version"], "1.10")
-            self.assertEqual(RESULT_CONTRACT_VERSION, "1.10")
+            self.assertEqual(document["contract"]["version"], "1.11")
+            self.assertEqual(RESULT_CONTRACT_VERSION, "1.11")
             self.assertAlmostEqual(
                 document["execution_timing"]["optimization_seconds"],
                 timing.optimization_seconds,

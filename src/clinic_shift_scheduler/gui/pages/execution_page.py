@@ -45,6 +45,96 @@ _OUTPUT_PATH_LABELS = (
 )
 
 
+def _compact_number(value: object) -> str:
+    number = float(value)
+    return str(int(number)) if number.is_integer() else f"{number:.1f}"
+
+
+def _solver_progress_text(message: dict[str, Any]) -> str | None:
+    details = message.get("details")
+    if not isinstance(details, dict):
+        return None
+    activity = str(details.get("activity", ""))
+    if activity not in {
+        "formal_stage",
+        "preference_benchmark",
+        "formal_optimization_completed",
+    }:
+        return None
+
+    lines: list[str] = []
+    if details.get("has_feasible_solution") is True:
+        lines.append("已找到合法班表 ✓，目前仍在最佳化品質。")
+
+    user_index = details.get("user_step_index")
+    user_total = details.get("user_step_total")
+    user_title = details.get("user_step_title")
+    if user_index is not None and user_total is not None and user_title:
+        lines.append(f"目前第 {user_index}/{user_total} 步：{user_title}")
+
+    completed = details.get("formal_stages_completed")
+    formal_total = details.get("formal_stage_total", 16)
+    if activity == "formal_stage":
+        stage_index = details.get("formal_stage_index")
+        stage_name = details.get("formal_stage_name")
+        if stage_index is not None and stage_name:
+            completed_prefix = (
+                ""
+                if completed is None
+                else f"正式流程已完成 {completed}/{formal_total}；"
+            )
+            lines.append(
+                f"{completed_prefix}目前 {stage_index}/{formal_total}："
+                f"{stage_name}"
+            )
+    elif activity == "preference_benchmark":
+        rank = "第一" if details.get("rank") == "first" else "第二"
+        lines.append(
+            f"正在計算 {details.get('full_time_class', '—')} 類{rank}偏好基準"
+            f"（{details.get('benchmark_index', '—')}/"
+            f"{details.get('benchmark_total', '—')}）"
+        )
+        if completed is not None:
+            lines.append(f"正式流程已完成 {completed}/{formal_total}")
+    elif completed is not None:
+        lines.append(f"正式流程已完成 {completed}/{formal_total}")
+
+    incumbent = details.get("incumbent")
+    best_bound = details.get("best_bound")
+    objective_parts: list[str] = []
+    if incumbent is not None:
+        objective_parts.append(f"目前目標 {_compact_number(incumbent)}")
+    if best_bound is not None:
+        objective_parts.append(f"最佳界 {_compact_number(best_bound)}")
+    relative_gap = details.get("relative_gap")
+    if relative_gap is not None:
+        objective_parts.append(f"gap {float(relative_gap) * 100:.1f}%")
+    if objective_parts:
+        lines.append("、".join(objective_parts))
+
+    timing_parts: list[str] = []
+    stage_elapsed = details.get("stage_elapsed_seconds")
+    if stage_elapsed is not None:
+        timing_parts.append(f"本階段耗時 {format_duration(float(stage_elapsed))}")
+    since_solution = details.get("seconds_since_last_solution")
+    if since_solution is not None:
+        timing_parts.append(
+            f"最後找到更好解 {format_duration(float(since_solution))}前"
+        )
+    since_bound = details.get("seconds_since_bound_update")
+    if since_bound is not None:
+        timing_parts.append(
+            f"最佳界最後更新 {format_duration(float(since_bound))}前"
+        )
+    if timing_parts:
+        lines.append("、".join(timing_parts))
+
+    total_elapsed = details.get("total_elapsed_seconds")
+    if total_elapsed is not None:
+        lines.append(f"總耗時 {format_duration(float(total_elapsed))}")
+    return "\n".join(lines) if lines else None
+
+
 class _ExecutionContentScrollArea(QScrollArea):
     """Page-level scrolling independent from the execution log viewport."""
 
@@ -292,7 +382,7 @@ class ExecutionPage(InputPage):
         phase = str(message.get("phase", "APPLICATION"))
         label = _PHASE_LABELS.get(phase, phase)
         rendered = str(message.get("message", ""))
-        self.status_label.setText(rendered)
+        self.status_label.setText(_solver_progress_text(message) or rendered)
         kind = message.get("kind")
         if phase == ExecutionPhase.CANDIDATE_SEARCH.value:
             self._candidate_processing = True

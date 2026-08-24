@@ -42,7 +42,12 @@ from .ratio_fairness import (
     ratio_basis_points,
 )
 from .result_validation import ValidationReport, validate_schedule_result
-from .solver_contracts import Assignment, FeasibilityStatus, LexicographicResult
+from .solver_contracts import (
+    Assignment,
+    FeasibilityStatus,
+    LexicographicResult,
+    OptimizationTelemetry,
+)
 
 
 class ScheduleCellKind(StrEnum):
@@ -209,6 +214,8 @@ class ExecutionTiming:
     optimization_seconds: float
     result_validation_and_build_seconds: float
     scheduling_pipeline_seconds: float
+    time_to_first_feasible_schedule: float | None = None
+    time_to_proven_formal_optimum: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +232,7 @@ class FormalScheduleOutput:
     optimization_stages: tuple[OptimizationStageResult, ...]
     preference_benchmarks: tuple[PreferenceBenchmarkResult, ...]
     class_pattern_locks: tuple[ClassPatternLockResult, ...]
+    optimization_telemetry: OptimizationTelemetry | None = None
     execution_timing: ExecutionTiming | None = None
 
     @property
@@ -680,6 +688,7 @@ def finalize_schedule_output(
             optimization_stages=result.stages,
             preference_benchmarks=result.preference_benchmarks,
             class_pattern_locks=result.class_pattern_locks,
+            optimization_telemetry=result.optimization_telemetry,
         )
 
     report = validate_schedule_result(
@@ -703,6 +712,7 @@ def finalize_schedule_output(
             optimization_stages=result.stages,
             preference_benchmarks=result.preference_benchmarks,
             class_pattern_locks=result.class_pattern_locks,
+            optimization_telemetry=result.optimization_telemetry,
         )
 
     stage_by_name = {item.stage: item for item in result.stages}
@@ -736,6 +746,7 @@ def finalize_schedule_output(
         optimization_stages=result.stages,
         preference_benchmarks=result.preference_benchmarks,
         class_pattern_locks=result.class_pattern_locks,
+        optimization_telemetry=result.optimization_telemetry,
     )
 
 

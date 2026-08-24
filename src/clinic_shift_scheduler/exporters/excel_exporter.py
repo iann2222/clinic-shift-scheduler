@@ -658,6 +658,27 @@ def _build_solver_sheet(
                     timing.result_validation_and_build_seconds,
                 ),
                 ("排班管線總時間（秒）", timing.scheduling_pipeline_seconds),
+                (
+                    "首次合法班表（秒）",
+                    timing.time_to_first_feasible_schedule,
+                ),
+                (
+                    "正式最佳值證明（秒）",
+                    timing.time_to_proven_formal_optimum,
+                ),
+            )
+        )
+    telemetry = output.optimization_telemetry
+    if telemetry is not None:
+        formal_values.extend(
+            (
+                ("月份日數", telemetry.days),
+                ("員工人數", telemetry.employees),
+                ("正職人數", telemetry.full_time_employees),
+                ("兼職人數", telemetry.part_time_employees),
+                ("assignment 變數數", telemetry.assignment_variables),
+                ("可排 assignment 比例", telemetry.availability_ratio),
+                ("需求節數", telemetry.demand_units),
             )
         )
     row = _write_key_values(
@@ -746,7 +767,7 @@ def _build_solver_sheet(
     )
     row += 2
     sheet.cell(row, 1, "最佳化階段")
-    sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=9)
+    sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=12)
     _header(sheet.cell(row, 1))
     row += 1
     stage_header = row
@@ -760,6 +781,9 @@ def _build_solver_sheet(
         "常數證明",
         "solver status",
         "wall time (秒)",
+        "best objective bound",
+        "conflicts",
+        "branches",
     )
     for column, value in enumerate(stage_headers, start=1):
         sheet.cell(row, column, value)
@@ -775,6 +799,9 @@ def _build_solver_sheet(
             stage.constant_proof.value if stage.constant_proof else "",
             stage.raw_solver_status,
             stage.wall_time_seconds,
+            stage.best_objective_bound,
+            stage.num_conflicts,
+            stage.num_branches,
         )
         for column, value in enumerate(values, start=1):
             sheet.cell(row, column, value)
@@ -785,7 +812,7 @@ def _build_solver_sheet(
         header_row=stage_header,
         first_data_row=stage_header + 1,
         last_row=row,
-        last_column=9,
+        last_column=12,
     )
     row += 2
     validation_title = row
