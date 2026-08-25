@@ -81,6 +81,7 @@ from .solver_contracts import (
     Assignment,
     FeasibilityStatus,
     LexicographicResult,
+    OptimizationStopSnapshot,
     OptimizationTelemetry,
     PersonDayKey,
     SchedulePreservationInfo,
@@ -159,6 +160,7 @@ class _SolverRun:
     best_objective_bound: float | None = None
     num_conflicts: int | None = None
     num_branches: int | None = None
+    progress_snapshot: Mapping[str, int | float | None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1398,6 +1400,7 @@ def _solve_once(
         ),
         num_conflicts=_safe_solver_stat(solver, "num_conflicts"),
         num_branches=_safe_solver_stat(solver, "num_branches"),
+        progress_snapshot=MappingProxyType(state.snapshot()),
     )
 
 
@@ -1606,7 +1609,11 @@ def _discover_preference_benchmarks(
     optimization_started_at: float | None = None,
     formal_stages_completed: int = 0,
     time_to_first_feasible_schedule: float | None = None,
-) -> tuple[tuple[PreferenceBenchmarkResult, ...], _SolverRun | None]:
+) -> tuple[
+    tuple[PreferenceBenchmarkResult, ...],
+    _SolverRun | None,
+    _SolveProgressContext | None,
+]:
     """Prove independent per-class ideals without locking either class first."""
 
     optimization_started_at = optimization_started_at or perf_counter()
@@ -1615,6 +1622,7 @@ def _discover_preference_benchmarks(
     )
     results: list[PreferenceBenchmarkResult] = []
     last_run: _SolverRun | None = None
+    last_context: _SolveProgressContext | None = None
     for benchmark_index, definition in enumerate(definitions, start=1):
         if preservation is not None and preservation.is_requested:
             break
@@ -1652,6 +1660,7 @@ def _discover_preference_benchmarks(
             optimization_started_at=optimization_started_at,
             details=MappingProxyType(details),
         )
+        last_context = context
         _emit_activity_event(progress, context, ProgressEventKind.STEP_STARTED)
         opportunity_days = class_opportunity_days(
             data, definition.full_time_class
@@ -1743,7 +1752,7 @@ def _discover_preference_benchmarks(
         )
         if status is not OptimizationStageStatus.OPTIMAL:
             break
-    return tuple(results), last_run
+    return tuple(results), last_run, last_context
 
 
 def solve_lexicographic(
@@ -1819,6 +1828,75 @@ def solve_lexicographic(
     def preservation_requested() -> bool:
         return preservation is not None and preservation.is_requested
 
+    def stop_snapshot(
+        activity: str,
+        *,
+        context: _SolveProgressContext | None,
+        run: _SolverRun | None,
+    ) -> OptimizationStopSnapshot:
+        details = {} if context is None else dict(context.details)
+        observed = (
+            {}
+            if run is None or run.progress_snapshot is None
+            else dict(run.progress_snapshot)
+        )
+
+        def optional_int(value: object) -> int | None:
+            return None if value is None else int(value)
+
+        def optional_float(value: object) -> float | None:
+            return None if value is None else float(value)
+
+        best_bound = observed.get("best_bound")
+        if best_bound is None and run is not None:
+            best_bound = run.best_objective_bound
+        stage_elapsed = observed.get("stage_elapsed_seconds")
+        if stage_elapsed is None and run is not None:
+            stage_elapsed = run.wall_time_seconds
+        return OptimizationStopSnapshot(
+            activity=activity,
+            objective_direction=(
+                None
+                if context is None
+                or context.direction is ObjectiveDirection.NONE
+                else context.direction.value
+            ),
+            user_step_index=optional_int(details.get("user_step_index")),
+            user_step_total=optional_int(details.get("user_step_total")),
+            user_step_title=(
+                None
+                if details.get("user_step_title") is None
+                else str(details["user_step_title"])
+            ),
+            formal_stage_index=optional_int(
+                details.get("formal_stage_index")
+            ),
+            formal_stage_total=optional_int(
+                details.get("formal_stage_total")
+            ),
+            formal_stages_completed=formal_stages_completed,
+            benchmark_index=optional_int(details.get("benchmark_index")),
+            benchmark_total=optional_int(details.get("benchmark_total")),
+            incumbent=optional_float(observed.get("incumbent")),
+            best_objective_bound=optional_float(best_bound),
+            absolute_gap=optional_float(observed.get("absolute_gap")),
+            relative_gap=optional_float(observed.get("relative_gap")),
+            solutions_found=optional_int(observed.get("solutions_found")),
+            stage_elapsed_seconds=optional_float(stage_elapsed),
+            optimization_elapsed_seconds=(
+                perf_counter() - optimization_started_at
+            ),
+            seconds_since_last_solution=optional_float(
+                observed.get("seconds_since_last_solution")
+            ),
+            seconds_since_bound_update=optional_float(
+                observed.get("seconds_since_bound_update")
+            ),
+            time_to_first_feasible_schedule=(
+                time_to_first_feasible_schedule
+            ),
+        )
+
     def preservation_info(
         activity: str,
         *,
@@ -1826,7 +1904,21 @@ def solve_lexicographic(
         rank: PreferenceRank | None = None,
         full_time_class: FullTimeClass | None = None,
         used_current_incumbent: bool = False,
+        context: _SolveProgressContext | None = None,
+        run: _SolverRun | None = None,
     ) -> SchedulePreservationInfo:
+        if context is None and stage is not None:
+            context = _formal_progress_context(
+                stage,
+                optimization_started_at=optimization_started_at,
+                has_feasible_solution=(
+                    time_to_first_feasible_schedule is not None
+                ),
+                completed_stages=formal_stages_completed,
+                time_to_first_feasible_schedule=(
+                    time_to_first_feasible_schedule
+                ),
+            )
         return SchedulePreservationInfo(
             activity=activity,
             formal_stage=None if stage is None else stage.value,
@@ -1835,6 +1927,11 @@ def solve_lexicographic(
                 None if full_time_class is None else full_time_class.value
             ),
             used_current_incumbent=used_current_incumbent,
+            optimization_stop_snapshot=stop_snapshot(
+                activity,
+                context=context,
+                run=run,
+            ),
         )
 
     hard_context = _formal_progress_context(
@@ -1908,6 +2005,8 @@ def solve_lexicographic(
                 preservation_info(
                     "formal_stage",
                     stage=OptimizationStage.HARD_FEASIBILITY,
+                    context=hard_context,
+                    run=hard_run,
                 )
                 if preservation_requested()
                 else None
@@ -1946,6 +2045,8 @@ def solve_lexicographic(
                 "formal_stage",
                 stage=OptimizationStage.HARD_FEASIBILITY,
                 used_current_incumbent=True,
+                context=hard_context,
+                run=hard_run,
             ),
         )
 
@@ -2008,6 +2109,7 @@ def solve_lexicographic(
                         preservation_info=preservation_info(
                             "formal_stage",
                             stage=objective.stage,
+                            context=context,
                         ),
                     )
                 continue
@@ -2063,6 +2165,8 @@ def solve_lexicographic(
                             "formal_stage",
                             stage=objective.stage,
                             used_current_incumbent=True,
+                            context=context,
+                            run=run,
                         ),
                     )
                 continue
@@ -2123,6 +2227,8 @@ def solve_lexicographic(
                         "formal_stage",
                         stage=objective.stage,
                         used_current_incumbent=used_current_incumbent,
+                        context=context,
+                        run=run,
                     )
                     if preservation_requested()
                     else None
@@ -2162,18 +2268,22 @@ def solve_lexicographic(
                     rank=rank,
                 ),
             )
-        discovered, last_run = _discover_preference_benchmarks(
-            data,
-            built,
-            rank,
-            config,
-            cancellation,
-            preservation=preservation,
-            progress=progress,
-            progress_interval_seconds=progress_interval_seconds,
-            optimization_started_at=optimization_started_at,
-            formal_stages_completed=formal_stages_completed,
-            time_to_first_feasible_schedule=time_to_first_feasible_schedule,
+        discovered, last_run, last_benchmark_context = (
+            _discover_preference_benchmarks(
+                data,
+                built,
+                rank,
+                config,
+                cancellation,
+                preservation=preservation,
+                progress=progress,
+                progress_interval_seconds=progress_interval_seconds,
+                optimization_started_at=optimization_started_at,
+                formal_stages_completed=formal_stages_completed,
+                time_to_first_feasible_schedule=(
+                    time_to_first_feasible_schedule
+                ),
+            )
         )
         if preservation_requested():
             completed_discovered = tuple(
@@ -2215,6 +2325,8 @@ def solve_lexicographic(
                         if interrupted is None
                         else interrupted.full_time_class
                     ),
+                    context=last_benchmark_context,
+                    run=last_run,
                 ),
             )
         benchmarks.extend(discovered)

@@ -17,6 +17,8 @@ from clinic_shift_scheduler import (
     FormalExportError,
     OptimizationStage,
     PreservationToken,
+    PROVISIONAL_RESULT_CONTRACT_NAME,
+    PROVISIONAL_RESULT_CONTRACT_VERSION,
     PROVISIONAL_WORKSHEET_NAMES,
     RESULT_CONTRACT_NAME,
     RESULT_CONTRACT_VERSION,
@@ -107,6 +109,20 @@ class JsonExporterTests(unittest.TestCase):
             )
 
         self.assertEqual(document["status"], "FEASIBLE")
+        self.assertEqual(
+            document["contract"],
+            {
+                "name": PROVISIONAL_RESULT_CONTRACT_NAME,
+                "version": PROVISIONAL_RESULT_CONTRACT_VERSION,
+            },
+        )
+        self.assertEqual(PROVISIONAL_RESULT_CONTRACT_VERSION, "1.1")
+        stop_snapshot = document["preservation"][
+            "optimization_stop_snapshot"
+        ]
+        self.assertEqual(stop_snapshot["activity"], "formal_stage")
+        self.assertEqual(stop_snapshot["formal_stages_completed"], 1)
+        self.assertGreater(stop_snapshot["optimization_elapsed_seconds"], 0)
         self.assertIn("尚未完成全部最佳化", document["warning"])
         self.assertIn("尚未完成全部最佳化", pdf_text)
 

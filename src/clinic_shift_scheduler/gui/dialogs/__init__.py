@@ -3,7 +3,9 @@
 from .date_picker_dialog import DatePickerDialog, MonthCalendarWidget
 from .employee_dialog import EmployeeEditDialog, EmployeeEditorValues
 from .localized_dialogs import (
+    ask_cancel_confirm,
     ask_yes_no,
+    build_cancel_confirm_message_box,
     build_message_box,
     localize_dialog_buttons,
     show_critical,
@@ -20,7 +22,9 @@ __all__ = [
     "MonthCalendarWidget",
     "MonthDialog",
     "SettingsDialog",
+    "ask_cancel_confirm",
     "ask_yes_no",
+    "build_cancel_confirm_message_box",
     "build_message_box",
     "localize_dialog_buttons",
     "show_critical",

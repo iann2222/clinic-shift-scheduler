@@ -34,6 +34,7 @@ from clinic_shift_scheduler.gui.dialogs import (
     DatePickerDialog,
     MonthDialog,
     SettingsDialog,
+    build_cancel_confirm_message_box,
     build_message_box,
 )
 from clinic_shift_scheduler.gui.main import create_application
@@ -567,6 +568,20 @@ class GuiFoundationTests(unittest.TestCase):
             button_box.layoutDirection(),
             Qt.LayoutDirection.LeftToRight,
         )
+
+    def test_action_confirmation_uses_cancel_and_confirm_labels(self) -> None:
+        message = build_cancel_confirm_message_box(
+            None,
+            "終止排班",
+            "確定要終止嗎？",
+        )
+        self.addCleanup(message.close)
+
+        cancel_button = message.button(QMessageBox.StandardButton.Cancel)
+        confirm_button = message.button(QMessageBox.StandardButton.Ok)
+        self.assertEqual(cancel_button.text(), "取消")
+        self.assertEqual(confirm_button.text(), "確認")
+        self.assertIs(message.defaultButton(), cancel_button)
 
     def test_date_picker_is_month_bounded_and_uses_bottom_right_actions(self) -> None:
         dialog = DatePickerDialog(

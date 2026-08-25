@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import PropertyMock, patch
 
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -181,6 +181,72 @@ class GuiDocumentLifecycleTests(unittest.TestCase):
             self.assertTrue(window.execution_page.open_output_button.isEnabled())
             self.assertTrue(window.navigation.list_widget.isEnabled())
             self.assertTrue(window.document_header.settings_button.isEnabled())
+
+    def test_cancel_schedule_requires_confirmation(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            window = self.make_window(Path(directory))
+
+            with (
+                patch.object(
+                    type(window.execution_controller),
+                    "is_running",
+                    new_callable=PropertyMock,
+                    return_value=True,
+                ),
+                patch(
+                    "clinic_shift_scheduler.gui.main_window.ask_cancel_confirm",
+                    side_effect=(False, True),
+                ) as confirm,
+                patch.object(
+                    window.execution_page,
+                    "request_cancelling",
+                ) as request_cancelling,
+                patch.object(window.execution_controller, "cancel") as cancel,
+            ):
+                window._cancel_schedule()
+                request_cancelling.assert_not_called()
+                cancel.assert_not_called()
+
+                window._cancel_schedule()
+
+            self.assertEqual(confirm.call_count, 2)
+            self.assertEqual(confirm.call_args.args[1], "終止排班")
+            self.assertIn("不會保留", confirm.call_args.args[2])
+            self.assertIn(
+                "終止排班並保留當前最佳班表",
+                confirm.call_args.args[2],
+            )
+            request_cancelling.assert_called_once_with()
+            cancel.assert_called_once_with()
+
+    def test_preserve_schedule_uses_cancel_confirm_dialog(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            window = self.make_window(Path(directory))
+
+            with (
+                patch.object(
+                    type(window.execution_controller),
+                    "is_running",
+                    new_callable=PropertyMock,
+                    return_value=True,
+                ),
+                patch(
+                    "clinic_shift_scheduler.gui.main_window.ask_cancel_confirm",
+                    return_value=False,
+                ) as confirm,
+                patch.object(
+                    window.execution_controller,
+                    "preserve_current_best",
+                ) as preserve,
+            ):
+                window._preserve_current_schedule()
+
+            confirm.assert_called_once()
+            self.assertEqual(
+                confirm.call_args.args[1],
+                "保留目前最佳合法班表",
+            )
+            preserve.assert_not_called()
 
     def test_validation_issue_routes_to_relevant_page(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

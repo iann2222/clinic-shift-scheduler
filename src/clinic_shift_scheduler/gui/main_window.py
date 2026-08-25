@@ -30,6 +30,7 @@ from ..enums import EmploymentType
 from .dialogs import (
     MonthDialog,
     SettingsDialog,
+    ask_cancel_confirm,
     ask_yes_no,
     build_message_box,
     show_critical,
@@ -601,13 +602,21 @@ class MainWindow(QMainWindow):
     def _cancel_schedule(self) -> None:
         if not self.execution_controller.is_running:
             return
+        if not ask_cancel_confirm(
+            self,
+            "終止排班",
+            "確定要終止目前的排班嗎？\n"
+            "本次執行會立即停止，且不會保留目前找到的結果。\n\n"
+            "若要保留目前最佳合法班表，請改用「終止排班並保留當前最佳班表」。",
+        ):
+            return
         self.execution_page.request_cancelling()
         self.execution_controller.cancel()
 
     def _preserve_current_schedule(self) -> None:
         if not self.execution_controller.is_running:
             return
-        if not ask_yes_no(
+        if not ask_cancel_confirm(
             self,
             "保留目前最佳合法班表",
             "這會停止後續最佳化，並嘗試輸出目前找到的最佳合法班表。\n"

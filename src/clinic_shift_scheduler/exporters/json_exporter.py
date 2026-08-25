@@ -28,7 +28,7 @@ RESULT_CONTRACT_VERSION = "1.11"
 PROVISIONAL_RESULT_CONTRACT_NAME = (
     "clinic-shift-scheduler-provisional-result"
 )
-PROVISIONAL_RESULT_CONTRACT_VERSION = "1.0"
+PROVISIONAL_RESULT_CONTRACT_VERSION = "1.1"
 
 
 def _validation_document(output: FormalScheduleOutput) -> dict[str, Any]:

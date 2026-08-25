@@ -182,6 +182,17 @@ class LexicographicOptimizationTests(unittest.TestCase):
 
         self.assertEqual(result.status, FeasibilityStatus.FEASIBLE)
         self.assertIsNotNone(result.preservation_info)
+        assert result.preservation_info is not None
+        stop_snapshot = result.preservation_info.optimization_stop_snapshot
+        self.assertIsNotNone(stop_snapshot)
+        assert stop_snapshot is not None
+        self.assertEqual(stop_snapshot.activity, "formal_stage")
+        self.assertEqual(stop_snapshot.user_step_index, 1)
+        self.assertEqual(stop_snapshot.user_step_total, 10)
+        self.assertEqual(stop_snapshot.formal_stage_index, 1)
+        self.assertEqual(stop_snapshot.formal_stages_completed, 1)
+        self.assertIsNotNone(stop_snapshot.optimization_elapsed_seconds)
+        self.assertIsNotNone(stop_snapshot.time_to_first_feasible_schedule)
         self.assertEqual(
             [item.stage for item in result.stages],
             [OptimizationStage.HARD_FEASIBILITY],
@@ -233,6 +244,14 @@ class LexicographicOptimizationTests(unittest.TestCase):
             "preference_benchmark",
         )
         self.assertFalse(result.preservation_info.used_current_incumbent)
+        stop_snapshot = result.preservation_info.optimization_stop_snapshot
+        self.assertIsNotNone(stop_snapshot)
+        assert stop_snapshot is not None
+        self.assertEqual(stop_snapshot.activity, "preference_benchmark")
+        self.assertEqual(stop_snapshot.user_step_index, 3)
+        self.assertEqual(stop_snapshot.benchmark_index, 1)
+        self.assertEqual(stop_snapshot.benchmark_total, 2)
+        self.assertIsNotNone(stop_snapshot.stage_elapsed_seconds)
         self.assertEqual(output.status, FeasibilityStatus.FEASIBLE)
         assert output.validation_report is not None
         self.assertEqual(

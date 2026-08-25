@@ -131,3 +131,37 @@ def ask_yes_no(parent: QWidget | None, title: str, text: str) -> bool:
     )
     message.setDefaultButton(QMessageBox.StandardButton.No)
     return message.exec() == QMessageBox.StandardButton.Yes
+
+
+def build_cancel_confirm_message_box(
+    parent: QWidget | None,
+    title: str,
+    text: str,
+) -> QMessageBox:
+    """Build an action confirmation with cancel as the safe default."""
+
+    message = build_message_box(
+        parent,
+        QMessageBox.Icon.Question,
+        title,
+        text,
+        buttons=(
+            QMessageBox.StandardButton.Cancel
+            | QMessageBox.StandardButton.Ok
+        ),
+    )
+    message.button(QMessageBox.StandardButton.Cancel).setText("取消")
+    message.button(QMessageBox.StandardButton.Ok).setText("確認")
+    message.setDefaultButton(QMessageBox.StandardButton.Cancel)
+    return message
+
+
+def ask_cancel_confirm(
+    parent: QWidget | None,
+    title: str,
+    text: str,
+) -> bool:
+    return (
+        build_cancel_confirm_message_box(parent, title, text).exec()
+        == QMessageBox.StandardButton.Ok
+    )

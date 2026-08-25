@@ -112,6 +112,10 @@ class ScheduleRunnerTests(unittest.TestCase):
             document = json.loads(result.json_path.read_text(encoding="utf-8"))
             self.assertEqual(document["result_kind"], "provisional")
             self.assertEqual(document["status"], "FEASIBLE")
+            self.assertEqual(document["contract"]["version"], "1.1")
+            self.assertIsNotNone(
+                document["preservation"]["optimization_stop_snapshot"]
+            )
             self.assertIsNone(result.excel_path)
             self.assertIsNone(result.pdf_path)
             self.assertFalse(
@@ -248,9 +252,9 @@ class ScheduleRunnerTests(unittest.TestCase):
         rendered = stream.getvalue()
         self.assertIn("正式流程 6/16", rendered)
         self.assertIn("已有合法班表 ✓", rendered)
-        self.assertIn("目標 438", rendered)
-        self.assertIn("最佳界 421", rendered)
-        self.assertIn("gap 3.9%", rendered)
+        self.assertIn("目前找到的最佳值 438", rendered)
+        self.assertIn("已證明的最佳值界限 421", rendered)
+        self.assertIn("與證明最佳的距離 3.9%", rendered)
 
     def test_cli_defaults_follow_typed_application_defaults(self) -> None:
         defaults = SchedulerAppConfig(input_file="schedule.json")

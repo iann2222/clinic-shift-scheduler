@@ -5,10 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QElapsedTimer, Qt, QTimer, Signal
+from PySide6.QtCore import QElapsedTimer, QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import QFocusEvent, QMouseEvent, QTextCursor
 from PySide6.QtWidgets import (
     QFrame,
     QFormLayout,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QLabel,
@@ -50,89 +52,14 @@ def _compact_number(value: object) -> str:
     return str(int(number)) if number.is_integer() else f"{number:.1f}"
 
 
-def _solver_progress_text(message: dict[str, Any]) -> str | None:
-    details = message.get("details")
-    if not isinstance(details, dict):
+def _formatted_duration_or_none(
+    value: object,
+    *,
+    suffix: str = "",
+) -> str | None:
+    if value is None:
         return None
-    activity = str(details.get("activity", ""))
-    if activity not in {
-        "formal_stage",
-        "preference_benchmark",
-        "formal_optimization_completed",
-    }:
-        return None
-
-    lines: list[str] = []
-    if details.get("has_feasible_solution") is True:
-        lines.append("已找到合法班表 ✓，目前仍在最佳化品質。")
-
-    user_index = details.get("user_step_index")
-    user_total = details.get("user_step_total")
-    user_title = details.get("user_step_title")
-    if user_index is not None and user_total is not None and user_title:
-        lines.append(f"目前第 {user_index}/{user_total} 步：{user_title}")
-
-    completed = details.get("formal_stages_completed")
-    formal_total = details.get("formal_stage_total", 16)
-    if activity == "formal_stage":
-        stage_index = details.get("formal_stage_index")
-        stage_name = details.get("formal_stage_name")
-        if stage_index is not None and stage_name:
-            completed_prefix = (
-                ""
-                if completed is None
-                else f"正式流程已完成 {completed}/{formal_total}；"
-            )
-            lines.append(
-                f"{completed_prefix}目前 {stage_index}/{formal_total}："
-                f"{stage_name}"
-            )
-    elif activity == "preference_benchmark":
-        rank = "第一" if details.get("rank") == "first" else "第二"
-        lines.append(
-            f"正在計算 {details.get('full_time_class', '—')} 類{rank}偏好基準"
-            f"（{details.get('benchmark_index', '—')}/"
-            f"{details.get('benchmark_total', '—')}）"
-        )
-        if completed is not None:
-            lines.append(f"正式流程已完成 {completed}/{formal_total}")
-    elif completed is not None:
-        lines.append(f"正式流程已完成 {completed}/{formal_total}")
-
-    incumbent = details.get("incumbent")
-    best_bound = details.get("best_bound")
-    objective_parts: list[str] = []
-    if incumbent is not None:
-        objective_parts.append(f"目前目標 {_compact_number(incumbent)}")
-    if best_bound is not None:
-        objective_parts.append(f"最佳界 {_compact_number(best_bound)}")
-    relative_gap = details.get("relative_gap")
-    if relative_gap is not None:
-        objective_parts.append(f"gap {float(relative_gap) * 100:.1f}%")
-    if objective_parts:
-        lines.append("、".join(objective_parts))
-
-    timing_parts: list[str] = []
-    stage_elapsed = details.get("stage_elapsed_seconds")
-    if stage_elapsed is not None:
-        timing_parts.append(f"本階段耗時 {format_duration(float(stage_elapsed))}")
-    since_solution = details.get("seconds_since_last_solution")
-    if since_solution is not None:
-        timing_parts.append(
-            f"最後找到更好解 {format_duration(float(since_solution))}前"
-        )
-    since_bound = details.get("seconds_since_bound_update")
-    if since_bound is not None:
-        timing_parts.append(
-            f"最佳界最後更新 {format_duration(float(since_bound))}前"
-        )
-    if timing_parts:
-        lines.append("、".join(timing_parts))
-
-    total_elapsed = details.get("total_elapsed_seconds")
-    if total_elapsed is not None:
-        lines.append(f"總耗時 {format_duration(float(total_elapsed))}")
-    return "\n".join(lines) if lines else None
+    return f"{format_duration(float(value))}{suffix}"
 
 
 class _ExecutionContentScrollArea(QScrollArea):
@@ -150,8 +77,172 @@ class _ExecutionContentScrollArea(QScrollArea):
         self.setWidget(content)
 
     def resizeEvent(self, event: Any) -> None:
+        scroll_bar = self.verticalScrollBar()
+        previous_maximum = scroll_bar.maximum()
+        previous_value = scroll_bar.value()
+        was_at_bottom = (
+            previous_maximum > 0
+            and previous_value >= previous_maximum - 2
+        )
         super().resizeEvent(event)
         self._content.setMinimumHeight(self.viewport().height())
+        target = (
+            scroll_bar.maximum()
+            if was_at_bottom
+            else min(previous_value, scroll_bar.maximum())
+        )
+        scroll_bar.setValue(target)
+
+
+class _ExecutionLog(QPlainTextEdit):
+    """Read-only log with stable follow-tail and drag-selection scrolling."""
+
+    _EDGE_MARGIN = 24
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._follow_tail = True
+        self._applying_scroll_policy = False
+        self._selection_drag_active = False
+        self._auto_scroll_direction = 0
+        self._last_drag_position = QPoint()
+        self._selection_scroll_timer = QTimer(self)
+        self._selection_scroll_timer.setInterval(50)
+        self._selection_scroll_timer.timeout.connect(
+            self._scroll_selection_toward_edge
+        )
+        scroll_bar = self.verticalScrollBar()
+        scroll_bar.valueChanged.connect(self._record_scroll_position)
+        scroll_bar.rangeChanged.connect(self._follow_changed_scroll_range)
+
+    def appendPlainText(self, text: str) -> None:
+        """Append without stealing a reader's current scroll position."""
+
+        scroll_bar = self.verticalScrollBar()
+        was_at_bottom = self._follow_tail
+        previous_value = scroll_bar.value()
+
+        self._applying_scroll_policy = True
+        try:
+            append_cursor = QTextCursor(self.document())
+            append_cursor.movePosition(QTextCursor.MoveOperation.End)
+            if not self.document().isEmpty():
+                append_cursor.insertBlock()
+            append_cursor.insertText(text)
+            if was_at_bottom:
+                scroll_bar.setValue(scroll_bar.maximum())
+            else:
+                scroll_bar.setValue(
+                    min(previous_value, scroll_bar.maximum())
+                )
+        finally:
+            self._applying_scroll_policy = False
+        self._follow_tail = was_at_bottom
+
+    def _record_scroll_position(self, value: int) -> None:
+        if self._applying_scroll_policy:
+            return
+        scroll_bar = self.verticalScrollBar()
+        self._follow_tail = value >= scroll_bar.maximum() - 2
+
+    def _follow_changed_scroll_range(
+        self,
+        _minimum: int,
+        maximum: int,
+    ) -> None:
+        if not self._follow_tail or self._applying_scroll_policy:
+            return
+        self._applying_scroll_policy = True
+        try:
+            self.verticalScrollBar().setValue(maximum)
+        finally:
+            self._applying_scroll_policy = False
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        self._stop_selection_auto_scroll()
+        self._selection_drag_active = (
+            event.button() == Qt.MouseButton.LeftButton
+        )
+        self._last_drag_position = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        self._last_drag_position = event.position().toPoint()
+        self._selection_drag_active = bool(
+            event.buttons() & Qt.MouseButton.LeftButton
+        )
+        super().mouseMoveEvent(event)
+        self._update_selection_auto_scroll()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._selection_drag_active = False
+            self._stop_selection_auto_scroll()
+
+    def focusOutEvent(self, event: QFocusEvent) -> None:
+        self._selection_drag_active = False
+        self._stop_selection_auto_scroll()
+        super().focusOutEvent(event)
+
+    def _update_selection_auto_scroll(self) -> None:
+        if not self._selection_drag_active:
+            self._stop_selection_auto_scroll()
+            return
+
+        viewport_height = self.viewport().height()
+        if self._last_drag_position.y() <= self._EDGE_MARGIN:
+            direction = -1
+        elif (
+            self._last_drag_position.y()
+            >= viewport_height - self._EDGE_MARGIN
+        ):
+            direction = 1
+        else:
+            self._stop_selection_auto_scroll()
+            return
+
+        self._auto_scroll_direction = direction
+        if not self._selection_scroll_timer.isActive():
+            self._selection_scroll_timer.start()
+
+    def _scroll_selection_toward_edge(self) -> None:
+        if not self._selection_drag_active or not self._auto_scroll_direction:
+            self._stop_selection_auto_scroll()
+            return
+
+        scroll_bar = self.verticalScrollBar()
+        old_value = scroll_bar.value()
+        step = max(1, scroll_bar.singleStep())
+        scroll_bar.setValue(old_value + self._auto_scroll_direction * step)
+        if scroll_bar.value() == old_value:
+            return
+
+        viewport = self.viewport()
+        target_y = (
+            1
+            if self._auto_scroll_direction < 0
+            else max(1, viewport.height() - 2)
+        )
+        target_x = min(
+            max(1, self._last_drag_position.x()),
+            max(1, viewport.width() - 2),
+        )
+        target_position = self.cursorForPosition(
+            QPoint(target_x, target_y)
+        ).position()
+        cursor = self.textCursor()
+        anchor = cursor.anchor()
+        cursor.setPosition(anchor)
+        cursor.setPosition(
+            target_position,
+            QTextCursor.MoveMode.KeepAnchor,
+        )
+        self.setTextCursor(cursor)
+
+    def _stop_selection_auto_scroll(self) -> None:
+        self._auto_scroll_direction = 0
+        self._selection_scroll_timer.stop()
 
 
 class ExecutionPage(InputPage):
@@ -187,13 +278,152 @@ class ExecutionPage(InputPage):
         self.status_group = QGroupBox("執行狀態")
         self.status_group.setObjectName("executionStickyStatus")
         status_layout = QVBoxLayout(self.status_group)
+
+        self.status_summary = QFrame()
+        self.status_summary.setObjectName("executionStatusSummary")
+        summary_layout = QHBoxLayout(self.status_summary)
+        summary_layout.setContentsMargins(0, 0, 0, 8)
+        summary_layout.setSpacing(10)
+        self.status_indicator = QLabel("●")
+        self.status_indicator.setObjectName("executionStatusIndicator")
+        self.status_indicator.setProperty("state", "neutral")
+        summary_layout.addWidget(
+            self.status_indicator,
+            0,
+            Qt.AlignmentFlag.AlignTop,
+        )
+        summary_text_layout = QVBoxLayout()
+        summary_text_layout.setContentsMargins(0, 0, 0, 0)
+        summary_text_layout.setSpacing(2)
         self.status_label = QLabel("資料準備完成後即可執行排班。")
-        self.status_label.setObjectName("mutedText")
+        self.status_label.setObjectName("executionStatusPrimary")
         self.status_label.setWordWrap(True)
-        status_layout.addWidget(self.status_label)
-        self.elapsed_label = QLabel("總耗時：0 秒")
-        self.elapsed_label.setObjectName("mutedText")
-        status_layout.addWidget(self.elapsed_label)
+        summary_text_layout.addWidget(self.status_label)
+        self.status_detail_label = QLabel()
+        self.status_detail_label.setObjectName("executionStatusDetail")
+        self.status_detail_label.setWordWrap(True)
+        self.status_detail_label.hide()
+        summary_text_layout.addWidget(self.status_detail_label)
+        summary_layout.addLayout(summary_text_layout, 1)
+
+        elapsed_layout = QVBoxLayout()
+        elapsed_layout.setContentsMargins(12, 0, 0, 0)
+        elapsed_layout.setSpacing(0)
+        elapsed_title = QLabel("總耗時")
+        elapsed_title.setObjectName("executionElapsedTitle")
+        elapsed_title.setAlignment(Qt.AlignmentFlag.AlignRight)
+        elapsed_layout.addWidget(elapsed_title)
+        self.elapsed_label = QLabel("0 秒")
+        self.elapsed_label.setObjectName("executionElapsedValue")
+        self.elapsed_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        elapsed_layout.addWidget(self.elapsed_label)
+        summary_layout.addLayout(elapsed_layout)
+        status_layout.addWidget(self.status_summary)
+
+        self.progress_section = QFrame()
+        self.progress_section.setObjectName("executionProgressSection")
+        progress_layout = QVBoxLayout(self.progress_section)
+        progress_layout.setContentsMargins(0, 6, 0, 6)
+        progress_layout.setSpacing(4)
+        progress_header = QHBoxLayout()
+        progress_header.setContentsMargins(0, 0, 0, 0)
+        self.progress_count_label = QLabel()
+        self.progress_count_label.setObjectName("executionProgressCount")
+        self.progress_title_label = QLabel()
+        self.progress_title_label.setObjectName("executionProgressTitle")
+        self.progress_title_label.setWordWrap(True)
+        progress_header.addWidget(self.progress_count_label)
+        progress_header.addWidget(self.progress_title_label, 1)
+        progress_layout.addLayout(progress_header)
+        self.progress_subtask_frame = QFrame()
+        self.progress_subtask_frame.setObjectName("executionProgressSubtask")
+        subtask_layout = QVBoxLayout(self.progress_subtask_frame)
+        subtask_layout.setContentsMargins(10, 2, 0, 2)
+        self.progress_subtask_label = QLabel()
+        self.progress_subtask_label.setObjectName("executionProgressSubtaskText")
+        self.progress_subtask_label.setWordWrap(True)
+        subtask_layout.addWidget(self.progress_subtask_label)
+        progress_layout.addWidget(self.progress_subtask_frame)
+        self.progress_technical_label = QLabel()
+        self.progress_technical_label.setObjectName(
+            "executionProgressTechnical"
+        )
+        self.progress_technical_label.setWordWrap(True)
+        progress_layout.addWidget(self.progress_technical_label)
+        self.progress_section.hide()
+        self.progress_subtask_frame.hide()
+        self.progress_technical_label.hide()
+        status_layout.addWidget(self.progress_section)
+
+        self.metrics_section = QFrame()
+        self.metrics_section.setObjectName("executionMetricsSection")
+        metrics_layout = QVBoxLayout(self.metrics_section)
+        metrics_layout.setContentsMargins(0, 6, 0, 6)
+        metrics_layout.setSpacing(4)
+        metrics_title = QLabel("最佳化指標")
+        metrics_title.setObjectName("executionMetricsTitle")
+        metrics_layout.addWidget(metrics_title)
+        metrics_grid = QGridLayout()
+        metrics_grid.setContentsMargins(0, 0, 0, 0)
+        metrics_grid.setHorizontalSpacing(20)
+        metrics_grid.setVerticalSpacing(5)
+        self.metric_items: dict[str, QWidget] = {}
+        self.metric_labels: dict[str, QLabel] = {}
+        self.metric_values: dict[str, QLabel] = {}
+        metric_definitions = (
+            (
+                "incumbent",
+                "目前找到的最佳值",
+                "目前已找到且符合現行限制的班表，在本階段達到的最佳值。",
+            ),
+            (
+                "best_bound",
+                "已證明的最佳值界限",
+                "求解器目前能證明的最佳可能界限，不代表已經找到該數值的班表。",
+            ),
+            (
+                "relative_gap",
+                "與證明最佳的距離",
+                "目前找到的最佳值與已證明的最佳值界限之相對差距；0% 代表本階段已證明最佳，不能換算為剩餘時間。",
+            ),
+            ("stage_elapsed_seconds", "本階段耗時", "目前求解階段已使用的時間。"),
+            (
+                "seconds_since_last_solution",
+                "最後找到更好解",
+                "距離上一次找到更佳可行值已經過的時間。",
+            ),
+            (
+                "seconds_since_bound_update",
+                "最佳界限最後更新",
+                "距離已證明的最佳值界限上一次改善已經過的時間。",
+            ),
+        )
+        for index, (key, title, tooltip) in enumerate(metric_definitions):
+            item = QFrame()
+            item.setObjectName("executionMetricItem")
+            item.setToolTip(tooltip)
+            item_layout = QVBoxLayout(item)
+            item_layout.setContentsMargins(0, 0, 0, 0)
+            item_layout.setSpacing(0)
+            label = QLabel(title)
+            label.setObjectName("executionMetricLabel")
+            label.setToolTip(tooltip)
+            value = QLabel()
+            value.setObjectName("executionMetricValue")
+            value.setToolTip(tooltip)
+            item_layout.addWidget(label)
+            item_layout.addWidget(value)
+            metrics_grid.addWidget(item, index // 3, index % 3)
+            self.metric_items[key] = item
+            self.metric_labels[key] = label
+            self.metric_values[key] = value
+            item.hide()
+        for column in range(3):
+            metrics_grid.setColumnStretch(column, 1)
+        metrics_layout.addLayout(metrics_grid)
+        self.metrics_section.hide()
+        status_layout.addWidget(self.metrics_section)
+
         actions = QHBoxLayout()
         self.run_button = QPushButton("檢查、儲存並執行")
         self.run_button.setObjectName("primaryActionButton")
@@ -243,7 +473,7 @@ class ExecutionPage(InputPage):
             QSizePolicy.Policy.Expanding,
         )
         log_layout = QVBoxLayout(self.log_group)
-        self.log = QPlainTextEdit()
+        self.log = _ExecutionLog()
         self.log.setReadOnly(True)
         self.log.setPlaceholderText("排班開始後會在這裡顯示處理進度。")
         self.log.setAccessibleName("排班執行訊息")
@@ -278,6 +508,280 @@ class ExecutionPage(InputPage):
     def terminal_received(self) -> bool:
         return self._terminal_received
 
+    def _set_status_summary(
+        self,
+        primary: str,
+        secondary: str | None = None,
+        *,
+        state: str = "neutral",
+    ) -> None:
+        """Render summary widgets without retaining domain or execution state."""
+
+        self.status_label.setText(primary)
+        if secondary:
+            self.status_detail_label.setText(secondary)
+            self.status_detail_label.show()
+        else:
+            self.status_detail_label.clear()
+            self.status_detail_label.hide()
+        self.status_indicator.setProperty("state", state)
+        self.status_indicator.style().unpolish(self.status_indicator)
+        self.status_indicator.style().polish(self.status_indicator)
+
+    def _hide_progress_presentation(self) -> None:
+        self.progress_count_label.clear()
+        self.progress_count_label.hide()
+        self.progress_title_label.clear()
+        self.progress_title_label.hide()
+        self.progress_subtask_label.clear()
+        self.progress_subtask_frame.hide()
+        self.progress_technical_label.clear()
+        self.progress_technical_label.hide()
+        self.progress_section.hide()
+        for item in self.metric_items.values():
+            item.hide()
+        self.metrics_section.hide()
+
+    def _present_progress_event(self, message: dict[str, Any]) -> None:
+        """Map one event to UI widgets; this intentionally stores no new state."""
+
+        phase = str(message.get("phase", ExecutionPhase.APPLICATION.value))
+        rendered = str(message.get("message", "")).strip()
+        details = message.get("details")
+        details = details if isinstance(details, dict) else {}
+        has_rich_optimization_context = bool(details.get("activity"))
+        has_existing_optimization_presentation = any(
+            (
+                not self.progress_section.isHidden(),
+                not self.metrics_section.isHidden(),
+            )
+        )
+        if (
+            phase == ExecutionPhase.OPTIMIZATION.value
+            and not has_rich_optimization_context
+            and has_existing_optimization_presentation
+        ):
+            # Runner-level elapsed/completion messages are only a fallback.
+            # They must not erase a newer solver event with stage and bound
+            # information, especially while preserving a partial schedule.
+            return
+        retain_stopped_optimization = (
+            self._preserve_requested
+            and phase
+            in {
+                ExecutionPhase.VALIDATION.value,
+                ExecutionPhase.OUTPUT.value,
+            }
+        )
+        if not retain_stopped_optimization:
+            self._hide_progress_presentation()
+
+        if phase == ExecutionPhase.INPUT.value:
+            self._set_status_summary(
+                "正在讀取輸入資料",
+                rendered or None,
+                state="running",
+            )
+        elif phase == ExecutionPhase.CONFIG.value:
+            self._set_status_summary(
+                "正在載入執行設定",
+                rendered or None,
+                state="running",
+            )
+        elif phase == ExecutionPhase.NORMALIZATION.value:
+            self._set_status_summary(
+                "正在驗證與整理輸入資料",
+                rendered or None,
+                state="running",
+            )
+        elif phase == ExecutionPhase.PRECHECK.value:
+            self._set_status_summary(
+                "正在執行前置可行性檢查",
+                rendered or None,
+                state="running",
+            )
+        elif phase == ExecutionPhase.OPTIMIZATION.value:
+            self._present_optimization_event(rendered, details)
+        elif phase == ExecutionPhase.VALIDATION.value:
+            self._set_status_summary(
+                "正在驗證排班結果",
+                "依最終班表重新檢查硬性規則、統計與鎖定目標",
+                state="running",
+            )
+        elif phase == ExecutionPhase.OUTPUT.value:
+            self._set_status_summary(
+                "正在產生輸出檔案",
+                rendered.splitlines()[0] if rendered else None,
+                state="running",
+            )
+        elif phase == ExecutionPhase.CANDIDATE_SEARCH.value:
+            self._set_status_summary(
+                "正式班表已完成",
+                "正在搜尋同品質候選班表",
+                state="success",
+            )
+            current = message.get("current")
+            total = message.get("total")
+            if current is not None and total is not None:
+                self.progress_count_label.setText(
+                    f"候選搜尋 {current} / {total}"
+                )
+                self.progress_count_label.show()
+                self.progress_title_label.setText("已找到同品質候選班表")
+                self.progress_title_label.show()
+                self.progress_section.show()
+        else:
+            self._set_status_summary(
+                rendered or "正在執行排班流程",
+                state="running" if self._running else "neutral",
+            )
+
+    def _present_optimization_event(
+        self,
+        rendered: str,
+        details: dict[str, Any],
+    ) -> None:
+        activity = str(details.get("activity", ""))
+        has_feasible = details.get("has_feasible_solution") is True
+        if activity == "formal_optimization_completed":
+            self._set_status_summary(
+                "排班品質最佳化已完成",
+                "正式目標均已完成並證明最佳值",
+                state="success",
+            )
+        elif has_feasible:
+            self._set_status_summary(
+                "已找到合法班表",
+                "目前仍在最佳化品質",
+                state="success",
+            )
+        else:
+            self._set_status_summary(
+                "正在尋找合法班表",
+                rendered or "正在檢查全部硬性限制",
+                state="running",
+            )
+
+        user_index = details.get("user_step_index")
+        user_total = details.get("user_step_total")
+        user_title = details.get("user_step_title")
+        if user_index is not None and user_total is not None:
+            self.progress_count_label.setText(
+                f"最佳化進度 {user_index} / {user_total}"
+            )
+            self.progress_count_label.show()
+        if user_title:
+            self.progress_title_label.setText(str(user_title))
+            self.progress_title_label.show()
+
+        completed = details.get("formal_stages_completed")
+        formal_total = details.get("formal_stage_total")
+        technical: str | None = None
+        if activity == "formal_stage":
+            stage_index = details.get("formal_stage_index")
+            stage_name = details.get("formal_stage_name")
+            if stage_index is not None and formal_total is not None:
+                technical = f"技術進度：正式流程 {stage_index} / {formal_total}"
+                if stage_name:
+                    technical += f" · {stage_name}"
+                if completed is not None:
+                    technical += f"（已完成 {completed} / {formal_total}）"
+        elif activity == "preference_benchmark":
+            rank = "第一" if details.get("rank") == "first" else "第二"
+            full_time_class = details.get("full_time_class")
+            benchmark_index = details.get("benchmark_index")
+            benchmark_total = details.get("benchmark_total")
+            if (
+                full_time_class
+                and benchmark_index is not None
+                and benchmark_total is not None
+            ):
+                self.progress_subtask_label.setText(
+                    f"{full_time_class} 類{rank}偏好基準 "
+                    f"{benchmark_index} / {benchmark_total}"
+                )
+                self.progress_subtask_frame.show()
+            if completed is not None and formal_total is not None:
+                technical = (
+                    "技術進度：正式流程已完成 "
+                    f"{completed} / {formal_total}"
+                )
+        elif (
+            activity == "formal_optimization_completed"
+            and completed is not None
+            and formal_total is not None
+        ):
+            technical = f"技術進度：正式流程 {completed} / {formal_total}"
+        if technical:
+            self.progress_technical_label.setText(technical)
+            self.progress_technical_label.show()
+
+        if any(
+            (
+                not self.progress_count_label.isHidden(),
+                not self.progress_title_label.isHidden(),
+                not self.progress_subtask_frame.isHidden(),
+                not self.progress_technical_label.isHidden(),
+            )
+        ):
+            self.progress_section.show()
+
+        incumbent = details.get("incumbent")
+        if incumbent is None:
+            incumbent = details.get("objective_value")
+        if incumbent is None:
+            incumbent = details.get("benchmark_ideal_value")
+        best_bound = details.get("best_bound")
+        if best_bound is None:
+            best_bound = details.get("best_objective_bound")
+        relative_gap = details.get("relative_gap")
+        if (
+            relative_gap is None
+            and incumbent is not None
+            and best_bound is not None
+        ):
+            absolute_gap = abs(float(incumbent) - float(best_bound))
+            relative_gap = absolute_gap / max(abs(float(incumbent)), 1.0)
+
+        metric_values: dict[str, str | None] = {
+            "incumbent": (
+                None
+                if incumbent is None
+                else _compact_number(incumbent)
+            ),
+            "best_bound": (
+                None
+                if best_bound is None
+                else _compact_number(best_bound)
+            ),
+            "relative_gap": (
+                None
+                if relative_gap is None
+                else f"{float(relative_gap) * 100:.1f}%"
+            ),
+            "stage_elapsed_seconds": _formatted_duration_or_none(
+                details.get("stage_elapsed_seconds")
+            ),
+            "seconds_since_last_solution": _formatted_duration_or_none(
+                details.get("seconds_since_last_solution"),
+                suffix="前",
+            ),
+            "seconds_since_bound_update": _formatted_duration_or_none(
+                details.get("seconds_since_bound_update"),
+                suffix="前",
+            ),
+        }
+        has_metric = False
+        for key, value in metric_values.items():
+            item = self.metric_items[key]
+            if value is None:
+                item.hide()
+                continue
+            self.metric_values[key].setText(value)
+            item.show()
+            has_metric = True
+        self.metrics_section.setVisible(has_metric)
+
     def bind_document(
         self,
         *,
@@ -300,10 +804,12 @@ class ExecutionPage(InputPage):
         self._has_feasible_solution = False
         self._can_preserve_output = False
         self._preserve_requested = False
-        self.status_label.setText("資料準備完成後即可執行排班。")
-        self.status_label.setObjectName("mutedText")
-        self._repolish_status()
-        self.elapsed_label.setText("總耗時：0 秒")
+        self._set_status_summary(
+            "資料準備完成後即可執行排班。",
+            state="neutral",
+        )
+        self._hide_progress_presentation()
+        self.elapsed_label.setText("0 秒")
         self.result_status_label.setText("尚未產生")
         self.validation_label.setText("尚未執行")
         self.candidate_label.setText("尚未執行")
@@ -322,9 +828,12 @@ class ExecutionPage(InputPage):
     def mark_input_changed(self) -> None:
         if self._running or not self._terminal_received:
             return
-        self.status_label.setText("輸入資料已修改；再次執行前會先儲存最新內容。")
-        self.status_label.setObjectName("documentStatusDirty")
-        self._repolish_status()
+        self._set_status_summary(
+            "輸入資料已修改",
+            "再次執行前會先儲存最新內容。",
+            state="warning",
+        )
+        self._hide_progress_presentation()
         self.result_status_label.setText("先前結果（不含目前修改）")
 
     def begin(self) -> None:
@@ -344,13 +853,16 @@ class ExecutionPage(InputPage):
         self.candidate_label.setText("等待執行")
         self.open_output_button.setEnabled(False)
         self.open_output_button.setProperty("output_directory", None)
-        self.status_label.setText("正在啟動獨立排班程序……")
-        self.status_label.setObjectName("documentStatusDirty")
-        self._repolish_status()
+        self._set_status_summary(
+            "正在啟動排班程序",
+            "準備讀取設定與輸入資料",
+            state="running",
+        )
+        self._hide_progress_presentation()
         self.run_button.setEnabled(False)
         self.cancel_button.setEnabled(True)
         self.preserve_button.setEnabled(False)
-        self.preserve_button.setToolTip("找到第一份合法班表後即可使用。")
+        self.preserve_button.setToolTip("")
         self.stop_candidate_button.setEnabled(False)
         self._elapsed.start()
         self._timer.start()
@@ -359,7 +871,12 @@ class ExecutionPage(InputPage):
     def show_message(self, message: dict[str, Any]) -> None:
         message_type = message.get("type")
         if message_type == "started":
-            self.status_label.setText("排班程序已啟動，正在讀取資料。")
+            self._set_status_summary(
+                "排班程序已啟動",
+                "正在讀取資料",
+                state="running",
+            )
+            self._hide_progress_presentation()
             self.log.appendPlainText("[執行] 已啟動獨立排班程序。")
         elif message_type == "progress":
             self._show_progress(message)
@@ -378,7 +895,11 @@ class ExecutionPage(InputPage):
         self.cancel_button.setEnabled(False)
         self.preserve_button.setEnabled(False)
         self.stop_candidate_button.setEnabled(False)
-        self.status_label.setText("正在取消排班，請稍候……")
+        self._set_status_summary(
+            "正在終止排班",
+            "本次結果將不會保留，請稍候。",
+            state="warning",
+        )
         self.log.appendPlainText("[執行] 已提出取消要求。")
 
     def request_preserving(self) -> None:
@@ -388,8 +909,10 @@ class ExecutionPage(InputPage):
         self.cancel_button.setEnabled(False)
         self.preserve_button.setEnabled(False)
         self.stop_candidate_button.setEnabled(False)
-        self.status_label.setText(
-            "正在停止後續最佳化，並驗證及輸出目前最佳合法班表……"
+        self._set_status_summary(
+            "正在保留目前最佳合法班表",
+            "停止後續最佳化後，將先進行獨立驗證再輸出。",
+            state="warning",
         )
         self.log.appendPlainText(
             "[排班] 已提出保留要求；完成獨立驗證後才會建立暫存結果。"
@@ -400,9 +923,12 @@ class ExecutionPage(InputPage):
             return
         self._candidate_stop_requested = True
         self.stop_candidate_button.setEnabled(False)
-        self.status_label.setText(
-            "正在終止候選處理；已完成的正式班表不受影響。"
+        self._set_status_summary(
+            "正式班表已完成",
+            "正在終止候選處理；已完成的正式班表不受影響。",
+            state="success",
         )
+        self._hide_progress_presentation()
         self.log.appendPlainText("[候選處理] 已提出終止要求。")
 
     def process_finished(self) -> None:
@@ -419,7 +945,7 @@ class ExecutionPage(InputPage):
         phase = str(message.get("phase", "APPLICATION"))
         label = _PHASE_LABELS.get(phase, phase)
         rendered = str(message.get("message", ""))
-        self.status_label.setText(_solver_progress_text(message) or rendered)
+        self._present_progress_event(message)
         kind = message.get("kind")
         details = message.get("details")
         if isinstance(details, dict):
@@ -428,12 +954,6 @@ class ExecutionPage(InputPage):
             if "can_preserve_output" in details:
                 self._can_preserve_output = bool(
                     details.get("can_preserve_output")
-                )
-                reason = details.get("preservation_unavailable_reason")
-                self.preserve_button.setToolTip(
-                    str(reason)
-                    if reason
-                    else "停止後續最佳化，並輸出已通過硬性規則的目前班表。"
                 )
         if phase == ExecutionPhase.CANDIDATE_SEARCH.value:
             self._candidate_processing = True
@@ -480,9 +1000,12 @@ class ExecutionPage(InputPage):
         self.preserve_button.setEnabled(False)
         self.stop_candidate_button.setEnabled(False)
         self.result_group.setTitle("正式結果")
-        self.status_label.setText("排班完成，正式結果已輸出。")
-        self.status_label.setObjectName("documentStatusClean")
-        self._repolish_status()
+        self._set_status_summary(
+            "排班完成",
+            "正式結果已通過驗證並完成輸出。",
+            state="success",
+        )
+        self._hide_progress_presentation()
         status = str(message.get("status", "—"))
         validation = str(message.get("validation", "—"))
         self.result_status_label.setText(
@@ -511,13 +1034,7 @@ class ExecutionPage(InputPage):
                 "output_directory", output_directory
             )
             self.open_output_button.setEnabled(True)
-        total = message.get("timings", {}).get("total_execution_seconds")
-        suffix = (
-            ""
-            if total is None
-            else f"，總耗時 {format_duration(float(total))}"
-        )
-        self.log.appendPlainText(f"[執行] 正式結果完成{suffix}。")
+        self.log.appendPlainText("[執行] 正式結果完成。")
         self.result_group.show()
         self.scroll_content.updateGeometry()
         QTimer.singleShot(0, self._scroll_to_completed_result)
@@ -528,11 +1045,11 @@ class ExecutionPage(InputPage):
         self.cancel_button.setEnabled(False)
         self.preserve_button.setEnabled(False)
         self.stop_candidate_button.setEnabled(False)
-        self.status_label.setText(
-            "已保留目前最佳合法班表；正式最佳化尚未完成。"
+        self._set_status_summary(
+            "已保留目前最佳合法班表",
+            "正式最佳化尚未完成，此結果未證明為最佳。",
+            state="warning",
         )
-        self.status_label.setObjectName("documentStatusClean")
-        self._repolish_status()
         status = str(message.get("status", "—"))
         validation = str(message.get("validation", "—"))
         self.result_group.setTitle("目前最佳合法班表")
@@ -570,17 +1087,8 @@ class ExecutionPage(InputPage):
                 "output_directory", str(Path(str(first_path)).parent)
             )
             self.open_output_button.setEnabled(True)
-        timings = message.get("timings", {})
-        total = (
-            timings.get("total_execution_seconds")
-            if isinstance(timings, dict)
-            else None
-        )
-        suffix = (
-            "" if total is None else f"，總耗時 {format_duration(float(total))}"
-        )
         self.log.appendPlainText(
-            f"[執行] 已輸出目前最佳合法班表{suffix}；此結果尚未證明最佳。"
+            "[執行] 已輸出目前最佳合法班表；此結果尚未證明最佳。"
         )
         self.result_group.show()
         self.scroll_content.updateGeometry()
@@ -594,11 +1102,13 @@ class ExecutionPage(InputPage):
         kind = str(message.get("kind", "UNKNOWN"))
         cancelled = kind == "CANCELLED"
         rendered = str(message.get("message", "排班失敗。"))
-        self.status_label.setText("排班已取消。" if cancelled else "排班未完成。")
-        self.status_label.setObjectName(
-            "mutedText" if cancelled else "documentStatusDirty"
+        self._set_status_summary(
+            "排班已終止" if cancelled else "排班未完成",
+            "已保留終止當下的求解進度。" if cancelled else rendered,
+            state="neutral" if cancelled else "error",
         )
-        self._repolish_status()
+        if not cancelled:
+            self._hide_progress_presentation()
         self.result_status_label.setText("CANCELLED" if cancelled else kind)
         self.validation_label.setText("未完成")
         self.candidate_label.setText("未完成")
@@ -615,11 +1125,7 @@ class ExecutionPage(InputPage):
             if not self._elapsed.isValid()
             else self._elapsed.elapsed() // 1000
         )
-        self.elapsed_label.setText(f"總耗時：{format_duration(elapsed_seconds)}")
-
-    def _repolish_status(self) -> None:
-        self.status_label.style().unpolish(self.status_label)
-        self.status_label.style().polish(self.status_label)
+        self.elapsed_label.setText(format_duration(elapsed_seconds))
 
     def _update_preserve_button(
         self,
@@ -643,15 +1149,13 @@ class ExecutionPage(InputPage):
             self.open_output_requested.emit(directory)
 
     def _scroll_to_completed_result(self) -> None:
-        """Move document metadata out while keeping log context above results."""
+        """Reveal the complete result area and its output-directory action."""
 
         layout = self.scroll_content.layout()
         if layout is not None:
             layout.activate()
         bar = self.content_scroll.verticalScrollBar()
-        result_top = self.result_group.y()
-        context_height = max(96, self.content_scroll.viewport().height() // 3)
-        bar.setValue(min(max(result_top - context_height, 0), bar.maximum()))
+        bar.setValue(bar.maximum())
 
 
 def _render_output_paths(

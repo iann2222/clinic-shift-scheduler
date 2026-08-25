@@ -86,6 +86,32 @@ class OptimizationTelemetry:
 
 
 @dataclass(frozen=True, slots=True)
+class OptimizationStopSnapshot:
+    """Observed solver progress when preservation stopped optimization."""
+
+    activity: str
+    objective_direction: str | None = None
+    user_step_index: int | None = None
+    user_step_total: int | None = None
+    user_step_title: str | None = None
+    formal_stage_index: int | None = None
+    formal_stage_total: int | None = None
+    formal_stages_completed: int | None = None
+    benchmark_index: int | None = None
+    benchmark_total: int | None = None
+    incumbent: float | None = None
+    best_objective_bound: float | None = None
+    absolute_gap: float | None = None
+    relative_gap: float | None = None
+    solutions_found: int | None = None
+    stage_elapsed_seconds: float | None = None
+    optimization_elapsed_seconds: float | None = None
+    seconds_since_last_solution: float | None = None
+    seconds_since_bound_update: float | None = None
+    time_to_first_feasible_schedule: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SchedulePreservationInfo:
     """Where a user stopped optimization to keep the best legal snapshot."""
 
@@ -94,6 +120,7 @@ class SchedulePreservationInfo:
     preference_rank: str | None = None
     full_time_class: str | None = None
     used_current_incumbent: bool = False
+    optimization_stop_snapshot: OptimizationStopSnapshot | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -41,6 +41,106 @@ QWidget#executionScrollContent {
     border: none;
 }
 
+QGroupBox#executionStickyStatus {
+    background-color: $SURFACE;
+    border: 1px solid $BORDER;
+    border-radius: 5px;
+    margin-top: 8px;
+    padding: 8px 10px 10px 10px;
+}
+
+QGroupBox#executionStickyStatus::title {
+    subcontrol-origin: margin;
+    left: 10px;
+    padding: 0 4px;
+}
+
+QFrame#executionStatusSummary {
+    background-color: transparent;
+    border-bottom: 1px solid $BORDER;
+}
+
+QLabel#executionStatusIndicator {
+    color: $TEXT_MUTED;
+    font-size: 12pt;
+}
+
+QLabel#executionStatusIndicator[state="running"] {
+    color: $PRIMARY;
+}
+
+QLabel#executionStatusIndicator[state="success"] {
+    color: $SUCCESS;
+}
+
+QLabel#executionStatusIndicator[state="warning"] {
+    color: $WARNING;
+}
+
+QLabel#executionStatusIndicator[state="error"] {
+    color: #A94442;
+}
+
+QLabel#executionStatusPrimary {
+    color: $TEXT;
+    font-size: 11pt;
+    font-weight: 600;
+}
+
+QLabel#executionStatusDetail,
+QLabel#executionElapsedTitle,
+QLabel#executionProgressTechnical,
+QLabel#executionMetricLabel {
+    color: $TEXT_MUTED;
+    font-size: 8.5pt;
+}
+
+QLabel#executionElapsedValue {
+    color: $TEXT;
+    font-family: "Cascadia Mono", "Consolas", monospace;
+    font-size: 14pt;
+    font-weight: 600;
+}
+
+QFrame#executionProgressSection,
+QFrame#executionMetricsSection {
+    background-color: transparent;
+    border-bottom: 1px solid $BORDER;
+}
+
+QLabel#executionProgressCount,
+QLabel#executionMetricsTitle {
+    color: $PRIMARY;
+    font-weight: 600;
+}
+
+QLabel#executionProgressTitle {
+    color: $TEXT;
+    font-weight: 600;
+}
+
+QFrame#executionProgressSubtask {
+    background-color: transparent;
+    border: none;
+    border-left: 2px solid $PRIMARY;
+}
+
+QLabel#executionProgressSubtaskText {
+    color: $TEXT_MUTED;
+    font-size: 9pt;
+}
+
+QFrame#executionMetricItem {
+    background-color: transparent;
+    border: none;
+}
+
+QLabel#executionMetricValue {
+    color: $TEXT;
+    font-size: 10.5pt;
+    font-weight: 600;
+}
+
 QFrame#monthStartPanel {
     background-color: $PRIMARY_SOFT;
     border: 1px solid $BORDER;

@@ -43,12 +43,14 @@ def _solver_progress_message(event: ProgressEvent) -> str:
     incumbent = details.get("incumbent")
     best_bound = details.get("best_bound")
     if incumbent is not None:
-        parts.append(f"目標 {float(incumbent):g}")
+        parts.append(f"目前找到的最佳值 {float(incumbent):g}")
     if best_bound is not None:
-        parts.append(f"最佳界 {float(best_bound):g}")
+        parts.append(f"已證明的最佳值界限 {float(best_bound):g}")
     relative_gap = details.get("relative_gap")
     if relative_gap is not None:
-        parts.append(f"gap {float(relative_gap) * 100:.1f}%")
+        parts.append(
+            f"與證明最佳的距離 {float(relative_gap) * 100:.1f}%"
+        )
     stage_elapsed = details.get("stage_elapsed_seconds")
     if stage_elapsed is not None:
         parts.append(f"本階段 {format_seconds(float(stage_elapsed))}")

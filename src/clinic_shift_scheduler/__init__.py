@@ -29,7 +29,7 @@ _exports("optimization_policy", "CLASS_PREFERENCES", "FORMAL_OBJECTIVE_STAGES", 
 _exports("errors", "InputValidationError", "ValidationIssue")
 _exports("events", "CancellationToken", "DiagnosticIssue", "DiagnosticSeverity", "ExecutionPhase", "OperationCancelledError", "PreservationToken", "ProgressCallback", "ProgressEvent", "ProgressEventKind")
 _exports("exporters", "DEFAULT_OUTPUT_DIRECTORY", "PROVISIONAL_RESULT_CONTRACT_NAME", "PROVISIONAL_RESULT_CONTRACT_VERSION", "PROVISIONAL_WORKSHEET_NAMES", "RESULT_CONTRACT_NAME", "RESULT_CONTRACT_VERSION", "WORKSHEET_NAMES", "ExportFileExistsError", "FormalExportError", "OutputPaths", "build_output_paths", "build_provisional_output_paths", "build_provisional_result_document", "build_provisional_workbook", "build_result_document", "build_workbook", "export_provisional_result_excel", "export_provisional_result_json", "export_provisional_schedule_pdf_from_excel", "export_result_excel", "export_result_json", "export_schedule_pdf_from_excel")
-_exports("solver_contracts", "Assignment", "FeasibilityResult", "FeasibilitySolverConfig", "FeasibilityStatus", "LexicographicResult", "OptimizationTelemetry", "SchedulePreservationInfo")
+_exports("solver_contracts", "Assignment", "FeasibilityResult", "FeasibilitySolverConfig", "FeasibilityStatus", "LexicographicResult", "OptimizationStopSnapshot", "OptimizationTelemetry", "SchedulePreservationInfo")
 _exports("daily_patterns", "DailyPattern")
 _exports("feasibility", "build_feasibility_model", "solve_feasibility")
 _exports("models", "NormalizedScheduleInput", "ScheduleInput")
@@ -95,6 +95,7 @@ __all__ = [
     "OptimizationStage",
     "OptimizationStageResult",
     "OptimizationStageStatus",
+    "OptimizationStopSnapshot",
     "OptimizationTelemetry",
     "OutputPaths",
     "OverallStatistics",
