@@ -1282,6 +1282,9 @@ def _emit_solver_progress(
     details = dict(context.details)
     details.update(state.snapshot())
     details["activity"] = context.activity
+    if context.direction is not ObjectiveDirection.NONE:
+        details["objective_direction"] = context.direction.value
+        details["objective_name"] = context.label
     details["total_elapsed_seconds"] = (
         perf_counter() - context.optimization_started_at
     )
@@ -1497,6 +1500,9 @@ def _emit_activity_event(
     if extra_details is not None:
         details.update(extra_details)
     details["activity"] = context.activity
+    if context.direction is not ObjectiveDirection.NONE:
+        details["objective_direction"] = context.direction.value
+        details["objective_name"] = context.label
     details["total_elapsed_seconds"] = (
         perf_counter() - context.optimization_started_at
     )

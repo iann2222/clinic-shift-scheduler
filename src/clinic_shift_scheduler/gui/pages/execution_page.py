@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QElapsedTimer, QPoint, Qt, QTimer, Signal
+from PySide6.QtCore import QElapsedTimer, QPoint, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QFocusEvent, QMouseEvent, QTextCursor
 from PySide6.QtWidgets import (
     QFrame,
@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
 from ...events import ExecutionPhase, ProgressEventKind
 from ...time_formatting import format_duration
 from ..navigation import NAVIGATION_ITEMS, PageId
+from ..styles.icons import themed_information_icon
 from .base import InputPage
 
 
@@ -360,9 +362,23 @@ class ExecutionPage(InputPage):
         metrics_layout = QVBoxLayout(self.metrics_section)
         metrics_layout.setContentsMargins(0, 6, 0, 6)
         metrics_layout.setSpacing(4)
+        metrics_header = QHBoxLayout()
+        metrics_header.setContentsMargins(0, 0, 0, 0)
+        metrics_header.setSpacing(5)
         metrics_title = QLabel("最佳化指標")
         metrics_title.setObjectName("executionMetricsTitle")
-        metrics_layout.addWidget(metrics_title)
+        metrics_header.addWidget(metrics_title)
+        self.objective_info_button = QToolButton()
+        self.objective_info_button.setObjectName("executionObjectiveInfo")
+        self.objective_info_button.setAccessibleName("目前最佳化目標說明")
+        self.objective_info_button.setAutoRaise(True)
+        self.objective_info_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.objective_info_button.setIcon(themed_information_icon())
+        self.objective_info_button.setIconSize(QSize(16, 16))
+        self.objective_info_button.hide()
+        metrics_header.addWidget(self.objective_info_button)
+        metrics_header.addStretch(1)
+        metrics_layout.addLayout(metrics_header)
         metrics_grid = QGridLayout()
         metrics_grid.setContentsMargins(0, 0, 0, 0)
         metrics_grid.setHorizontalSpacing(20)
@@ -433,6 +449,7 @@ class ExecutionPage(InputPage):
         self.preserve_button.setEnabled(False)
         self.stop_candidate_button = QPushButton("終止候選處理")
         self.stop_candidate_button.setEnabled(False)
+        self.stop_candidate_button.hide()
         self.run_button.clicked.connect(self.run_requested.emit)
         self.cancel_button.clicked.connect(self.cancel_requested.emit)
         self.preserve_button.clicked.connect(self.preserve_requested.emit)
@@ -537,6 +554,8 @@ class ExecutionPage(InputPage):
         self.progress_subtask_frame.hide()
         self.progress_technical_label.clear()
         self.progress_technical_label.hide()
+        self.objective_info_button.setToolTip("")
+        self.objective_info_button.hide()
         self.progress_section.hide()
         for item in self.metric_items.values():
             item.hide()
@@ -618,7 +637,7 @@ class ExecutionPage(InputPage):
             self._set_status_summary(
                 "正式班表已完成",
                 "正在搜尋同品質候選班表",
-                state="success",
+                state="running",
             )
             current = message.get("current")
             total = message.get("total")
@@ -646,14 +665,14 @@ class ExecutionPage(InputPage):
         if activity == "formal_optimization_completed":
             self._set_status_summary(
                 "排班品質最佳化已完成",
-                "正式目標均已完成並證明最佳值",
-                state="success",
+                "正式目標均已證明最佳，準備驗證與輸出",
+                state="running",
             )
         elif has_feasible:
             self._set_status_summary(
-                "已找到合法班表",
-                "目前仍在最佳化品質",
-                state="success",
+                "已找到可行班表，持續最佳化中",
+                "目前已有可行但非最佳的班表",
+                state="running",
             )
         else:
             self._set_status_summary(
@@ -667,7 +686,7 @@ class ExecutionPage(InputPage):
         user_title = details.get("user_step_title")
         if user_index is not None and user_total is not None:
             self.progress_count_label.setText(
-                f"最佳化進度 {user_index} / {user_total}"
+                f"整體最佳化 {user_index} / {user_total}"
             )
             self.progress_count_label.show()
         if user_title:
@@ -681,7 +700,7 @@ class ExecutionPage(InputPage):
             stage_index = details.get("formal_stage_index")
             stage_name = details.get("formal_stage_name")
             if stage_index is not None and formal_total is not None:
-                technical = f"技術進度：正式流程 {stage_index} / {formal_total}"
+                technical = f"技術細節：正式流程 {stage_index} / {formal_total}"
                 if stage_name:
                     technical += f" · {stage_name}"
                 if completed is not None:
@@ -697,13 +716,13 @@ class ExecutionPage(InputPage):
                 and benchmark_total is not None
             ):
                 self.progress_subtask_label.setText(
-                    f"{full_time_class} 類{rank}偏好基準 "
+                    f"目前：{full_time_class} 類{rank}偏好基準 "
                     f"{benchmark_index} / {benchmark_total}"
                 )
                 self.progress_subtask_frame.show()
             if completed is not None and formal_total is not None:
                 technical = (
-                    "技術進度：正式流程已完成 "
+                    "技術細節：正式流程已完成 "
                     f"{completed} / {formal_total}"
                 )
         elif (
@@ -711,7 +730,7 @@ class ExecutionPage(InputPage):
             and completed is not None
             and formal_total is not None
         ):
-            technical = f"技術進度：正式流程 {completed} / {formal_total}"
+            technical = f"技術細節：正式流程 {completed} / {formal_total}"
         if technical:
             self.progress_technical_label.setText(technical)
             self.progress_technical_label.show()
@@ -780,6 +799,25 @@ class ExecutionPage(InputPage):
             self.metric_values[key].setText(value)
             item.show()
             has_metric = True
+        objective_direction = str(details.get("objective_direction", ""))
+        objective_name = str(
+            details.get("formal_stage_name")
+            or details.get("objective_name")
+            or rendered
+        ).strip()
+        if has_metric and objective_direction in {"MAXIMIZE", "MINIMIZE"}:
+            direction_text = (
+                "最大化，數值越大越好"
+                if objective_direction == "MAXIMIZE"
+                else "最小化，數值越小越好"
+            )
+            self.objective_info_button.setToolTip(
+                f"目前目標：{objective_name}\n求解方向：{direction_text}"
+            )
+            self.objective_info_button.show()
+        else:
+            self.objective_info_button.setToolTip("")
+            self.objective_info_button.hide()
         self.metrics_section.setVisible(has_metric)
 
     def bind_document(
@@ -823,6 +861,7 @@ class ExecutionPage(InputPage):
         self.preserve_button.setEnabled(False)
         self.preserve_button.setToolTip("")
         self.stop_candidate_button.setEnabled(False)
+        self.stop_candidate_button.hide()
         self.result_group.setTitle("正式結果")
 
     def mark_input_changed(self) -> None:
@@ -864,6 +903,7 @@ class ExecutionPage(InputPage):
         self.preserve_button.setEnabled(False)
         self.preserve_button.setToolTip("")
         self.stop_candidate_button.setEnabled(False)
+        self.stop_candidate_button.hide()
         self._elapsed.start()
         self._timer.start()
         self._refresh_elapsed()
@@ -926,7 +966,7 @@ class ExecutionPage(InputPage):
         self._set_status_summary(
             "正式班表已完成",
             "正在終止候選處理；已完成的正式班表不受影響。",
-            state="success",
+            state="running",
         )
         self._hide_progress_presentation()
         self.log.appendPlainText("[候選處理] 已提出終止要求。")
@@ -938,6 +978,7 @@ class ExecutionPage(InputPage):
         self.cancel_button.setEnabled(False)
         self.preserve_button.setEnabled(False)
         self.stop_candidate_button.setEnabled(False)
+        self.stop_candidate_button.hide()
         self._candidate_processing = False
         self._refresh_elapsed()
 
@@ -959,6 +1000,7 @@ class ExecutionPage(InputPage):
             self._candidate_processing = True
             self.cancel_button.setEnabled(False)
             self.preserve_button.setEnabled(False)
+            self.stop_candidate_button.show()
             self.stop_candidate_button.setEnabled(
                 not self._candidate_stop_requested
             )
@@ -967,6 +1009,7 @@ class ExecutionPage(InputPage):
             self.cancel_button.setEnabled(False)
             self.preserve_button.setEnabled(False)
             self.stop_candidate_button.setEnabled(False)
+            self.stop_candidate_button.hide()
         elif phase in {
             ExecutionPhase.VALIDATION.value,
             ExecutionPhase.OUTPUT.value,
@@ -976,7 +1019,9 @@ class ExecutionPage(InputPage):
             # available if the optional search starts afterwards.
             self.cancel_button.setEnabled(False)
             self.preserve_button.setEnabled(False)
+            self.stop_candidate_button.hide()
         else:
+            self.stop_candidate_button.hide()
             activity = (
                 str(details.get("activity", ""))
                 if isinstance(details, dict)
@@ -999,6 +1044,7 @@ class ExecutionPage(InputPage):
         self._candidate_processing = False
         self.preserve_button.setEnabled(False)
         self.stop_candidate_button.setEnabled(False)
+        self.stop_candidate_button.hide()
         self.result_group.setTitle("正式結果")
         self._set_status_summary(
             "排班完成",
@@ -1045,6 +1091,7 @@ class ExecutionPage(InputPage):
         self.cancel_button.setEnabled(False)
         self.preserve_button.setEnabled(False)
         self.stop_candidate_button.setEnabled(False)
+        self.stop_candidate_button.hide()
         self._set_status_summary(
             "已保留目前最佳合法班表",
             "正式最佳化尚未完成，此結果未證明為最佳。",
@@ -1099,6 +1146,7 @@ class ExecutionPage(InputPage):
         self._candidate_processing = False
         self.preserve_button.setEnabled(False)
         self.stop_candidate_button.setEnabled(False)
+        self.stop_candidate_button.hide()
         kind = str(message.get("kind", "UNKNOWN"))
         cancelled = kind == "CANCELLED"
         rendered = str(message.get("message", "排班失敗。"))

@@ -305,6 +305,19 @@ class LexicographicOptimizationTests(unittest.TestCase):
         self.assertTrue(
             all("benchmark_index" in event.details for event in benchmark_events)
         )
+        self.assertTrue(
+            all(
+                event.details.get("objective_direction")
+                in {"MAXIMIZE", "MINIMIZE"}
+                for event in benchmark_events
+            )
+        )
+        self.assertTrue(
+            all(
+                event.details.get("objective_name")
+                for event in benchmark_events
+            )
+        )
         benchmark_solver_updates = [
             event
             for event in benchmark_events
@@ -334,6 +347,21 @@ class LexicographicOptimizationTests(unittest.TestCase):
             {event.details.get("formal_stage_total") for event in events
              if event.details.get("activity") == "formal_stage"},
             {len(FORMAL_STAGE_SEQUENCE)},
+        )
+        objective_stage_events = [
+            event
+            for event in events
+            if event.details.get("activity") == "formal_stage"
+            and event.details.get("formal_stage")
+            != OptimizationStage.HARD_FEASIBILITY.value
+        ]
+        self.assertTrue(objective_stage_events)
+        self.assertTrue(
+            all(
+                event.details.get("objective_direction")
+                in {"MAXIMIZE", "MINIMIZE"}
+                for event in objective_stage_events
+            )
         )
         telemetry = observed.optimization_telemetry
         self.assertIsNotNone(telemetry)

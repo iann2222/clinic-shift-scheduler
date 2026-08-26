@@ -104,10 +104,12 @@ class GuiExecutionTests(unittest.TestCase):
             page.log.verticalScrollBar(),
         )
         self.assertFalse(page.result_group.isVisible())
+        self.assertTrue(page.stop_candidate_button.isHidden())
         page.begin()
         self.assertTrue(page.cancel_button.isEnabled())
         self.assertFalse(page.preserve_button.isEnabled())
         self.assertFalse(page.stop_candidate_button.isEnabled())
+        self.assertTrue(page.stop_candidate_button.isHidden())
         self.assertTrue(page.result_group.isHidden())
 
         page.show_message(
@@ -120,8 +122,10 @@ class GuiExecutionTests(unittest.TestCase):
         )
         self.assertFalse(page.cancel_button.isEnabled())
         self.assertTrue(page.stop_candidate_button.isEnabled())
+        self.assertFalse(page.stop_candidate_button.isHidden())
         page.request_candidate_stopping()
         self.assertFalse(page.stop_candidate_button.isEnabled())
+        self.assertFalse(page.stop_candidate_button.isHidden())
         self.assertIn("正式班表不受影響", page.status_detail_label.text())
         page.show_message(
             {
@@ -133,6 +137,7 @@ class GuiExecutionTests(unittest.TestCase):
         )
         self.assertFalse(page.stop_candidate_button.isEnabled())
         page.process_finished()
+        self.assertTrue(page.stop_candidate_button.isHidden())
 
     def test_execution_log_follows_tail_without_stealing_history_position(
         self,
@@ -324,6 +329,8 @@ class GuiExecutionTests(unittest.TestCase):
                     "formal_stage_index": 6,
                     "formal_stage_total": 16,
                     "formal_stage_name": "正職個人班型比例最大 gap",
+                    "objective_direction": "MINIMIZE",
+                    "objective_name": "正職個人班型比例最大 gap",
                     "formal_stages_completed": 5,
                     "incumbent": 438.0,
                     "best_bound": 421.0,
@@ -336,9 +343,16 @@ class GuiExecutionTests(unittest.TestCase):
             }
         )
 
-        self.assertEqual(page.status_label.text(), "已找到合法班表")
-        self.assertEqual(page.status_detail_label.text(), "目前仍在最佳化品質")
-        self.assertEqual(page.progress_count_label.text(), "最佳化進度 5 / 10")
+        self.assertEqual(
+            page.status_label.text(),
+            "已找到可行班表，持續最佳化中",
+        )
+        self.assertEqual(
+            page.status_detail_label.text(),
+            "目前已有可行但非最佳的班表",
+        )
+        self.assertEqual(page.status_indicator.property("state"), "running")
+        self.assertEqual(page.progress_count_label.text(), "整體最佳化 5 / 10")
         self.assertEqual(
             page.progress_title_label.text(),
             "平衡正職個人的班型比例",
@@ -363,6 +377,22 @@ class GuiExecutionTests(unittest.TestCase):
         self.assertIn(
             "不能換算為剩餘時間",
             page.metric_labels["relative_gap"].toolTip(),
+        )
+        self.assertFalse(page.objective_info_button.isHidden())
+        self.assertFalse(page.objective_info_button.icon().isNull())
+        available_icon_sizes = {
+            (size.width(), size.height())
+            for size in page.objective_info_button.icon().availableSizes()
+        }
+        self.assertIn((16, 16), available_icon_sizes)
+        self.assertIn((32, 32), available_icon_sizes)
+        self.assertIn(
+            "目前目標：正職個人班型比例最大 gap",
+            page.objective_info_button.toolTip(),
+        )
+        self.assertIn(
+            "最小化，數值越小越好",
+            page.objective_info_button.toolTip(),
         )
         visible_status_text = "\n".join(
             (
@@ -426,10 +456,27 @@ class GuiExecutionTests(unittest.TestCase):
         )
         self.assertEqual(
             page.progress_subtask_label.text(),
-            "A 類第一偏好基準 1 / 2",
+            "目前：A 類第一偏好基準 1 / 2",
         )
         self.assertFalse(page.progress_subtask_frame.isHidden())
         self.assertTrue(page.metrics_section.isHidden())
+
+        page.show_message(
+            {
+                "type": "progress",
+                "phase": ExecutionPhase.OPTIMIZATION.value,
+                "kind": ProgressEventKind.STEP_COMPLETED.value,
+                "message": "正式最佳化已完成",
+                "details": {
+                    "activity": "formal_optimization_completed",
+                    "has_feasible_solution": True,
+                    "formal_stages_completed": 16,
+                    "formal_stage_total": 16,
+                },
+            }
+        )
+        self.assertEqual(page.status_label.text(), "排班品質最佳化已完成")
+        self.assertEqual(page.status_indicator.property("state"), "running")
 
         page.show_message(
             {
@@ -465,11 +512,13 @@ class GuiExecutionTests(unittest.TestCase):
             }
         )
         self.assertEqual(page.status_label.text(), "正式班表已完成")
+        self.assertEqual(page.status_indicator.property("state"), "running")
         self.assertEqual(
             page.status_detail_label.text(),
             "正在搜尋同品質候選班表",
         )
         self.assertEqual(page.progress_count_label.text(), "候選搜尋 7 / 100")
+        self.assertFalse(page.stop_candidate_button.isHidden())
         self.assertFalse(page.progress_section.isHidden())
         self.assertTrue(page.metrics_section.isHidden())
 
@@ -631,7 +680,7 @@ class GuiExecutionTests(unittest.TestCase):
         self.assertEqual(page.validation_label.text(), "通過（PASS）")
         self.assertIn("Excel：未選擇", page.output_label.text())
         self.assertIn("尚未完成", page.status_detail_label.text())
-        self.assertEqual(page.progress_count_label.text(), "最佳化進度 5 / 10")
+        self.assertEqual(page.progress_count_label.text(), "整體最佳化 5 / 10")
         self.assertIn("正式流程 8 / 16", page.progress_technical_label.text())
         self.assertEqual(page.metric_values["incumbent"].text(), "19")
         self.assertEqual(page.metric_values["best_bound"].text(), "18")

@@ -114,9 +114,21 @@ QLabel#executionMetricsTitle {
     font-weight: 600;
 }
 
+QLabel#executionProgressCount {
+    font-size: 10.5pt;
+}
+
 QLabel#executionProgressTitle {
     color: $TEXT;
     font-weight: 600;
+}
+
+QToolButton#executionObjectiveInfo,
+QToolButton#executionObjectiveInfo:hover,
+QToolButton#executionObjectiveInfo:pressed {
+    background-color: transparent;
+    border: none;
+    padding: 0;
 }
 
 QFrame#executionProgressSubtask {
