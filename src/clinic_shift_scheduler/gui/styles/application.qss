@@ -61,24 +61,28 @@ QFrame#executionStatusSummary {
 }
 
 QLabel#executionStatusIndicator {
-    color: $TEXT_MUTED;
+    color: $STATUS_NEUTRAL;
     font-size: 12pt;
 }
 
 QLabel#executionStatusIndicator[state="running"] {
-    color: $PRIMARY;
+    color: $STATUS_RUNNING;
 }
 
 QLabel#executionStatusIndicator[state="success"] {
-    color: $SUCCESS;
+    color: $STATUS_SUCCESS;
 }
 
 QLabel#executionStatusIndicator[state="warning"] {
-    color: $WARNING;
+    color: $STATUS_WARNING;
 }
 
 QLabel#executionStatusIndicator[state="error"] {
-    color: #A94442;
+    color: $STATUS_ERROR;
+}
+
+QLabel#executionStatusIndicator[state="cancelled"] {
+    color: $STATUS_CANCELLED;
 }
 
 QLabel#executionStatusPrimary {

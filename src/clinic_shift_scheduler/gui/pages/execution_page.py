@@ -286,21 +286,23 @@ class ExecutionPage(InputPage):
         summary_layout = QHBoxLayout(self.status_summary)
         summary_layout.setContentsMargins(0, 0, 0, 8)
         summary_layout.setSpacing(10)
-        self.status_indicator = QLabel("●")
-        self.status_indicator.setObjectName("executionStatusIndicator")
-        self.status_indicator.setProperty("state", "neutral")
-        summary_layout.addWidget(
-            self.status_indicator,
-            0,
-            Qt.AlignmentFlag.AlignTop,
-        )
         summary_text_layout = QVBoxLayout()
         summary_text_layout.setContentsMargins(0, 0, 0, 0)
         summary_text_layout.setSpacing(2)
+        # 狀態點與主文字放在同一列，讓圓點與單行文字垂直置中對齊；
+        # 多行或顯示次要說明時，圓點仍對齊主要文字區塊。
+        status_title_row = QHBoxLayout()
+        status_title_row.setContentsMargins(0, 0, 0, 0)
+        status_title_row.setSpacing(10)
+        self.status_indicator = QLabel("●")
+        self.status_indicator.setObjectName("executionStatusIndicator")
+        self.status_indicator.setProperty("state", "neutral")
+        status_title_row.addWidget(self.status_indicator)
         self.status_label = QLabel("資料準備完成後即可執行排班。")
         self.status_label.setObjectName("executionStatusPrimary")
         self.status_label.setWordWrap(True)
-        summary_text_layout.addWidget(self.status_label)
+        status_title_row.addWidget(self.status_label, 1)
+        summary_text_layout.addLayout(status_title_row)
         self.status_detail_label = QLabel()
         self.status_detail_label.setObjectName("executionStatusDetail")
         self.status_detail_label.setWordWrap(True)
@@ -1153,7 +1155,7 @@ class ExecutionPage(InputPage):
         self._set_status_summary(
             "排班已終止" if cancelled else "排班未完成",
             "已保留終止當下的求解進度。" if cancelled else rendered,
-            state="neutral" if cancelled else "error",
+            state="cancelled" if cancelled else "error",
         )
         if not cancelled:
             self._hide_progress_presentation()

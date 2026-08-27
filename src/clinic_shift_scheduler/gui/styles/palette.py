@@ -16,6 +16,15 @@ SUCCESS = "#3C7257"
 WARNING = "#8B6828"
 ERROR = "#9B4646"
 
+# Execution-page status indicator colors (deliberately more vivid than the
+# low-saturation UI palette so the small dot remains distinguishable).
+STATUS_NEUTRAL = "#9CA3A8"
+STATUS_RUNNING = "#4A7FA5"
+STATUS_SUCCESS = "#4E9268"
+STATUS_WARNING = "#CB9A3E"
+STATUS_ERROR = "#C15B54"
+STATUS_CANCELLED = "#767D82"
+
 
 def stylesheet_tokens() -> dict[str, str]:
     return {
@@ -31,4 +40,10 @@ def stylesheet_tokens() -> dict[str, str]:
         "SUCCESS": SUCCESS,
         "WARNING": WARNING,
         "ERROR": ERROR,
+        "STATUS_NEUTRAL": STATUS_NEUTRAL,
+        "STATUS_RUNNING": STATUS_RUNNING,
+        "STATUS_SUCCESS": STATUS_SUCCESS,
+        "STATUS_WARNING": STATUS_WARNING,
+        "STATUS_ERROR": STATUS_ERROR,
+        "STATUS_CANCELLED": STATUS_CANCELLED,
     }
