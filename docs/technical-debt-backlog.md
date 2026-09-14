@@ -1,109 +1,230 @@
 # Technical Debt Backlog
 
-本文件只記錄目前尚待處理的技術債，作為專案後續維護與重構清單。
+本文件只記錄目前尚待處理的技術債、已確認的行為風險，以及需要正式決策的產品問題。最近一次完整盤點日期為 2026-09-15。
 
 處理原則：
 
-- 每完成並驗證一項，就直接從本文件刪除該項，不保留已完成清單。
-- 重構不得改變既有 v1 排班規則、正式最佳化順序或輸出結果契約，除非另有明確的規格決策。
-- 涉及 solver、metrics 與 validator 的調整，必須維持三者重算結果一致，並執行完整測試。
-- 其餘項目可依風險與開發節奏處理，不必為了開始前端先全部清除。
+- 每完成並驗證一項，就直接從本文件刪除整個對應項目，不保留已完成清單；完成歷史由 Git 記錄。
+- 項目前綴用來區分 `[行為修正]`、`[架構重構]`、`[純重構]`、`[產品決策]`、`[文件]` 與 `[效能實驗]`。
+- 純重構不得改變既有 v1 排班規則、正式最佳化順序、狀態語意、objective vector 或輸出契約。
+- 涉及 solver、metrics 與 validator 的調整，必須維持三者計算定義一致，並執行完整測試。
+- 產品決策與可能改變既有行為的項目，必須先確認規格，不能混在重構中順便修改。
+- 文件中的行號與程式規模會隨開發變動；判斷是否完成應以責任邊界與完成條件為準。
 
-## 高優先技術債
+## 高優先：可靠性與架構邊界
 
-### 拆分過大的核心函式與模組
+### [行為修正] 讓正式輸出成為整組交易
 
-目前主要複雜點包括：
-
-- `build_optimization_model()` 同時建立多類指標與公平性目標。
-- `recompute_schedule_metrics()` 同時重算個人、類別與群組統計。
-- `validate_schedule_result()` 同時驗證硬性規則與所有鎖定目標。
-- `solve_lexicographic()` 同時管理 benchmark、分階段求解與最佳值鎖定。
-- `run_schedule_file()` 同時協調輸入、求解、正式輸出與候選處理。
-- `run_prechecks()` 同時執行多種容量與匹配檢查。
-
-預計依責任拆分模型指標建立、類別偏好、個人公平、共同公平、求解控制、結果重算、硬性驗證與應用流程；避免只把程式搬成更多大型 helper 而沒有形成清楚邊界。
-
-### 讓正式輸出成為整組交易
-
-目前 JSON、Excel、PDF 各自原子寫入，但三份正式檔案依序提交；後一種媒介失敗時可能留下不完整或不同版本的輸出組合。
+目前 JSON、Excel、PDF 各自使用原子寫入，但三種正式檔案仍依序提交。後一種媒介產製失敗時，可能留下不完整或跨版本混合的正式輸出。
 
 預計處理：
 
-- 先在 staging directory 產生並驗證全部正式檔案。
-- 全部成功後才替換正式輸出。
-- 失敗時清理暫存產物並保留上一組完整結果。
-- 候選班表輸出採用相同策略或明確標示部分成功狀態。
+- 先在同一個 staging directory 產生並重新驗證本次要求的全部正式檔案。
+- 全部成功後才一次提交成新的正式輸出組合；失敗時保留上一組完整結果。
+- 明確處理 overwrite、舊檔清理及提交途中失敗的復原策略。
+- 候選班表採相同策略，或明確記錄每份候選的完整／失敗狀態。
 
-## 中優先技術債
+完成條件：模擬 JSON、Excel、PDF 任一階段失敗時，不會留下可被誤認為同一批結果的混合檔案，且相關錯誤路徑有自動化測試。
 
-### 明確化 Excel 與 PDF 的版面契約
+### [行為修正] 將正式排班成功與候選處理失敗解耦
 
-PDF exporter 目前依賴固定 sheet 名稱、固定儲存格座標與求解資訊文字標籤。這符合 PDF 由正式 Excel 產生的需求，但 Excel 版面微調容易意外破壞 PDF。
-
-預計處理：
-
-- 集中 sheet 名稱、區塊位置與必要欄位定義。
-- 為 workbook contract 加入版本或 metadata。
-- PDF 讀取結構化定位資訊，避免散落固定座標。
-
-### 拆分大型最佳化測試模組
-
-`tests/test_optimization.py` 集中涵蓋多個不同責任，後續新增案例時不易定位與維護。
+正式班表已輸出後，候選搜尋、候選資料夾重設或候選匯出若發生例外，仍可能沿著整體執行失敗路徑回報，讓 GUI 看起來像正式排班也失敗。
 
 預計處理：
 
-- 依 TARGET、類別偏好、比例公平、整數公平、共同公平與候選解拆分測試模組。
-- 加入測試收集數或明確的 policy coverage，避免測試被改名後靜默失效。
+- 正式排班與候選處理使用可區分的結果及錯誤狀態。
+- 正式輸出成功後的候選錯誤只回報候選處理失敗，不撤銷正式成功狀態。
+- GUI、終端訊息及執行協定清楚呈現「正式結果可用，但候選處理未完成」。
 
-### 改善發布依賴的可重現性
+完成條件：候選搜尋、清理或匯出故障的測試中，正式結果仍可開啟，GUI 不會顯示整體排班失敗。
 
-部分發布 dependencies 只限制版本範圍，重建同一版本時可能取得不同套件版本。目前封裝版本與專案版本已有一致性測試及建置前檢查，但仍分別儲存在兩份設定中。
+### [行為修正] 防止多個程序同時寫入同一份執行產物
+
+GUI 目前能阻止同一個 controller 重複啟動，但兩個 GUI、兩個 quick runner，或 GUI 與 quick runner 同時執行時，仍可能競爭 `runtime/`、`output/` 與候選輸出目錄。
 
 預計處理：
 
-- 確認 PyInstaller 產物與 smoke test 不受影響。
-- 評估為正式發布保存 tested lock／constraints 或完整 dependency manifest。
-- 評估讓 `pyproject.toml` 與 packaging config 改由單一來源產生版本值。
+- 建立跨程序執行鎖，鎖定範圍以同一個 workspace／輸出目標為準。
+- 鎖定失敗時提供可理解的訊息，不進入會覆寫產物的流程。
+- 程序異常結束後不能留下永久無法解除的假鎖。
 
-## 低優先技術債
+完成條件：自動化或手動整合測試能證明第二個執行程序會被安全拒絕，第一個程序的輸出不受破壞。
 
-### 合併重複的小型基礎功能
+### [架構重構] 修正 application layer 反向依賴 GUI
 
-目前可見的重複包括：
+`authoring_application.py` 與 `config_application.py` 目前會匯入 GUI 的 drafts／presenters。這讓本應可由 CLI、測試與未來其他介面共用的 application service 依賴 PySide6 介面層的目錄結構。
+
+預計處理：
+
+- 將中立的 draft／mapping contract 移到非 GUI 模組，或讓 application service 只接受正式 document／純資料 contract。
+- GUI presenter 負責把 widget draft 轉成 application 接受的資料，不讓 application 反向知道 GUI。
+- 加入架構測試，禁止 domain／application 匯入 `clinic_shift_scheduler.gui`。
+
+完成條件：authoring 與 config application service 可在不載入 GUI package 的情況下使用，既有 GUI 開啟、驗證、儲存與月份複製行為不變。
+
+### [產品決策] 明確界定 GUI 能編輯的正式輸入能力
+
+目前 GUI 的簡化操作未完整呈現 authoring schema 的所有能力：
+
+- 正職 schema 可明確提供 `available_slots`，但 GUI 主要採「預設可排，只編輯不可排」，開啟既有資料時可能無法忠實呈現這類限制。
+- 純 GUI 建立或從上月複製時會清空假日，而假日標記區目前不可編輯，因此無法只靠 GUI 啟用假日公平性資料。
+- 兼職 availability 可帶職務範圍，但簡化的日期／時段介面未必能完整編輯 role-scoped availability。
+
+需要先決定：正式支援這些欄位的編輯、以唯讀方式保留並提示，或在 GUI 開啟時明確拒絕無法無損編輯的文件。不可默默遺失或改寫使用者原有語意。
+
+完成條件：決策寫入前端文件，並以 round-trip 測試證明 GUI 對所有宣稱支援的輸入都能無損重新開啟與儲存；不支援的資料有明確且不破壞原檔的處理方式。
+
+## 中優先：可維護性與契約
+
+### [純重構] 拆分最佳化大型模組與求解協調流程
+
+`optimization.py` 同時負責模型指標、正式目標、conditional benchmark、嚴格分階段求解、進度回報、中止保留與同品質候選搜尋。主要大型函式包括 `build_optimization_model()`、`_formal_objective_specs()`、`_discover_preference_benchmarks()`、`solve_lexicographic()` 及其內部 `execute_specs()`。
+
+預計依既有 contract 拆成：
+
+- Optimization model builder：只建立核心變數、硬限制與可重用指標。
+- CP-SAT stage runner：只負責單次求解、進度、取消與 solver statistics。
+- Lexicographic session：只負責 stage／benchmark 次序、最佳值鎖定與整體狀態。
+- Equivalent solution service：只負責正式結果完成後的同品質候選處理。
+- 集中的 stage result factory：消除多個建構分支重複填寫欄位。
+
+完成條件：正式 policy 順序、每階段結果、objective vector、最終 assignment、進度事件、取消語意及完整測試結果保持不變；新模組均有單一清楚責任。
+
+### [純重構] 拆分 metrics、獨立 validator、precheck 與 runner 的責任
+
+`recompute_schedule_metrics()`、`validate_schedule_result()`、`run_prechecks()` 與 `run_schedule_file()` 都承擔多種不同工作，閱讀與局部測試成本偏高。
+
+預計處理：
+
+- metrics 依個人、類別／群組、整體與 objective metrics 分段計算，再由單一入口組合。
+- validator 依需求覆蓋、資格與互斥、可排性、班次界限、每日模式及 locked objectives 分成獨立 validation passes。
+- precheck 依總容量、個人容量、日期／時段角色匹配分成可單獨測試的 checks。
+- runner 拆出正式流程協調、正式輸出提交與候選處理協調。
+
+獨立 validator 必須繼續只依 assignment 與正規化輸入重算，不可為了減少重複而讀取 solver 的衍生變數。允許共享的只有正式政策常數、合法班型集合與比例 rounding 等純定義。
+
+完成條件：每個子責任可獨立測試，完整測試與代表性月份結果不變，validator 的獨立性有測試保護。
+
+### [純重構] 收斂 ExecutionPage 的 presentation patch stack
+
+`execution_page.py` 已累積執行前、最佳化進度、中止保留、候選處理、完成與錯誤等多條更新路徑；同一批 label、可見性與捲動狀態由多個函式分別修補，容易再次出現資訊殘留或版面跳動。
+
+預計處理：
+
+- 建立純粹的 `ExecutionPresentation` 映射：由現有 execution snapshot／event 單向產生要顯示的文字、可見性、按鈕狀態及 metric rows。
+- renderer 只套用 presentation，不保存新的業務狀態，也不另建第二套 execution state machine。
+- 把 log 自動捲動、文字選取與外層頁面定位視為獨立 viewport policy。
+
+完成條件：資料準備、最佳化、已有可行解、驗證、輸出、候選處理、完成、取消、中止保留與失敗皆有 presentation 測試；畫面不重複顯示總耗時或殘留前一 phase 指標。
+
+### [架構重構] 明確化 Excel 與 PDF 的版面契約
+
+PDF exporter 目前依賴 Excel 的固定 sheet 順序／名稱、固定儲存格及求解資訊文字標籤。這符合「PDF 由正式 Excel 月班表產生」的需求，但 Excel 版面微調容易意外破壞 PDF。
+
+預計處理：
+
+- 集中 sheet 名稱、必要區塊、儲存格位置與欄位標籤為 `WorkbookLayoutContract`。
+- 為 workbook contract 加入明確版本及機器可讀 metadata；可評估 named ranges 或隱藏 metadata sheet。
+- PDF exporter 只依契約定位，不散落硬編碼座標與顯示文字。
+
+完成條件：Excel 版面契約有專門測試；調整非契約樣式不會破壞 PDF，而破壞必要結構時會得到明確錯誤。
+
+### [架構重構] 移除 authoring model 與 parser 的反向匯入
+
+`WeeklyAuthoringDocument.from_dict()` 目前透過函式內匯入呼叫 authoring parser，形成 model／parser 的隱性循環，也讓 domain model 同時承擔反序列化協調責任。
+
+預計處理：
+
+- 將 dict → document factory 留在 parser／codec／application 邊界。
+- 若需保留便利 API，應由無循環依賴的 facade 提供，而不是 model 反向匯入 parser。
+
+完成條件：model 模組不匯入 parser，既有正式 JSON 解析、錯誤訊息與 round-trip 測試不變。
+
+### [文件] 對齊規格、README、前端規畫與目前實作
+
+目前已確認的落差包括：
+
+- 《診所排班系統.md》一處仍暗示正職可使用 TARGET，但正式規則與實作已是正職 EXACT／RANGE、兼職可使用 TARGET。
+- 前端規畫仍有舊頁面名稱與只描述兩個設定分頁的內容；目前已有「正職不可排」、「兼職時段」及第三個「詳情」設定頁。
+- README 仍有部分舊的前端流程／頁面名稱。
+- README 仍可能讓人誤解 packaging config 保存版本號；目前正式唯一來源是 `packaging/version.txt`。
+
+完成條件：上述文件都與程式及正式 schema 一致，且不新增另一套規則說法。
+
+## 低優先：日常維護品質
+
+### [純重構] 拆分大型測試模組
+
+`tests/test_optimization.py`、runner 與部分 GUI 測試集中涵蓋多個責任，後續新增案例時不易定位與維護。
+
+預計依 TARGET／PT、conditional preference、比例公平、整數公平、共同公平、進度與取消、同品質候選等責任拆分；同時保留 policy coverage 或測試收集檢查，避免搬移後靜默漏測。
+
+### [純重構] 合併真正同語意的小型基礎功能
+
+目前可評估的重複包括：
 
 - JSON、Excel、PDF 與中間輸入的 temporary file＋replace 流程。
-- app config、weekly authoring 與 canonical validation 的基本型別解析工具。
+- app config、weekly authoring 與 canonical validation 的部分基本型別解析。
 
-應只抽出具有相同語意的部分，避免建立過度抽象的通用工具。
+只抽取錯誤語意、生命週期與原子性要求完全相同的部分；不同媒介的驗證與提交規則不得被過度抽象掩蓋。
 
-### 清理過時命名與註解
+### [純重構] 清理過時命名與內部用語
 
-目前仍有 `implemented_objective_prefix_optimal`，以及內部「候選診斷」與使用者訊息「候選處理」混用等歷史名稱。
+目前仍可見 `implemented_objective_prefix_optimal`，以及內部「candidate diagnostic」與使用者介面「候選處理」並存的歷史名稱。
 
-預計處理：
+若涉及公開 JSON 欄位或既有 API，需先決定向後相容或版本策略；只處理內部名稱時應同步更新 docstring、測試與 CLI 訊息。
 
-- 統一目前完整 v1 的正式名稱。
-- 更新 package description、docstrings、README 與 CLI help。
-- 若涉及公開 JSON 欄位或 API，需先決定相容與版本策略。
+### [可靠性] 保存未預期錯誤的本機診斷資訊
 
-### 加入基本靜態品質檢查與 CI
+execution worker 對未預期例外主要回傳字串。一般使用者需要簡短訊息，但維護者仍需要可追查的 traceback 與執行識別資訊。
 
-目前主要依賴 pytest，尚未配置格式、lint、型別檢查與持續整合。
+預計加入不含敏感排班內容的本機診斷 log／correlation ID，並明確規定保存位置、輪替與隱私邊界。
 
-預計處理：
+### [工程化] 加入基本靜態品質檢查與 CI
 
-- 選擇並配置最小必要的 formatter／linter。
-- 評估 Pyright 或 Mypy，優先覆蓋 contracts、models 與 application service。
-- CI 至少執行完整 pytest、靜態檢查及必要的 packaging contract tests。
-- Windows 封裝與 native smoke test 可保留為獨立、較低頻率工作。
+目前主要依賴 pytest，尚未建立固定的 formatter／linter、型別檢查與持續整合流程。
 
-### 隔離已知版本相容 workaround
+預計採最小必要組合；型別檢查優先覆蓋 contracts、models、application service 與 execution protocol。CI 至少執行完整 pytest、靜態檢查及 packaging contract tests；Windows native 封裝 smoke test 可使用獨立、較低頻率工作。
 
-TARGET 絕對偏差目前包含針對 OR-Tools 9.12 `AddAbsEquality` 的已知避錯寫法；runner 也包含供 VS Code 直接執行單檔的 bootstrap。
+### [發布] 改善依賴重建的可重現性
 
-這些特例目前都有實際用途，不應直接刪除，但應：
+版本號已集中由 `packaging/version.txt` 管理，不再是待處理問題。目前剩餘風險是部分 dependencies 只限制版本範圍，同一發布版日後重建時可能取得不同套件版本。
 
-- 保留針對性 regression test。
-- 在未來升級 OR-Tools 時重新驗證是否仍需要 workaround。
-- 將 VS Code／封裝入口特例限制在 adapter 層，不進入 application service 或 domain core。
+預計為正式發布保存 tested constraints／lock 或完整 dependency manifest，同時維持 `pyproject.toml` 作為專案依賴宣告，並驗證 OR-Tools、PySide6、openpyxl、ReportLab 與 PyInstaller 的實際封裝組合。
+
+### [維護] 隔離已知版本相容 workaround
+
+TARGET 絕對偏差包含針對 OR-Tools 9.12 `AddAbsEquality` 的避錯寫法；入口亦包含供 VS Code 直接執行單檔的 bootstrap。這些都有實際用途，不應直接刪除。
+
+預計維持針對性 regression test；升級 OR-Tools 時重新驗證 workaround；將入口／封裝特例限制在 adapter 層，不進入 application service 或 domain core。
+
+## 效能實驗清單
+
+下列項目不是已證實的缺陷，也不得直接改變正式求解政策。每次實驗都必須使用代表性月份，比較完整 objective vector、validation、狀態、時間及可重現性。
+
+### [效能實驗] 建立可比較的 stage profiling 基準
+
+- 保存非敏感問題規模：天數、人數、正兼職數、assignment variables、availability ratio、demand units。
+- 保存 hard feasibility、各 benchmark、各正式 stage、首次可行解與完整最佳化時間。
+- 先找出真正耗時的 benchmark／stage，再決定優化位置；不要優先微調 JSON、GUI 或已低於毫秒／秒級的前處理。
+
+### [效能實驗] 評估 CP-SAT 多 worker
+
+目前正式求解偏向單 worker。可用同一批月份比較 1、2、4、8 workers 的時間、記憶體與穩定性。多 worker 可能改變同品質 assignment 與重現性，不能只看速度就直接成為正式預設。
+
+### [效能實驗] 評估分階段 solution hints
+
+後續 lexicographic stage 可嘗試以前一階段 assignment 作為 hint。驗收時必須確認 objective vector 與 validation 完全一致，並明確接受或拒絕代表性同品質班表可能改變的影響。
+
+### [效能實驗] 依 profiling 評估延遲建立目標衍生變數
+
+目前目標衍生變數相對核心 assignment model 的增量有限，預期不是第一優先。只有 profiling 證明特定指標建立或搜尋造成顯著成本時，才評估按 stage 延遲建立，避免為小幅收益增加模型生命週期複雜度。
+
+## 不應誤當成技術債的既有設計
+
+- 嚴格 lexicographic optimization 需要多次 CP-SAT 求解與逐層鎖定；這是正式需求，不應為縮短時間任意合併目標。
+- 獨立結果 validator 不依賴 solver 衍生狀態，是必要的可信度邊界；重構時必須保留。
+- GUI 透過獨立 process 執行排班，可避免 Qt event loop 被 solver 阻塞，方向正確。
+- 正式班表完成後才進行同品質候選處理，使候選工作可以獨立停止，方向正確。
+- output model 維持媒介無關，Excel／JSON／PDF 邏輯留在 exporters，方向正確。
+- 單一檔案目前已採原子寫入；待補的是多媒介輸出組合的交易性，不應重寫已正常運作的單檔機制。
