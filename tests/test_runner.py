@@ -38,6 +38,7 @@ import clinic_shift_scheduler.console_app as console_module
 from clinic_shift_scheduler.cli import main
 from clinic_shift_scheduler.time_formatting import format_seconds_with_minutes
 import clinic_shift_scheduler.runner as runner_module
+from clinic_shift_scheduler.run_lock import ScheduleRunLockUnavailableError
 import run_scheduler
 
 from tests.fixtures import minimal_valid_input, synthetic_schedule_input
@@ -55,6 +56,20 @@ def progress_event(
 
 
 class ScheduleRunnerTests(unittest.TestCase):
+    def test_active_run_lock_rejects_request_before_reading_input(self) -> None:
+        lock_path = Path("output/.clinic-shift-scheduler.lock")
+        with patch.object(
+            runner_module,
+            "schedule_run_lock",
+            side_effect=ScheduleRunLockUnavailableError(lock_path),
+        ), patch.object(runner_module, "_load_payload") as load_payload:
+            with self.assertRaises(ScheduleRunError) as raised:
+                run_schedule_file("missing.json", output_directory="output")
+
+        load_payload.assert_not_called()
+        self.assertEqual(raised.exception.issues[0].code, "schedule_run_locked")
+        self.assertEqual(raised.exception.issues[0].path, str(lock_path))
+
     def test_cancelled_request_stops_before_reading_input(self) -> None:
         cancellation = CancellationToken()
         cancellation.cancel()

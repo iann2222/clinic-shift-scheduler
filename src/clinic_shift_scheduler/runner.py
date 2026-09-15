@@ -57,6 +57,10 @@ from .json_io import read_json_object
 from .models import NormalizedScheduleInput
 from .output import ExecutionTiming, FormalScheduleOutput, finalize_schedule_output
 from .precheck import PrecheckResult, run_prechecks
+from .run_lock import (
+    ScheduleRunLockUnavailableError,
+    schedule_run_lock,
+)
 from .validation import validate_and_normalize
 from .optimization import (
     EquivalentSolutionDiagnosticConfig,
@@ -487,6 +491,62 @@ def _export_preserved_schedule(
 
 
 def run_schedule_file(
+    input_path: str | Path,
+    *,
+    output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY,
+    intermediate_directory: str | Path = DEFAULT_INTERMEDIATE_DIRECTORY,
+    overwrite: bool = False,
+    equivalent_solution_diagnostic_config: (
+        EquivalentSolutionDiagnosticConfig | None
+    ) = None,
+    candidate_export_config: CandidateExportConfig | None = None,
+    provisional_export_config: ProvisionalExportConfig | None = None,
+    progress_interval_seconds: float = 5.0,
+    progress: ProgressCallback | None = None,
+    diagnostic_progress: ProgressCallback | None = None,
+    cancellation: CancellationToken | None = None,
+    preservation: PreservationToken | None = None,
+) -> ScheduleRunResult | PreservedScheduleRunResult:
+    """Run one serialized scheduling workflow for the output directory."""
+
+    try:
+        with schedule_run_lock(output_directory):
+            return _run_schedule_file_locked(
+                input_path,
+                output_directory=output_directory,
+                intermediate_directory=intermediate_directory,
+                overwrite=overwrite,
+                equivalent_solution_diagnostic_config=(
+                    equivalent_solution_diagnostic_config
+                ),
+                candidate_export_config=candidate_export_config,
+                provisional_export_config=provisional_export_config,
+                progress_interval_seconds=progress_interval_seconds,
+                progress=progress,
+                diagnostic_progress=diagnostic_progress,
+                cancellation=cancellation,
+                preservation=preservation,
+            )
+    except ScheduleRunLockUnavailableError as error:
+        message = (
+            "另一個排班程序正在使用相同的輸出資料夾；"
+            "請等待該程序完成後再試。"
+        )
+        raise ScheduleRunError(
+            message,
+            issues=(
+                DiagnosticIssue(
+                    code="schedule_run_locked",
+                    path=str(error.path),
+                    message=message,
+                    phase=ExecutionPhase.APPLICATION,
+                    details={"lock_path": str(error.path)},
+                ),
+            ),
+        ) from error
+
+
+def _run_schedule_file_locked(
     input_path: str | Path,
     *,
     output_directory: str | Path = DEFAULT_OUTPUT_DIRECTORY,

@@ -13,18 +13,6 @@
 
 ## 高優先：可靠性與架構邊界
 
-### [行為修正] 防止多個程序同時寫入同一份執行產物
-
-GUI 目前能阻止同一個 controller 重複啟動，但兩個 GUI、兩個 quick runner，或 GUI 與 quick runner 同時執行時，仍可能競爭 `runtime/`、`output/` 與候選輸出目錄。
-
-預計處理：
-
-- 建立跨程序執行鎖，鎖定範圍以同一個 workspace／輸出目標為準。
-- 鎖定失敗時提供可理解的訊息，不進入會覆寫產物的流程。
-- 程序異常結束後不能留下永久無法解除的假鎖。
-
-完成條件：自動化或手動整合測試能證明第二個執行程序會被安全拒絕，第一個程序的輸出不受破壞。
-
 ### [架構重構] 修正 application layer 反向依賴 GUI
 
 `authoring_application.py` 與 `config_application.py` 目前會匯入 GUI 的 drafts／presenters。這讓本應可由 CLI、測試與未來其他介面共用的 application service 依賴 PySide6 介面層的目錄結構。
