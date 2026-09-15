@@ -778,6 +778,110 @@ class ScheduleRunnerTests(unittest.TestCase):
             EquivalentSolutionDiagnosticStatus.INTERRUPTED,
         )
 
+    def test_candidate_search_failure_does_not_invalidate_formal_result(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            input_path = root / "input.json"
+            input_path.write_text(
+                json.dumps(minimal_valid_input(), ensure_ascii=False),
+                encoding="utf-8",
+            )
+            events: list[ProgressEvent] = []
+            with patch.object(
+                runner_module,
+                "diagnose_equivalent_solutions",
+                side_effect=RuntimeError("candidate search failed"),
+            ):
+                result = run_schedule_file(
+                    input_path,
+                    output_directory=root / "output",
+                    intermediate_directory=root / "runtime" / "expanded-input",
+                    equivalent_solution_diagnostic_config=(
+                        EquivalentSolutionDiagnosticConfig(
+                            max_alternatives=1,
+                            max_time_seconds=1,
+                        )
+                    ),
+                    progress=events.append,
+                )
+
+            self.assertTrue(result.json_path.is_file())
+            self.assertTrue(result.excel_path.is_file())
+            self.assertTrue(result.pdf_path.is_file())
+            self.assertIsNotNone(result.candidate_processing_issue)
+            assert result.candidate_processing_issue is not None
+            self.assertEqual(
+                result.candidate_processing_issue.code,
+                "candidate_processing_failed",
+            )
+            self.assertIn(
+                "candidate search failed",
+                result.candidate_processing_issue.message,
+            )
+            self.assertTrue(
+                any(
+                    "正式班表已完成，但候選處理失敗" in event.message
+                    for event in events
+                )
+            )
+
+    def test_candidate_export_failure_does_not_invalidate_formal_result(
+        self,
+    ) -> None:
+        def find_one_candidate(result, config, **callbacks):
+            callbacks["candidate_found"](1, result.assignments)
+            return EquivalentSolutionDiagnosticResult(
+                status=EquivalentSolutionDiagnosticStatus.EXACT_COUNT,
+                alternative_count=1,
+                search_limit=config.max_alternatives,
+                time_limit_seconds=config.max_time_seconds,
+                wall_time_seconds=0.01,
+            )
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            input_path = root / "input.json"
+            input_path.write_text(
+                json.dumps(minimal_valid_input(), ensure_ascii=False),
+                encoding="utf-8",
+            )
+            with patch.object(
+                runner_module,
+                "diagnose_equivalent_solutions",
+                side_effect=find_one_candidate,
+            ), patch.object(
+                runner_module,
+                "_export_candidate_schedules",
+                side_effect=RuntimeError("candidate export failed"),
+            ):
+                result = run_schedule_file(
+                    input_path,
+                    output_directory=root / "output",
+                    intermediate_directory=root / "runtime" / "expanded-input",
+                    equivalent_solution_diagnostic_config=(
+                        EquivalentSolutionDiagnosticConfig(
+                            max_alternatives=1,
+                            max_time_seconds=1,
+                        )
+                    ),
+                    candidate_export_config=CandidateExportConfig(
+                        max_candidates=1,
+                        formats=("json",),
+                    ),
+                )
+
+            self.assertEqual(result.output.status, FeasibilityStatus.OPTIMAL)
+            self.assertTrue(result.json_path.is_file())
+            self.assertIsNotNone(result.candidate_processing_issue)
+            assert result.candidate_processing_issue is not None
+            self.assertIn(
+                "candidate export failed",
+                result.candidate_processing_issue.message,
+            )
+            self.assertEqual(result.candidate_exports, ())
+
 
 if __name__ == "__main__":
     unittest.main()

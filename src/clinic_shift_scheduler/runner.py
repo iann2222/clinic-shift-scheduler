@@ -34,6 +34,7 @@ from .authoring import WEEKLY_AUTHORING_VERSION, expand_weekly_template
 from .exporters import (
     DEFAULT_OUTPUT_DIRECTORY,
     build_provisional_output_paths,
+    export_formal_result_bundle,
     export_result_excel,
     export_result_json,
     export_provisional_result_excel,
@@ -44,6 +45,7 @@ from .exporters import (
 from .events import (
     CancellationToken,
     DiagnosticIssue,
+    DiagnosticSeverity,
     ExecutionPhase,
     OperationCancelledError,
     PreservationToken,
@@ -118,6 +120,7 @@ class ScheduleRunResult:
     candidate_exports: tuple[CandidateScheduleExport, ...]
     candidate_export_seconds: float
     total_execution_seconds: float
+    candidate_processing_issue: DiagnosticIssue | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -769,30 +772,18 @@ def run_schedule_file(
         phase=ExecutionPhase.OUTPUT,
         kind=ProgressEventKind.STEP_STARTED,
     )
-    step_started = perf_counter()
-    json_path = export_result_json(
+    formal_bundle = export_formal_result_bundle(
         data,
         output,
         output_directory=output_directory,
         overwrite=overwrite,
     )
-    json_export_seconds = perf_counter() - step_started
-
-    step_started = perf_counter()
-    excel_path = export_result_excel(
-        data,
-        output,
-        output_directory=output_directory,
-        overwrite=overwrite,
-    )
-    excel_export_seconds = perf_counter() - step_started
-
-    step_started = perf_counter()
-    pdf_path = export_schedule_pdf_from_excel(
-        excel_path,
-        overwrite=overwrite,
-    )
-    pdf_export_seconds = perf_counter() - step_started
+    json_path = formal_bundle.json_path
+    excel_path = formal_bundle.excel_path
+    pdf_path = formal_bundle.pdf_path
+    json_export_seconds = formal_bundle.json_export_seconds
+    excel_export_seconds = formal_bundle.excel_export_seconds
+    pdf_export_seconds = formal_bundle.pdf_export_seconds
 
     formal_output_seconds = perf_counter() - started
     file_export_seconds = (
@@ -838,78 +829,108 @@ def run_schedule_file(
     equivalent_solution_diagnostic_seconds = 0.0
     candidate_export_seconds = 0.0
     candidate_exports: tuple[CandidateScheduleExport, ...] = ()
-    candidate_output_directory = _reset_candidate_output_directory(
-        output_directory
+    candidate_processing_issue: DiagnosticIssue | None = None
+    candidate_output_directory = (
+        Path(output_directory).resolve() / CANDIDATE_OUTPUT_DIRECTORY_NAME
     )
-    if equivalent_solution_diagnostic_config is not None:
-        resolved_diagnostic_config = _resolve_diagnostic_config(
-            equivalent_solution_diagnostic_config,
-            optimization_seconds,
+    candidate_progress = diagnostic_progress or progress
+    try:
+        candidate_output_directory = _reset_candidate_output_directory(
+            output_directory
         )
-        candidate_progress = diagnostic_progress or progress
-        _notify(
-            candidate_progress,
-            "開始搜尋同品質候選班表"
-            f"（搜尋時間上限為 {format_seconds(resolved_diagnostic_config.max_time_seconds)}）",
-            phase=ExecutionPhase.CANDIDATE_SEARCH,
-            kind=ProgressEventKind.STEP_STARTED,
-        )
-        step_started = perf_counter()
-        captured_candidates: list[tuple[int, tuple[Assignment, ...]]] = []
-
-        def report_alternative(count: int) -> None:
-            _notify(
-                candidate_progress,
-                f"已找到 {count} 份同品質候選班表",
-                phase=ExecutionPhase.CANDIDATE_SEARCH,
-                kind=ProgressEventKind.CANDIDATE_COUNT,
-                current=count,
-                total=resolved_diagnostic_config.max_alternatives,
+        if equivalent_solution_diagnostic_config is not None:
+            resolved_diagnostic_config = _resolve_diagnostic_config(
+                equivalent_solution_diagnostic_config,
+                optimization_seconds,
             )
-
-        def capture_candidate(
-            index: int,
-            assignments: tuple[Assignment, ...],
-        ) -> None:
-            if len(captured_candidates) < resolved_candidate_export.max_candidates:
-                captured_candidates.append((index, assignments))
-
-        equivalent_solution_diagnostic = diagnose_equivalent_solutions(
-            solver_result,
-            resolved_diagnostic_config,
-            progress=report_alternative,
-            candidate_found=capture_candidate,
-            cancellation=cancellation,
-        )
-        equivalent_solution_diagnostic_seconds = perf_counter() - step_started
-
-        if (
-            captured_candidates
-            and equivalent_solution_diagnostic.status
-            is not EquivalentSolutionDiagnosticStatus.INTERRUPTED
-        ):
             _notify(
                 candidate_progress,
-                f"輸出 {len(captured_candidates)} 份同品質候選班表",
-                phase=ExecutionPhase.OUTPUT,
+                "開始搜尋同品質候選班表"
+                f"（搜尋時間上限為 {format_seconds(resolved_diagnostic_config.max_time_seconds)}）",
+                phase=ExecutionPhase.CANDIDATE_SEARCH,
                 kind=ProgressEventKind.STEP_STARTED,
             )
             step_started = perf_counter()
-            candidate_exports = _export_candidate_schedules(
-                data,
+            captured_candidates: list[tuple[int, tuple[Assignment, ...]]] = []
+
+            def report_alternative(count: int) -> None:
+                _notify(
+                    candidate_progress,
+                    f"已找到 {count} 份同品質候選班表",
+                    phase=ExecutionPhase.CANDIDATE_SEARCH,
+                    kind=ProgressEventKind.CANDIDATE_COUNT,
+                    current=count,
+                    total=resolved_diagnostic_config.max_alternatives,
+                )
+
+            def capture_candidate(
+                index: int,
+                assignments: tuple[Assignment, ...],
+            ) -> None:
+                if (
+                    len(captured_candidates)
+                    < resolved_candidate_export.max_candidates
+                ):
+                    captured_candidates.append((index, assignments))
+
+            equivalent_solution_diagnostic = diagnose_equivalent_solutions(
                 solver_result,
-                tuple(captured_candidates),
-                candidate_output_directory,
-                resolved_candidate_export.formats,
-                execution_timing,
+                resolved_diagnostic_config,
+                progress=report_alternative,
+                candidate_found=capture_candidate,
+                cancellation=cancellation,
             )
-            candidate_export_seconds = perf_counter() - step_started
-            _notify(
-                candidate_progress,
-                f"候選班表輸出完成：{candidate_output_directory}",
-                phase=ExecutionPhase.OUTPUT,
-                kind=ProgressEventKind.STEP_COMPLETED,
+            equivalent_solution_diagnostic_seconds = (
+                perf_counter() - step_started
             )
+
+            if (
+                captured_candidates
+                and equivalent_solution_diagnostic.status
+                is not EquivalentSolutionDiagnosticStatus.INTERRUPTED
+            ):
+                _notify(
+                    candidate_progress,
+                    f"輸出 {len(captured_candidates)} 份同品質候選班表",
+                    phase=ExecutionPhase.OUTPUT,
+                    kind=ProgressEventKind.STEP_STARTED,
+                )
+                step_started = perf_counter()
+                candidate_exports = _export_candidate_schedules(
+                    data,
+                    solver_result,
+                    tuple(captured_candidates),
+                    candidate_output_directory,
+                    resolved_candidate_export.formats,
+                    execution_timing,
+                )
+                candidate_export_seconds = perf_counter() - step_started
+                _notify(
+                    candidate_progress,
+                    f"候選班表輸出完成：{candidate_output_directory}",
+                    phase=ExecutionPhase.OUTPUT,
+                    kind=ProgressEventKind.STEP_COMPLETED,
+                )
+    except Exception as error:
+        candidate_processing_issue = DiagnosticIssue(
+            code="candidate_processing_failed",
+            path=str(candidate_output_directory),
+            message=str(error) or type(error).__name__,
+            phase=ExecutionPhase.CANDIDATE_SEARCH,
+            severity=DiagnosticSeverity.WARNING,
+            details={"error_type": type(error).__name__},
+        )
+        _notify(
+            candidate_progress,
+            "正式班表已完成，但候選處理失敗："
+            f"{candidate_processing_issue.message}",
+            phase=ExecutionPhase.CANDIDATE_SEARCH,
+            details={
+                "candidate_processing_issue": (
+                    candidate_processing_issue.to_dict()
+                )
+            },
+        )
 
     return ScheduleRunResult(
         output=output,
@@ -930,4 +951,5 @@ def run_schedule_file(
         candidate_exports=candidate_exports,
         candidate_export_seconds=candidate_export_seconds,
         total_execution_seconds=perf_counter() - started,
+        candidate_processing_issue=candidate_processing_issue,
     )

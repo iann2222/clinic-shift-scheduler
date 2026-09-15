@@ -11,12 +11,15 @@ from types import SimpleNamespace
 from clinic_shift_scheduler.execution_protocol import (
     EXECUTION_PROTOCOL,
     ExecutionMessageDecoder,
+    completion_message,
     encode_execution_message,
     preserved_completion_message,
     worker_command,
 )
 from clinic_shift_scheduler.events import (
     CancellationToken,
+    DiagnosticIssue,
+    DiagnosticSeverity,
     ExecutionPhase,
     PreservationToken,
     ProgressEvent,
@@ -89,6 +92,50 @@ class ExecutionWorkerTests(unittest.TestCase):
         self.assertEqual(message["validation"], "PASS")
         self.assertEqual(message["selected_formats"], ["json", "pdf"])
         self.assertNotIn("excel", message["paths"])
+
+    def test_completion_reports_candidate_warning_without_failing_formal_result(
+        self,
+    ) -> None:
+        issue = DiagnosticIssue(
+            code="candidate_processing_failed",
+            path="output/候選班表",
+            message="candidate failed",
+            phase=ExecutionPhase.CANDIDATE_SEARCH,
+            severity=DiagnosticSeverity.WARNING,
+        )
+        result = SimpleNamespace(
+            output=SimpleNamespace(
+                status=SimpleNamespace(value="OPTIMAL"),
+                validation_report=SimpleNamespace(
+                    status=SimpleNamespace(value="PASS")
+                ),
+                overall_statistics=SimpleNamespace(objective_vector={"x": 1}),
+            ),
+            json_path=Path("output/result.json"),
+            excel_path=Path("output/result.xlsx"),
+            pdf_path=Path("output/result.pdf"),
+            candidate_output_directory=Path("output/候選班表"),
+            equivalent_solution_diagnostic=None,
+            candidate_exports=(),
+            candidate_processing_issue=issue,
+            formal_output_seconds=1.0,
+            equivalent_solution_diagnostic_seconds=0.0,
+            candidate_export_seconds=0.0,
+            total_execution_seconds=1.1,
+        )
+
+        message = json.loads(completion_message(result).decode("utf-8"))
+
+        self.assertEqual(message["type"], "completed")
+        self.assertEqual(message["status"], "OPTIMAL")
+        self.assertEqual(
+            message["candidate_processing_issue"]["severity"],
+            "WARNING",
+        )
+        self.assertEqual(
+            message["candidate_processing_issue"]["message"],
+            "candidate failed",
+        )
 
     def test_worker_command_uses_scheduler_executable_when_frozen(self) -> None:
         root = Path("C:/Clinic")

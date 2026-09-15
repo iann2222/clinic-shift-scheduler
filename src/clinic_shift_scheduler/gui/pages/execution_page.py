@@ -1048,10 +1048,16 @@ class ExecutionPage(InputPage):
         self.stop_candidate_button.setEnabled(False)
         self.stop_candidate_button.hide()
         self.result_group.setTitle("正式結果")
+        candidate_issue = message.get("candidate_processing_issue")
+        candidate_failed = isinstance(candidate_issue, dict)
         self._set_status_summary(
             "排班完成",
-            "正式結果已通過驗證並完成輸出。",
-            state="success",
+            (
+                "正式結果已通過驗證並完成輸出；候選處理未完成。"
+                if candidate_failed
+                else "正式結果已通過驗證並完成輸出。"
+            ),
+            state="warning" if candidate_failed else "success",
         )
         self._hide_progress_presentation()
         status = str(message.get("status", "—"))
@@ -1067,7 +1073,10 @@ class ExecutionPage(InputPage):
             paths = {}
         self.output_label.setText(_render_output_paths(paths))
         candidate = message.get("candidate_diagnostic")
-        if isinstance(candidate, dict):
+        if candidate_failed:
+            issue_message = str(candidate_issue.get("message", "未知錯誤"))
+            self.candidate_label.setText(f"處理失敗：{issue_message}")
+        elif isinstance(candidate, dict):
             count = int(candidate.get("alternative_count", 0))
             diagnostic_status = str(candidate.get("status", "UNKNOWN"))
             self.candidate_label.setText(
@@ -1083,6 +1092,11 @@ class ExecutionPage(InputPage):
             )
             self.open_output_button.setEnabled(True)
         self.log.appendPlainText("[執行] 正式結果完成。")
+        if candidate_failed:
+            self.log.appendPlainText(
+                "[候選處理] 處理失敗，不影響正式班表："
+                f"{candidate_issue.get('message', '未知錯誤')}"
+            )
         self.result_group.show()
         self.scroll_content.updateGeometry()
         QTimer.singleShot(0, self._scroll_to_completed_result)

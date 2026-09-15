@@ -84,6 +84,11 @@ def completion_message(result: Any) -> bytes:
             }
         ),
         candidate_export_count=len(result.candidate_exports),
+        candidate_processing_issue=(
+            None
+            if getattr(result, "candidate_processing_issue", None) is None
+            else result.candidate_processing_issue.to_dict()
+        ),
         timings={
             "formal_output_seconds": result.formal_output_seconds,
             "candidate_processing_seconds": (

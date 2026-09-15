@@ -196,6 +196,12 @@ def run_schedule_request_with_console(
             "[候選處理] 候選輸出時間："
             f"{format_seconds(result.candidate_export_seconds)}"
         )
+    if result.candidate_processing_issue is not None:
+        print(
+            "[候選處理] 正式班表已完成，但候選處理失敗："
+            f"{result.candidate_processing_issue.message}",
+            file=sys.stderr,
+        )
     print(
         "[執行] 總耗時（含完整排班與候選處理）："
         f"{format_seconds_with_minutes(result.total_execution_seconds)}"

@@ -730,6 +730,41 @@ class GuiExecutionTests(unittest.TestCase):
         self.assertTrue(page.status_group.isVisible())
         page.process_finished()
 
+    def test_completed_page_keeps_formal_success_when_candidate_processing_failed(
+        self,
+    ) -> None:
+        page = ExecutionPage()
+        self.addCleanup(page.close)
+        page.bind_document(
+            month="2026-08",
+            path=Path("D:/clinic/input/schedule.json"),
+            config_path=Path("D:/clinic/config.json"),
+        )
+        page.begin()
+
+        page.show_message(
+            {
+                "type": "completed",
+                "status": "OPTIMAL",
+                "validation": "PASS",
+                "paths": {
+                    "json": "output/result.json",
+                    "excel": "output/result.xlsx",
+                    "pdf": "output/result.pdf",
+                },
+                "candidate_processing_issue": {
+                    "code": "candidate_processing_failed",
+                    "message": "candidate export failed",
+                    "severity": "WARNING",
+                },
+            }
+        )
+
+        self.assertIn("排班完成", page.status_label.text())
+        self.assertIn("候選處理未完成", page.status_detail_label.text())
+        self.assertIn("candidate export failed", page.candidate_label.text())
+        self.assertIn("不影響正式班表", page.log.toPlainText())
+
 
 if __name__ == "__main__":
     unittest.main()

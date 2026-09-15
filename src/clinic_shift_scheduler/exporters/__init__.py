@@ -30,11 +30,18 @@ from .pdf_exporter import (
     export_provisional_schedule_pdf_from_excel,
     export_schedule_pdf_from_excel,
 )
+from .bundle import (
+    FormalExportBundle,
+    FormalExportCommitError,
+    export_formal_result_bundle,
+)
 
 __all__ = [
     "DEFAULT_OUTPUT_DIRECTORY",
     "ExportFileExistsError",
     "FormalExportError",
+    "FormalExportBundle",
+    "FormalExportCommitError",
     "OutputPaths",
     "PROVISIONAL_RESULT_CONTRACT_NAME",
     "PROVISIONAL_RESULT_CONTRACT_VERSION",
@@ -49,6 +56,7 @@ __all__ = [
     "build_result_document",
     "build_workbook",
     "export_result_excel",
+    "export_formal_result_bundle",
     "export_result_json",
     "export_provisional_result_excel",
     "export_provisional_result_json",
