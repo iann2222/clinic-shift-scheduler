@@ -105,6 +105,11 @@ class GuiExecutionTests(unittest.TestCase):
         )
         self.assertFalse(page.result_group.isVisible())
         self.assertTrue(page.stop_candidate_button.isHidden())
+        self.assertEqual(page.run_button.property("actionRole"), "primary")
+        self.assertEqual(
+            page.open_output_button.property("actionRole"),
+            "secondary",
+        )
         page.begin()
         self.assertTrue(page.cancel_button.isEnabled())
         self.assertFalse(page.preserve_button.isEnabled())
@@ -688,6 +693,13 @@ class GuiExecutionTests(unittest.TestCase):
         self.assertFalse(page.progress_section.isHidden())
         self.assertFalse(page.metrics_section.isHidden())
         self.assertFalse(page.result_group.isHidden())
+        self.assertEqual(page.run_button.property("actionRole"), "secondary")
+        self.assertEqual(
+            page.open_output_button.property("actionRole"),
+            "primary",
+        )
+        self.assertFalse(page.run_button.isDefault())
+        self.assertTrue(page.open_output_button.isDefault())
         QApplication.processEvents()
         result_scroll = page.content_scroll.verticalScrollBar()
         self.assertEqual(result_scroll.value(), result_scroll.maximum())
@@ -729,6 +741,13 @@ class GuiExecutionTests(unittest.TestCase):
         self.assertEqual(result_scroll.value(), result_scroll.maximum())
         self.assertTrue(page.status_group.isVisible())
         page.process_finished()
+        self.assertEqual(page.run_button.property("actionRole"), "secondary")
+        self.assertEqual(
+            page.open_output_button.property("actionRole"),
+            "primary",
+        )
+        self.assertFalse(page.run_button.isDefault())
+        self.assertTrue(page.open_output_button.isDefault())
 
     def test_completed_page_keeps_formal_success_when_candidate_processing_failed(
         self,

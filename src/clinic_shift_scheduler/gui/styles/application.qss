@@ -180,18 +180,18 @@ QPushButton#monthActionButton {
     font-weight: 600;
 }
 
-QPushButton#primaryActionButton {
+QPushButton[actionRole="primary"] {
     background-color: $PRIMARY;
     border-color: $PRIMARY;
     color: white;
     font-weight: 600;
 }
 
-QPushButton#primaryActionButton:hover {
+QPushButton[actionRole="primary"]:hover {
     background-color: #315867;
 }
 
-QPushButton#primaryActionButton:disabled {
+QPushButton[actionRole="primary"]:disabled {
     background-color: $BACKGROUND;
     border-color: $BORDER;
     color: $TEXT_MUTED;

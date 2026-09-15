@@ -444,7 +444,7 @@ class ExecutionPage(InputPage):
 
         actions = QHBoxLayout()
         self.run_button = QPushButton("檢查、儲存並執行")
-        self.run_button.setObjectName("primaryActionButton")
+        self.run_button.setObjectName("runScheduleButton")
         self.cancel_button = QPushButton("終止排班")
         self.cancel_button.setEnabled(False)
         self.preserve_button = QPushButton("終止排班並保留當前最佳班表")
@@ -511,6 +511,7 @@ class ExecutionPage(InputPage):
         result_form.addRow("候選處理：", self.candidate_label)
         result_form.addRow("輸出檔案：", self.output_label)
         self.open_output_button = QPushButton("開啟輸出資料夾")
+        self.open_output_button.setObjectName("openOutputButton")
         self.open_output_button.setEnabled(False)
         self.open_output_button.clicked.connect(self._request_open_output)
         result_form.addRow("", self.open_output_button)
@@ -522,10 +523,35 @@ class ExecutionPage(InputPage):
             self,
         )
         self.surface_layout.addWidget(self.content_scroll, 1)
+        self._set_primary_action(self.run_button)
 
     @property
     def terminal_received(self) -> bool:
         return self._terminal_received
+
+    def _set_primary_action(
+        self,
+        primary_button: QPushButton,
+        *,
+        focus: bool = False,
+    ) -> None:
+        """Present one clear next action without introducing workflow state."""
+
+        for button in (self.run_button, self.open_output_button):
+            is_primary = button is primary_button
+            role = "primary" if is_primary else "secondary"
+            if button.property("actionRole") != role:
+                button.setProperty("actionRole", role)
+                button.style().unpolish(button)
+                button.style().polish(button)
+                button.update()
+            button.setDefault(is_primary)
+            button.setAutoDefault(is_primary)
+            if not is_primary and button.hasFocus():
+                button.clearFocus()
+
+        if focus and primary_button.isEnabled() and primary_button.isVisible():
+            primary_button.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _set_status_summary(
         self,
@@ -865,6 +891,7 @@ class ExecutionPage(InputPage):
         self.stop_candidate_button.setEnabled(False)
         self.stop_candidate_button.hide()
         self.result_group.setTitle("正式結果")
+        self._set_primary_action(self.run_button)
 
     def mark_input_changed(self) -> None:
         if self._running or not self._terminal_received:
@@ -876,6 +903,7 @@ class ExecutionPage(InputPage):
         )
         self._hide_progress_presentation()
         self.result_status_label.setText("先前結果（不含目前修改）")
+        self._set_primary_action(self.run_button)
 
     def begin(self) -> None:
         self._running = True
@@ -894,6 +922,7 @@ class ExecutionPage(InputPage):
         self.candidate_label.setText("等待執行")
         self.open_output_button.setEnabled(False)
         self.open_output_button.setProperty("output_directory", None)
+        self._set_primary_action(self.run_button)
         self._set_status_summary(
             "正在啟動排班程序",
             "準備讀取設定與輸入資料",
@@ -983,6 +1012,10 @@ class ExecutionPage(InputPage):
         self.stop_candidate_button.hide()
         self._candidate_processing = False
         self._refresh_elapsed()
+        if self.open_output_button.isEnabled():
+            self._set_primary_action(self.open_output_button, focus=True)
+        else:
+            self._set_primary_action(self.run_button)
 
     def _show_progress(self, message: dict[str, Any]) -> None:
         phase = str(message.get("phase", "APPLICATION"))
@@ -1084,13 +1117,21 @@ class ExecutionPage(InputPage):
             )
         else:
             self.candidate_label.setText("未啟用")
-        json_path = paths.get("json") if isinstance(paths, dict) else None
-        if json_path:
-            output_directory = str(Path(str(json_path)).parent)
+        first_path = next(
+            (
+                paths.get(key)
+                for key, _label in _OUTPUT_PATH_LABELS
+                if paths.get(key)
+            ),
+            None,
+        )
+        if first_path:
+            output_directory = str(Path(str(first_path)).parent)
             self.open_output_button.setProperty(
                 "output_directory", output_directory
             )
             self.open_output_button.setEnabled(True)
+            self._set_primary_action(self.open_output_button, focus=True)
         self.log.appendPlainText("[執行] 正式結果完成。")
         if candidate_failed:
             self.log.appendPlainText(
@@ -1150,6 +1191,7 @@ class ExecutionPage(InputPage):
                 "output_directory", str(Path(str(first_path)).parent)
             )
             self.open_output_button.setEnabled(True)
+            self._set_primary_action(self.open_output_button, focus=True)
         self.log.appendPlainText(
             "[執行] 已輸出目前最佳合法班表；此結果尚未證明最佳。"
         )
@@ -1177,6 +1219,7 @@ class ExecutionPage(InputPage):
         self.validation_label.setText("未完成")
         self.candidate_label.setText("未完成")
         self.result_group.hide()
+        self._set_primary_action(self.run_button)
         self.log.appendPlainText(f"[執行] {rendered}")
         for issue in message.get("issues", []):
             self.log.appendPlainText(
