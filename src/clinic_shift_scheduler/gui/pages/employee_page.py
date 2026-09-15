@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from ...enums import EmploymentType, ShiftMode
 from ..dialogs import EmployeeEditDialog, EmployeeEditorValues
 from ..display_labels import role_display_name
-from ..drafts import EmployeeDraft, ScheduleDraft
+from ...editing import EmployeeDraft, ScheduleDraft
 from ..field_location import FieldLocation
 from ..models import EmployeeTableModel
 from ..navigation import NAVIGATION_ITEMS, PageId

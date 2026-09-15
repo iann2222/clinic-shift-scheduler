@@ -144,14 +144,13 @@ GUI 不取代命令列入口；不使用前端時，仍可直接編輯 JSON／co
 src/clinic_shift_scheduler/
 ├─ authoring_application.py      # 月份文件建立、開啟、驗證與儲存
 ├─ config_application.py         # config 文件生命週期
+├─ editing/                      # Qt-independent drafts 與 document 映射
 ├─ application.py                # 完整排班 application service
 ├─ execution_protocol.py         # GUI/worker JSON-lines 協定
 ├─ execution_worker.py           # 無介面的背景排班入口
 └─ gui/
    ├─ main.py / main_window.py
    ├─ execution_controller.py    # QProcess 生命週期與合作式終止
-   ├─ drafts/                    # mutable UI state
-   ├─ presenters/                # document/draft 映射
    ├─ models/                    # Qt table models
    ├─ pages/                     # 八個流程頁
    ├─ dialogs/ / widgets/

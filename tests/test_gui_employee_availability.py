@@ -19,7 +19,7 @@ from clinic_shift_scheduler.gui.main import create_application
 from clinic_shift_scheduler.gui.dialogs import EmployeeEditDialog
 from clinic_shift_scheduler.gui.pages import EmployeePage
 from clinic_shift_scheduler.gui.pages import FullTimeUnavailablePage, PartTimeAvailablePage
-from clinic_shift_scheduler.gui.drafts import UnavailableSlotDraft
+from clinic_shift_scheduler.editing import UnavailableSlotDraft
 from clinic_shift_scheduler.gui.models import (
     AvailabilityFilterProxyModel,
     AvailabilitySummaryTableModel,

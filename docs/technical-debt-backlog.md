@@ -13,18 +13,6 @@
 
 ## 高優先：可靠性與架構邊界
 
-### [架構重構] 修正 application layer 反向依賴 GUI
-
-`authoring_application.py` 與 `config_application.py` 目前會匯入 GUI 的 drafts／presenters。這讓本應可由 CLI、測試與未來其他介面共用的 application service 依賴 PySide6 介面層的目錄結構。
-
-預計處理：
-
-- 將中立的 draft／mapping contract 移到非 GUI 模組，或讓 application service 只接受正式 document／純資料 contract。
-- GUI presenter 負責把 widget draft 轉成 application 接受的資料，不讓 application 反向知道 GUI。
-- 加入架構測試，禁止 domain／application 匯入 `clinic_shift_scheduler.gui`。
-
-完成條件：authoring 與 config application service 可在不載入 GUI package 的情況下使用，既有 GUI 開啟、驗證、儲存與月份複製行為不變。
-
 ### [產品決策] 明確界定 GUI 能編輯的正式輸入能力
 
 目前 GUI 的簡化操作未完整呈現 authoring schema 的所有能力：

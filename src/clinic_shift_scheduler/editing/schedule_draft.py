@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import date
 import re
 
-from ...enums import (
+from ..enums import (
     PERIODS_V1,
     EmploymentType,
     FullTimeClass,

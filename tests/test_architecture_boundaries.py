@@ -6,6 +6,32 @@ import unittest
 
 
 class ArchitectureBoundaryTests(unittest.TestCase):
+    def test_application_editing_services_do_not_load_gui_package(self) -> None:
+        script = """
+import sys
+import clinic_shift_scheduler.authoring_application
+import clinic_shift_scheduler.config_application
+blocked = [
+    name
+    for name in sys.modules
+    if name == 'clinic_shift_scheduler.gui'
+    or name.startswith('clinic_shift_scheduler.gui.')
+]
+if blocked:
+    raise SystemExit('unexpected application GUI imports: ' + ', '.join(blocked))
+"""
+        completed = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        self.assertEqual(
+            completed.returncode,
+            0,
+            completed.stderr + completed.stdout,
+        )
+
     def test_frontend_contract_imports_do_not_load_native_or_output_dependencies(
         self,
     ) -> None:

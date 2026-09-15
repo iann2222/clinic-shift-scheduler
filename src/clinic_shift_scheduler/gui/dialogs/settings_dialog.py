@@ -30,7 +30,7 @@ from ...optimization_policy import (
     USER_FACING_OPTIMIZATION_FLOW,
     ClassPolicySummary,
 )
-from ..drafts import ConfigDraft
+from ...editing import ConfigDraft
 from ..widgets import TrimmedDoubleSpinBox, UnitInput, VisibleCheckBox
 
 from .localized_dialogs import localize_dialog_buttons, show_warning

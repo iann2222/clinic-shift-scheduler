@@ -7,7 +7,7 @@ from PySide6.QtGui import QColor
 
 from ...enums import PERIODS_V1, Period, Weekday
 from ..display_labels import role_display_name
-from ..drafts import ScheduleDraft, StaffingDraft, WeeklyDemandDraft
+from ...editing import ScheduleDraft, StaffingDraft, WeeklyDemandDraft
 
 
 _WEEKDAY_LABELS = {

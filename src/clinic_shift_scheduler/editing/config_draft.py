@@ -1,11 +1,11 @@
-"""Mutable GUI draft for the versioned scheduler configuration."""
+"""Mutable editor draft for the versioned scheduler configuration."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
 
-from ...app_config import (
+from ..app_config import (
     CandidateDiagnosticSettings,
     DiagnosticTimeSettings,
     PreservationOutputSettings,
@@ -15,7 +15,7 @@ from ...app_config import (
 
 @dataclass(slots=True)
 class ConfigDraft:
-    """UI-owned mutable values converted back through the formal config types."""
+    """Editor-owned mutable values converted through formal config types."""
 
     input_file: str
     overwrite: bool

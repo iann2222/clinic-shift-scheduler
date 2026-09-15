@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..drafts import ScheduleDraft
+from ...editing import ScheduleDraft
 from ..field_location import FieldLocation
 from ..navigation import NAVIGATION_ITEMS, PageId
 from .base import InputPage

@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
 )
 
 from ...enums import Period
-from ..drafts import ScheduleDraft
+from ...editing import ScheduleDraft
 from ..field_location import FieldLocation
 from ..models import WeeklyDemandTableModel
 from ..navigation import NAVIGATION_ITEMS, PageId

@@ -14,10 +14,14 @@ from .authoring import (
 )
 from .authoring_models import WeeklyAuthoringDocument
 from .enums import PERIODS_V1, EmploymentType, Weekday
+from .editing import (
+    ScheduleDraft,
+    SchedulePresenter,
+    StaffingDraft,
+    WeeklyDemandDraft,
+)
 from .errors import InputValidationError
 from .events import DiagnosticIssue
-from .gui.drafts import ScheduleDraft, StaffingDraft, WeeklyDemandDraft
-from .gui.presenters import SchedulePresenter
 
 
 DEFAULT_NEW_DOCUMENT_ROLES = ("reception", "nursing")

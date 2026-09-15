@@ -13,8 +13,7 @@ from clinic_shift_scheduler.authoring_application import (
 )
 from clinic_shift_scheduler.enums import EmploymentType, Period
 from clinic_shift_scheduler.errors import InputValidationError
-from clinic_shift_scheduler.gui.drafts import RoleMutationError
-from clinic_shift_scheduler.gui.presenters import SchedulePresenter
+from clinic_shift_scheduler.editing import RoleMutationError, SchedulePresenter
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]

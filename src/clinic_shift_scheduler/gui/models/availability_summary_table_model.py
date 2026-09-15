@@ -7,7 +7,7 @@ from datetime import date
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
 from ...enums import PERIODS_V1, EmploymentType, Period
-from ..drafts import EmployeeDraft, ScheduleDraft
+from ...editing import EmployeeDraft, ScheduleDraft
 
 
 _PERIOD_LABELS = {

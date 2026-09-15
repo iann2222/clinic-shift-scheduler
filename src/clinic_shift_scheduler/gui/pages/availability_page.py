@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 
 from ...enums import PERIODS_V1, EmploymentType, Period
 from ..dialogs import localize_dialog_buttons, show_warning
-from ..drafts import EmployeeDraft, ScheduleDraft
+from ...editing import EmployeeDraft, ScheduleDraft
 from ..field_location import FieldLocation
 from ..models import AvailabilitySummaryTableModel
 from ..navigation import NAVIGATION_ITEMS, PageId

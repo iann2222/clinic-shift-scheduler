@@ -5,9 +5,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from ...authoring_models import WeeklyAuthoringDocument
-from ...enums import PERIODS_V1
-from ..drafts import (
+from ..authoring_models import WeeklyAuthoringDocument
+from ..enums import PERIODS_V1
+from .schedule_draft import (
     AvailableSlotDraft,
     DateOverrideDraft,
     EmployeeDraft,

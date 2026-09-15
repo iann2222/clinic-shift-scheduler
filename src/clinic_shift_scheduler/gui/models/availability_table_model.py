@@ -14,7 +14,7 @@ from PySide6.QtCore import (
 
 from ...enums import PERIODS_V1, EmploymentType, Period
 from ..display_labels import role_display_name
-from ..drafts import EmployeeDraft, ScheduleDraft
+from ...editing import EmployeeDraft, ScheduleDraft
 
 
 AVAILABILITY_LABELS = {

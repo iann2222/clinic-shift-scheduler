@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication
 from ..application_paths import application_root
 from .main_window import MainWindow
 from .focus_behavior import install_background_focus_clear
-from .presenters import SchedulePresenter
+from ..editing import SchedulePresenter
 from .styles.loader import load_application_stylesheet
 
 

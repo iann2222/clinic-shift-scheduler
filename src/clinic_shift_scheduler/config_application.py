@@ -10,9 +10,9 @@ from .app_config import (
     load_scheduler_config_document,
     write_scheduler_config_document,
 )
+from .editing import ConfigDraft
 from .errors import InputValidationError
 from .events import DiagnosticIssue, ExecutionPhase
-from .gui.drafts import ConfigDraft
 
 
 @dataclass(frozen=True, slots=True)

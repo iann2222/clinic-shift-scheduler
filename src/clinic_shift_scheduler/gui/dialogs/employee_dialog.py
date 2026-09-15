@@ -24,7 +24,7 @@ from PySide6.QtWidgets import (
 
 from ...enums import EmploymentType, FullTimeClass, ShiftMode
 from ..display_labels import role_display_name
-from ..drafts import EmployeeDraft
+from ...editing import EmployeeDraft
 from ..widgets import UnitInput, VisibleCheckBox
 from .localized_dialogs import ask_yes_no, localize_dialog_buttons, show_warning
 

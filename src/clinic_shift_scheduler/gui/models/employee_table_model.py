@@ -6,7 +6,7 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, Qt
 
 from ...enums import EmploymentType, ShiftMode
 from ..display_labels import role_display_name
-from ..drafts import EmployeeDraft, ScheduleDraft
+from ...editing import EmployeeDraft, ScheduleDraft
 
 
 _TYPE_LABELS = {

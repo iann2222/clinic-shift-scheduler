@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from ...enums import Period
 from ..dialogs import DatePickerDialog, show_warning
-from ..drafts import ScheduleDraft
+from ...editing import ScheduleDraft
 from ..field_location import FieldLocation
 from ..models import DateOverrideTableModel
 from ..navigation import NAVIGATION_ITEMS, PageId

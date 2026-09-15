@@ -9,7 +9,7 @@ from PySide6.QtGui import QColor
 
 from ...enums import PERIODS_V1, Period
 from ..display_labels import role_display_name
-from ..drafts import DateOverrideDraft, ScheduleDraft, StaffingDraft
+from ...editing import DateOverrideDraft, ScheduleDraft, StaffingDraft
 
 
 _PERIOD_LABELS = {
