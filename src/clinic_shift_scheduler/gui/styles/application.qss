@@ -180,23 +180,6 @@ QPushButton#monthActionButton {
     font-weight: 600;
 }
 
-QPushButton[actionRole="primary"] {
-    background-color: $PRIMARY;
-    border-color: $PRIMARY;
-    color: white;
-    font-weight: 600;
-}
-
-QPushButton[actionRole="primary"]:hover {
-    background-color: #315867;
-}
-
-QPushButton[actionRole="primary"]:disabled {
-    background-color: $BACKGROUND;
-    border-color: $BORDER;
-    color: $TEXT_MUTED;
-}
-
 QLabel#selectedDateLabel {
     color: $PRIMARY;
     font-weight: 600;
@@ -246,6 +229,35 @@ QPushButton:focus, QToolButton:focus {
 QPushButton:disabled, QToolButton:disabled {
     color: $TEXT_MUTED;
     background-color: $BACKGROUND;
+}
+
+QPushButton[actionRole="primary"] {
+    background-color: $PRIMARY;
+    border: 1px solid $PRIMARY;
+    color: white;
+    font-weight: 600;
+}
+
+QPushButton[actionRole="primary"]:focus {
+    background-color: $PRIMARY;
+    border: 2px solid $PRIMARY_FOCUS;
+    color: white;
+}
+
+QPushButton[actionRole="primary"]:hover {
+    background-color: $PRIMARY_HOVER;
+    border-color: $PRIMARY_HOVER;
+}
+
+QPushButton[actionRole="primary"]:pressed {
+    background-color: $PRIMARY_PRESSED;
+    border-color: $PRIMARY_PRESSED;
+}
+
+QPushButton[actionRole="primary"]:disabled {
+    background-color: $BACKGROUND;
+    border: 1px solid $BORDER;
+    color: $TEXT_MUTED;
 }
 
 /* Table selection remains functional without the platform blue fill. */

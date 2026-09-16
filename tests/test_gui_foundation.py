@@ -629,6 +629,23 @@ class GuiFoundationTests(unittest.TestCase):
         self.assertNotIn("QTableView::indicator", stylesheet)
         self.assertIn("QScrollBar::handle:vertical", stylesheet)
         self.assertIn("QPushButton:focus", stylesheet)
+        self.assertIn('QPushButton[actionRole="primary"]', stylesheet)
+        self.assertIn(
+            'QPushButton[actionRole="primary"]:hover',
+            stylesheet,
+        )
+        self.assertIn(
+            'QPushButton[actionRole="primary"]:pressed',
+            stylesheet,
+        )
+        self.assertIn(
+            'QPushButton[actionRole="primary"]:focus',
+            stylesheet,
+        )
+        self.assertIn(
+            'QPushButton[actionRole="primary"]:disabled',
+            stylesheet,
+        )
 
     def test_gui_smoke_entry_exits_without_loading_a_document(self) -> None:
         environment = os.environ.copy()
